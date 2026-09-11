@@ -1,0 +1,18 @@
+services:
+  - type: worker
+    name: kripto-v1-paper
+    runtime: docker
+    region: frankfurt
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: CRYPTO_STORAGE
+        value: /var/data
+    disk:
+      name: kripto-v1-data
+      mountPath: /var/data
+      sizeGB: 1
