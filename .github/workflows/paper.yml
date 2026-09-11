@@ -1,0 +1,49 @@
+name: Kripto V1 Paper
+
+on:
+  schedule:
+    - cron: "2,17,32,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kripto-v1-paper
+  cancel-in-progress: false
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore paper state
+        shell: bash
+        run: |
+          mkdir -p runtime
+          if git fetch origin runtime-state:refs/remotes/origin/runtime-state; then
+            git archive origin/runtime-state | tar -x -C runtime
+          fi
+      - name: Run paper scan and notify Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CRYPTO_STORAGE: runtime
+        run: python -m crypto_v1.github_worker
+      - name: Save paper state
+        shell: bash
+        run: |
+          state_dir="$(mktemp -d)"
+          cp -a runtime/. "$state_dir/"
+          cd "$state_dir"
+          git init -b runtime-state
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Update paper state"
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" runtime-state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

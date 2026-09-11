@@ -6,3 +6,4 @@ reports/
 .env
 .env.*
 *.sqlite
+runtime/

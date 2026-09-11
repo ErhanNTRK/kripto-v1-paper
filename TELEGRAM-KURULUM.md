@@ -16,6 +16,12 @@ Kalıcı disk zorunludur: paper durumu, fiyat geçmişi ve Telegram teslim kayı
 
 Render olası barındırma seçeneğidir; arka plan çalışanı ve kalıcı disk için hizmet planı/maliyeti hesap üzerinden doğrulanmadan ücretli kaynak oluşturulmaz. Bu paket henüz Render'a yüklenmedi veya dağıtılmadı.
 
+## Ücretsiz GitHub Actions seçeneği
+
+Kullanıcının ücret ödememe tercihi üzerine GitHub Actions çalışma dosyası eklendi. Herkese açık depoda standart GitHub çalıştırıcısı ücretsizdir. Bot anahtarı yalnızca `TELEGRAM_BOT_TOKEN` adlı GitHub Actions secret alanına girilir. Kod, daha önce bota gönderilmiş tek özel `/start` mesajından sohbet numarasını bulur; birden fazla özel `/start` varsa güvenli biçimde durur. Paper durumu `runtime-state` dalında tek commit olarak tutulur. Anahtar, rapor veya fiyat verisi bu dala yazılmaz.
+
+Zamanlanmış işler tam dakikada çalışmayı garanti etmez; GitHub yoğunluğunda gecikme olabilir. Bu yöntem 15 dakikalık mum kapanışı sonrasında sinyal bildirir ve gerçek emir vermez.
+
 Resmî belgeler:
 - https://core.telegram.org/bots/api#sendmessage
 - https://render.com/docs/background-workers
