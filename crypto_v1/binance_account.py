@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
@@ -22,6 +23,14 @@ def signed_get(path, api_key, private_pem, params=None, clock=None):
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.load(response)
+    except urllib.error.HTTPError as error:
+        try:
+            detail = json.loads(error.read().decode("utf-8"))
+            code = int(detail.get("code", 0))
+            message = str(detail.get("msg", "rejected"))[:160]
+        except Exception:
+            code, message = error.code, "rejected"
+        raise RuntimeError(f"Binance rejected signed request: {code} {message}") from None
     except Exception:
         raise RuntimeError("Binance signed account request failed") from None
 
