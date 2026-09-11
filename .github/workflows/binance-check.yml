@@ -1,0 +1,23 @@
+name: Binance Read Only Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Verify Binance account without orders
+        env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_ED25519_PRIVATE_KEY: ${{ secrets.BINANCE_ED25519_PRIVATE_KEY }}
+        run: python -m crypto_v1.binance_check
