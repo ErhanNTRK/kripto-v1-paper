@@ -19,7 +19,9 @@ ALLOWED = {
 
 
 class OrderRejected(RuntimeError):
-    pass
+    def __init__(self, code):
+        self.code = int(code)
+        super().__init__(f"Binance rejected order request: {self.code}")
 
 
 class OrderStateUnknown(RuntimeError):
@@ -57,7 +59,7 @@ def signed_order_request(method, path, params, api_key, private_pem, clock=None,
             code = int(detail.get("code", error.code))
         except Exception:
             code = error.code
-        raise OrderRejected(f"Binance rejected order request: {code}") from None
+        raise OrderRejected(code) from None
     except Exception:
         if method in {"POST", "DELETE"}:
             raise OrderStateUnknown("Binance order result is unknown; query by client order ID") from None
