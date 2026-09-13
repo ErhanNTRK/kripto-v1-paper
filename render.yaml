@@ -1,18 +1,12 @@
 services:
-  - type: worker
-    name: kripto-v1-paper
+  - type: web
+    name: kripto-v1-frankfurt
     runtime: docker
     region: frankfurt
-    plan: 0.5c-512mb
+    plan: free
     dockerfilePath: ./Dockerfile
     envVars:
-      - key: TELEGRAM_BOT_TOKEN
+      - key: BINANCE_API_KEY
         sync: false
-      - key: TELEGRAM_CHAT_ID
+      - key: BINANCE_ED25519_PRIVATE_KEY
         sync: false
-      - key: CRYPTO_STORAGE
-        value: /var/data
-    disk:
-      name: kripto-v1-data
-      mountPath: /var/data
-      sizeGB: 1
