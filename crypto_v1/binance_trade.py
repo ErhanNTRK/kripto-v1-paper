@@ -15,6 +15,8 @@ ALLOWED = {
     ("POST", "/api/v3/order"),
     ("GET", "/api/v3/order"),
     ("DELETE", "/api/v3/order"),
+    ("GET", "/api/v3/openOrders"),
+    ("GET", "/api/v3/allOrders"),
 }
 
 
@@ -72,8 +74,8 @@ class SpotExecutor:
         self.environment = environment
         self.opener = opener
 
-    def _credentials(self):
-        if not execution_enabled(self.config, self.environment):
+    def _credentials(self, require_live=True):
+        if require_live and not execution_enabled(self.config, self.environment):
             raise RuntimeError("real order execution is disabled")
         api_key = self.environment.get("BINANCE_API_KEY", "")
         private_key = self.environment.get("BINANCE_ED25519_PRIVATE_KEY", "")
@@ -81,9 +83,9 @@ class SpotExecutor:
             raise RuntimeError("Binance credentials are missing")
         return api_key, private_key
 
-    def request(self, method, params):
-        api_key, private_key = self._credentials()
-        return signed_order_request(method, "/api/v3/order", params, api_key, private_key,
+    def request(self, method, params, path="/api/v3/order"):
+        api_key, private_key = self._credentials(require_live=method.upper() != "GET")
+        return signed_order_request(method, path, params, api_key, private_key,
                                     opener=self.opener)
 
     def market_buy(self, symbol, quote_amount, client_id):
@@ -105,3 +107,12 @@ class SpotExecutor:
 
     def query(self, symbol, client_id):
         return self.request("GET", {"symbol": symbol, "origClientOrderId": client_id})
+
+    def open_orders(self):
+        return self.request("GET", {}, path="/api/v3/openOrders")
+
+    def all_orders(self, symbol, start_time=None):
+        params = {"symbol": symbol, "limit": 1000}
+        if start_time is not None:
+            params["startTime"] = int(start_time)
+        return self.request("GET", params, path="/api/v3/allOrders")

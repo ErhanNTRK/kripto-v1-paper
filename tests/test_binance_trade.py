@@ -31,6 +31,12 @@ class BinanceTradeTests(unittest.TestCase):
             executor.market_buy("BTCUSDT", "10", "kv1-buy-1")
         opener.assert_not_called()
 
+    def test_disabled_executor_can_only_query(self):
+        opener = Mock(return_value=Response([]))
+        env = {"BINANCE_API_KEY": "api", "BINANCE_ED25519_PRIVATE_KEY": self.pem}
+        self.assertEqual(SpotExecutor({"live_trading_enabled": False}, env, opener).open_orders(), [])
+        self.assertEqual(opener.call_count, 1)
+
     def test_market_buy_is_signed_and_has_client_id(self):
         opener = Mock(return_value=Response({"status": "FILLED"}))
         env = {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE, "BINANCE_API_KEY": "api",

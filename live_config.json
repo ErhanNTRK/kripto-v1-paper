@@ -12,5 +12,6 @@
   "signal_confirmation_expiry_minutes": 10,
   "require_exactly_one_pending_signal": true,
   "automatic_risk_exits": true,
-  "profit_exit_confirmation_required": false
+  "profit_exit_confirmation_required": false,
+  "max_entry_drift_fraction": 0.005
 }
