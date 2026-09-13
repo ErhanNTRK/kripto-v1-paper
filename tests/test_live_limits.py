@@ -36,6 +36,12 @@ class LiveLimitTests(unittest.TestCase):
         self.assertEqual(exit_action("take_profit", config),
                          ("notify_and_wait", "profit_confirmation_required"))
 
+    def test_profit_exit_is_automatic_when_configured(self):
+        config = dict(C, automatic_risk_exits=True, profit_exit_confirmation_required=False)
+        self.assertEqual(exit_action("take_profit", config), ("sell_now", "profit_exit"))
+        self.assertEqual(exit_action("trailing_profit", config), ("sell_now", "profit_exit"))
+        self.assertEqual(exit_action("profit_signal", config), ("sell_now", "profit_exit"))
+
     def test_sat_confirms_only_one_recent_profit_exit(self):
         config = dict(C, telegram_sell_command="SAT", profit_exit_confirmation_expiry_minutes=10)
         signal = {"symbol": "BTCUSDT", "created_at": 1000, "reason": "profit_signal"}

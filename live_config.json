@@ -12,7 +12,5 @@
   "signal_confirmation_expiry_minutes": 10,
   "require_exactly_one_pending_signal": true,
   "automatic_risk_exits": true,
-  "profit_exit_confirmation_required": true,
-  "telegram_sell_command": "SAT",
-  "profit_exit_confirmation_expiry_minutes": 10
+  "profit_exit_confirmation_required": false
 }

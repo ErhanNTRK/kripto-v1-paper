@@ -31,7 +31,7 @@ def confirmed_signal(command, pending, now_ms, config):
 
 
 def exit_action(reason, config):
-    """Risk exits execute immediately; profit exits require the owner's SAT."""
+    """Apply the configured automatic exit policy without predicting prices."""
     risk_reasons = {"stop_loss", "daily_loss_limit", "pilot_loss_limit", "emergency_risk"}
     profit_reasons = {"take_profit", "trailing_profit", "profit_signal"}
     if reason in risk_reasons:
@@ -39,7 +39,7 @@ def exit_action(reason, config):
             return "blocked", "automatic_risk_exit_disabled"
         return "sell_now", "risk_exit"
     if reason in profit_reasons:
-        if config.get("profit_exit_confirmation_required", True):
+        if config.get("profit_exit_confirmation_required", False):
             return "notify_and_wait", "profit_confirmation_required"
         return "sell_now", "profit_exit"
     return "blocked", "unknown_exit_reason"
