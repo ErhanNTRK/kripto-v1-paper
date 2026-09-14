@@ -10,3 +10,9 @@ services:
         sync: false
       - key: BINANCE_ED25519_PRIVATE_KEY
         sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false

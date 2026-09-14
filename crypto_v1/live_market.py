@@ -4,7 +4,8 @@ from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
 
 from .binance_account import signed_get
-from .data import get, universe
+from .data import INTERVAL, candles, get, universe
+from .indicators import features
 from .live_execution import symbol_rules
 
 
@@ -71,3 +72,28 @@ class BinanceMarket:
         orders = [order for batch in batches for order in batch]
         return summarize_pilot(self._account(), self.executor.open_orders(), orders,
                                tickers, self.config)
+
+    def live_positions(self):
+        positions = []
+        for stop in self.executor.open_orders():
+            stop_id = str(stop.get("clientOrderId", ""))
+            if not stop_id.startswith("kv1s") or stop.get("side") != "SELL": continue
+            buy = self.executor.query(stop["symbol"], "kv1b" + stop_id.removeprefix("kv1s"))
+            qty = Decimal(str(buy.get("executedQty", "0")))
+            quote = Decimal(str(buy.get("cummulativeQuoteQty", "0")))
+            if qty <= 0 or quote <= 0: continue
+            positions.append({"symbol": stop["symbol"], "entry": quote / qty,
+                              "stop_price": Decimal(str(stop["stopPrice"])),
+                              "quantity": stop["origQty"], "stop_client_id": stop_id,
+                              "buy_time": int(buy.get("time", buy.get("updateTime", 0)))})
+        return positions
+
+    def analysis(self, position):
+        now = get("time")["serverTime"] // INTERVAL * INTERVAL
+        start = min(position["buy_time"], now - 220 * INTERVAL)
+        coin_rows = candles(position["symbol"], start, now)
+        btc_rows = coin_rows if position["symbol"] == "BTCUSDT" else candles("BTCUSDT", start, now)
+        coin = features(coin_rows, self.strategy_config)[-1]
+        btc = features(btc_rows, self.strategy_config)[-1]
+        high = max(row["h"] for row in coin_rows if row["t"] >= position["buy_time"] // INTERVAL * INTERVAL)
+        return coin, btc, high

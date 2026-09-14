@@ -7,6 +7,7 @@ from .binance_trade import SpotExecutor
 from .live_controller import approve_buy
 from .live_execution import execution_enabled
 from .live_market import BinanceMarket
+from .live_monitor import execute_exit, exit_decision
 from .live_signal import fetch_runtime_state
 from .telegram import send_message
 
@@ -44,14 +45,30 @@ class LiveApp:
         else: send_message("AL yapilmadi: " + result.get("reason", "guvenlik kontrolu"))
         return result
 
+    def scan(self):
+        results = []
+        for position in self.market.live_positions():
+            feature, btc, high = self.market.analysis(position)
+            reason = exit_decision(position, feature, btc, high,
+                                   {**self.config, **{"trailing_atr": self.market.strategy_config["trailing_atr"]}})
+            if not reason: continue
+            if not execution_enabled(self.config, self.environment):
+                results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
+                continue
+            result = execute_exit(position, reason, self.executor)
+            send_message(f"OTOMATIK SAT: {position['symbol']} | Neden: {reason}")
+            results.append(result)
+        return {"status": "scanned", "results": results}
+
 class Handler(BaseHTTPRequestHandler):
     def _json(self, status, value):
         body = json.dumps(value, default=str).encode(); self.send_response(status)
         self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body)))
         self.end_headers(); self.wfile.write(body)
     def do_GET(self):
-        if self.path != "/health": self.send_error(404); return
-        self._json(200 if STATUS["ready"] else 503, STATUS)
+        if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
+        if self.path == "/scan": self._json(200, APP.scan()); return
+        self.send_error(404)
     def do_POST(self):
         if self.path != "/telegram": self.send_error(404); return
         expected = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")

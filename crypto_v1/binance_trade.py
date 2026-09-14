@@ -108,6 +108,9 @@ class SpotExecutor:
     def query(self, symbol, client_id):
         return self.request("GET", {"symbol": symbol, "origClientOrderId": client_id})
 
+    def cancel(self, symbol, client_id):
+        return self.request("DELETE", {"symbol": symbol, "origClientOrderId": client_id})
+
     def open_orders(self):
         return self.request("GET", {}, path="/api/v3/openOrders")
 
