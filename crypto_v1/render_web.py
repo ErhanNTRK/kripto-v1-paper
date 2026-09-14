@@ -42,6 +42,8 @@ class LiveApp:
             send_message(f"AL onayi dogrulandi: {plan['symbol']} | Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
         elif result["status"] == "bought_and_protected":
             send_message(f"ALIM TAMAMLANDI VE KORUYUCU STOP AKTIF: {result['plan']['symbol']}")
+        elif result["status"] == "bought_then_emergency_sold":
+            send_message(f"ACIL GUVENLIK SATISI: {result['plan']['symbol']} koruyucu stop kurulamadi ve alim geri satildi.")
         else: send_message("AL yapilmadi: " + result.get("reason", "guvenlik kontrolu"))
         return result
 

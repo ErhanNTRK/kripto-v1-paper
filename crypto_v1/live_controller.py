@@ -19,6 +19,12 @@ def _known_or_place(executor, symbol, client_id, place):
         return executor.query(symbol, client_id)
 
 
+def _emergency_sell(executor, symbol, quantity, update_id):
+    exit_id = f"kv1e{int(update_id)}"
+    return _known_or_place(executor, symbol, exit_id,
+                           lambda: executor.market_sell(symbol, format(quantity, "f"), exit_id))
+
+
 def approve_buy(update_id, command, now_ms, saved, config, environment, market, executor):
     candidates = pending_candidates(saved, now_ms, config)
     signal, reason = confirmed_signal(command, candidates, now_ms, config)
@@ -53,9 +59,14 @@ def approve_buy(update_id, command, now_ms, saved, config, environment, market, 
     if stop_qty < rules["min_qty"]:
         raise RuntimeError("filled quantity cannot support a protective order")
     stop_id = f"kv1s{int(update_id)}"
-    stop_order = _known_or_place(
-        executor, signal["symbol"], stop_id,
-        lambda: executor.protective_stop(signal["symbol"], format(stop_qty, "f"),
-                                         plan["stop_price"], plan["stop_limit_price"], stop_id))
+    try:
+        stop_order = _known_or_place(
+            executor, signal["symbol"], stop_id,
+            lambda: executor.protective_stop(signal["symbol"], format(stop_qty, "f"),
+                                             plan["stop_price"], plan["stop_limit_price"], stop_id))
+    except OrderRejected:
+        sold = _emergency_sell(executor, signal["symbol"], stop_qty, update_id)
+        return {"status": "bought_then_emergency_sold", "buy_order": buy,
+                "emergency_sell": sold, "reason": "protective_stop_rejected", "plan": plan}
     return {"status": "bought_and_protected", "buy_order": buy,
             "stop_order": stop_order, "plan": plan}

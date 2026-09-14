@@ -61,3 +61,15 @@ class LiveControllerTests(unittest.TestCase):
                              {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, Market(), executor)
         self.assertEqual(result["status"], "bought_and_protected")
         executor.market_buy.assert_called_once()
+
+    def test_rejected_stop_immediately_sells_the_fill(self):
+        executor = Mock()
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013),
+                                      OrderRejected(-2013)]
+        executor.market_buy.return_value = {"status": "FILLED", "executedQty": "0.34"}
+        executor.protective_stop.side_effect = OrderRejected(-1013)
+        executor.market_sell.return_value = {"status": "FILLED", "executedQty": "0.339"}
+        result = approve_buy(9, "AL", 501000, SAVED, dict(C, live_trading_enabled=True),
+                             {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, Market(), executor)
+        self.assertEqual(result["status"], "bought_then_emergency_sold")
+        executor.market_sell.assert_called_once()

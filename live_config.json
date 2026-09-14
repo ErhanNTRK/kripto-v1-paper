@@ -14,4 +14,5 @@
   "automatic_risk_exits": true,
   "profit_exit_confirmation_required": false,
   "max_entry_drift_fraction": 0.005
+  ,"live_fee_buffer_fraction": 0.001
 }

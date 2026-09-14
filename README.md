@@ -1,6 +1,6 @@
 # Kripto işlem sistemi V1
 
-Binance Spot USDT için **yalnızca geçmiş veri testi ve sanal işlem**. Python 3.11+ yeterli; ek paket, Binance anahtarı veya hesap erişimi gerekmez. Gerçek emir, para transferi ve otomatik canlıya geçiş kodu yoktur.
+Binance Spot USDT için backtest, paper takip ve iki ayrı kilitle kapatılmış canlı pilot altyapısı. Frankfurt Render servisi Telegram ve Binance okuma bağlantısıyla çalışır. Gerçek emirler varsayılan olarak kapalıdır; mevcut negatif test sonucu nedeniyle açılmamıştır.
 
 ## Başlangıç
 
@@ -14,7 +14,7 @@ python -m crypto_v1 paper
 python -m crypto_v1 paper --watch
 ```
 
-`paper` tek güncelleme yapar; `--watch` açık kaldığı sürece 30 saniyede bir kontrol eder. Ctrl+C durdurur. Bilgisayar uyurken veya uygulama kapalıyken sürekli takip garantisi yoktur. `Baslat.ps1` bu bilgisayardaki Python'u bulur ve paper takibini ayrı, gizli süreçte açar; `Durdur.ps1` bu süreci kapatır. Süreç durumunu `paper/process.json`, hataları `paper/error.log` üzerinden kontrol edin. Scriptleri bu klasörde PowerShell ile çalıştırın.
+`paper` tek güncelleme yapar; GitHub Actions 15 dakikada bir paper taraması yapar ve Frankfurt servisini otomatik çıkış kontrolü için uyandırır. Render ücretsiz planı uyuyabildiğinden ilk istek gecikebilir; borsadaki koruyucu stop sunucu uykusundan bağımsızdır.
 
 ## Kesin V1 kuralları
 
@@ -52,6 +52,6 @@ En az 30 takvim günü ve 100 kapanmış paper işleminden önce karar verilmez.
 
 ## Mimari
 
-`data`: anahtarsız fiyat verisi, doğrulama ve sabit evren; `indicators`: EMA/RSI/ATR; `strategy`: AL/SAT; `risk`: risk ve hedef; `backtest`: ortak portföy motoru, test ve metrikler; `paper_trading`: kalıcı sanal portföy; `telegram`: bildirim kuyruğu ve ayrıca yapılandırılabilen özel sohbet göndericisi. Standart yerel paper komutu mesaj göndermez. Kullanıcının Telegram talebi üzerine `cloud` çalışanı ve Dockerfile eklendi; token/chat bilgileri henüz bağlanmadı, sunucuya dağıtım yapılmadı. Ayrıntılar [Telegram kurulumu](TELEGRAM-KURULUM.md) dosyasındadır.
+`data`: anahtarsız fiyat verisi ve evren; `indicators`: EMA/RSI/ATR; `strategy`: AL/SAT; `risk`: boyut ve hedef; `backtest`: motor ve metrikler; `paper_trading`: kalıcı sanal portföy; `telegram`: bildirim; `live_controller`: yalnızca güncel tek sinyale verilen `AL` onayı; `live_monitor`: otomatik stop, hedef, trailing ve trend çıkışı; `live_market`: Render yeniden başladıktan sonra Binance'ten pilot durumunu kurar. Alımdan hemen sonra koruyucu stop kurulamazsa sistem acil piyasa satışı dener. Ayrıntılar [araştırma kararı](ARASTIRMA.md) ve [Telegram kurulumu](TELEGRAM-KURULUM.md) dosyalarındadır.
 
 Resmi veri kaynağı: https://developers.binance.com/en/docs/products/spot/rest-api — yalnızca https://data-api.binance.vision servisinin time, exchangeInfo, ticker/24hr ve klines uçları kullanılır.

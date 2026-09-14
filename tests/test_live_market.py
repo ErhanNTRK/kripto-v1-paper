@@ -13,19 +13,20 @@ class LiveMarketTests(unittest.TestCase):
                   {"side": "SELL", "status": "FILLED", "clientOrderId": "other",
                    "cummulativeQuoteQty": "999"}]
         result = summarize_pilot(account, open_orders, orders, {"SOLUSDT": Decimal("100")},
-                                 {"pilot_capital_usdt": 68.13})
+                                 {"pilot_capital_usdt": 68.13}, 0)
         self.assertEqual(result["open_positions"], 1)
         self.assertEqual(result["buys_today"], 1)
-        self.assertEqual(result["realized_loss_today"], Decimal("6.8"))
+        self.assertEqual(result["realized_loss_today"], Decimal("0"))
         self.assertEqual(result["equity"], Decimal("65"))
         self.assertEqual(result["pilot_drawdown"], Decimal("3.13"))
 
     def test_completed_round_trip_counts_realized_loss(self):
         orders = [{"side": "BUY", "status": "FILLED", "clientOrderId": "kv1b1",
-                   "cummulativeQuoteQty": "10"},
+                   "cummulativeQuoteQty": "10", "time": 1},
                   {"side": "SELL", "status": "FILLED", "clientOrderId": "kv1x1",
-                   "cummulativeQuoteQty": "9.7"}]
+                   "cummulativeQuoteQty": "9.7", "time": 20}]
         result = summarize_pilot({"balances": [{"asset": "USDT", "free": "67.83",
                                                  "locked": "0"}]}, [], orders, {},
-                                 {"pilot_capital_usdt": 68.13})
-        self.assertEqual(result["realized_loss_today"], Decimal("0.3"))
+                                 {"pilot_capital_usdt": 68.13}, 10)
+        self.assertEqual(result["realized_loss_today"], Decimal("0.3197"))
+        self.assertEqual(result["buys_today"], 0)

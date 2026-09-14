@@ -44,4 +44,4 @@ Telegram modülü yerel bildirim kuyruğu üretir. Telegram'a mesaj gönderimi b
 - [İşlem dökümü](reports/backtest/full/trades.csv)
 - [Sanal takip durdurma](Durdur.ps1) ve [yeniden başlatma](Baslat.ps1)
 
-18 otomatik test geçti. Ayrıca sabit backtest dönemi yeniden çalıştırıldı ve sonuçların birebir tekrarlandığı doğrulandı. Risk bütçesi maliyetleri içerir; fiyat boşluklarında gerçekleşen zarar planlanan %0,5'i aşabilir. Günlük kesici %2 veya art arda 3 zarardır; en fazla 3 eşzamanlı pozisyon vardır.
+61 otomatik test geçti. Frankfurt servisi Binance okuma bağlantısı, Telegram webhook kimliği ve kapalı gerçek-emir kilidiyle doğrulandı. `AL` yalnızca güncel tek sinyali kabul eder; risk ve kâr çıkışları otomatik tasarlanmıştır. Koruyucu stop kurulamazsa acil geri satış yapılır. Mevcut performans eşikleri geçmediği için gerçek emir kilidi kapalıdır. Pilot sınırları 68,13 USDT sermaye, işlem başına 0,34 USDT planlanan risk, günlük 1,36 USDT ve toplam 6,81 USDT düşüştür; fiyat boşluğu gerçekleşen zararı artırabilir.

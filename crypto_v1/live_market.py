@@ -13,7 +13,7 @@ def _decimal(value):
     return Decimal(str(value or "0"))
 
 
-def summarize_pilot(account, open_orders, orders, prices, config):
+def summarize_pilot(account, open_orders, orders, prices, config, day_start_ms=0):
     balances = account.get("balances", [])
     free_usdt = Decimal("0")
     equity = Decimal("0")
@@ -30,14 +30,25 @@ def summarize_pilot(account, open_orders, orders, prices, config):
     live_orders = [o for o in orders if str(o.get("clientOrderId", "")).startswith("kv1")]
     buys = [o for o in live_orders if o.get("side") == "BUY" and o.get("status") == "FILLED"]
     sells = [o for o in live_orders if o.get("side") == "SELL" and o.get("status") == "FILLED"]
-    spent = sum((_decimal(o.get("cummulativeQuoteQty")) for o in buys), Decimal("0"))
-    received = sum((_decimal(o.get("cummulativeQuoteQty")) for o in sells), Decimal("0"))
-    realized_loss = max(Decimal("0"), spent - received)
+    buys_by_suffix = {str(o.get("clientOrderId", ""))[4:]: o for o in buys
+                      if str(o.get("clientOrderId", "")).startswith("kv1b")}
+    fee = Decimal(str(config.get("live_fee_buffer_fraction", "0.001")))
+    realized_loss = Decimal("0")
+    for sell in sells:
+        if int(sell.get("updateTime", sell.get("time", 0))) < day_start_ms: continue
+        suffix = str(sell.get("clientOrderId", ""))[4:]
+        buy = buys_by_suffix.get(suffix)
+        if buy:
+            spent = _decimal(buy.get("cummulativeQuoteQty"))
+            received = _decimal(sell.get("cummulativeQuoteQty"))
+            realized_loss += max(Decimal("0"), spent * (Decimal("1") + fee)
+                                 - received * (Decimal("1") - fee))
     protective = [o for o in open_orders
                   if str(o.get("clientOrderId", "")).startswith("kv1s")]
     pilot_drawdown = max(Decimal("0"), Decimal(str(config["pilot_capital_usdt"])) - equity)
     return {"open_positions": len({o["symbol"] for o in protective}),
-            "buys_today": len({o["clientOrderId"] for o in buys}),
+            "buys_today": len({o["clientOrderId"] for o in buys
+                               if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}),
             "realized_loss_today": realized_loss, "pilot_drawdown": pilot_drawdown,
             "free_usdt": free_usdt, "equity": equity}
 
@@ -64,14 +75,20 @@ class BinanceMarket:
 
     def pilot_status(self):
         tickers = self._tickers()
-        symbols = universe(self.strategy_config)
+        account = self._account()
+        open_orders = self.executor.open_orders()
+        symbols = set(universe(self.strategy_config))
+        symbols.update(o["symbol"] for o in open_orders)
+        symbols.update(b["asset"] + "USDT" for b in account.get("balances", [])
+                       if b.get("asset") != "USDT" and
+                       (_decimal(b.get("free")) + _decimal(b.get("locked"))) > 0 and
+                       b["asset"] + "USDT" in tickers)
         start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0,
                                                    microsecond=0).timestamp() * 1000
         with ThreadPoolExecutor(max_workers=5) as pool:
-            batches = list(pool.map(lambda s: self.executor.all_orders(s, start), symbols))
+            batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
         orders = [order for batch in batches for order in batch]
-        return summarize_pilot(self._account(), self.executor.open_orders(), orders,
-                               tickers, self.config)
+        return summarize_pilot(account, open_orders, orders, tickers, self.config, int(start))
 
     def live_positions(self):
         positions = []

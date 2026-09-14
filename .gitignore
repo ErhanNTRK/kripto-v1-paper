@@ -7,3 +7,4 @@ reports/
 .env.*
 *.sqlite
 runtime/
+.secrets/
