@@ -68,3 +68,23 @@ dönem profit factor 1,2'nin altında ve iki kat maliyet beklentisi negatiftir.
 Bu sürüm Telegram paper stratejisine veya gerçek emre alınmadı. Daha uzun veri
 indirme denemesi TLS zaman aşımında kesildi; veri tamamlanmadan sonuç hakkında
 ek çıkarım yapılmadı.
+
+## V2 bir yıllık bulut testi
+
+Yerel TLS sorunu üzerine aynı önceden belirlenmiş model GitHub Actions üzerinde
+365 günlük veriyle çalıştırıldı. Çalışma başarıyla tamamlandı ve ham JSON raporu
+GitHub çalışma kaydı 34869305279 altında artifact olarak saklandı.
+
+| Ölçüt | Tüm dönem | Geliştirme | Son %30 | Son %30, 2 kat maliyet |
+|---|---:|---:|---:|---:|
+| İşlem | 266 | 168 | 98 | 98 |
+| Win rate | %35,71 | %35,12 | %36,73 | %31,63 |
+| Expectancy (R) | 0,0211 | -0,0142 | 0,0816 | -0,0134 |
+| Max drawdown | %4,98 | %4,34 | %4,98 | %6,82 |
+| Profit factor | 1,080 | 0,936 | 1,340 | 0,941 |
+| Net getiri | %2,56 | %-1,32 | %3,92 | %-0,78 |
+
+Son %30 güçlü görünse de geliştirme dönemi ve iki kat maliyet testi negatiftir.
+Tam dönem profit factor da 1,2 eşiğini geçmemiştir. Bu, piyasa rejimine ve
+maliyet varsayımına duyarlı bir modeldir; gerçek para veya ana paper stratejisi
+olarak kabul edilmedi.
