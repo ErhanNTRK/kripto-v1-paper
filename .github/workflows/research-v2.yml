@@ -1,0 +1,26 @@
+name: Kripto V2 One Year Research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download one year of public top-20 data
+        run: python -m crypto_v1 --config config_v2.json fetch --days 365 --data data-v2
+      - name: Run pre-registered V2 research
+        run: python -m crypto_v1 --config config_v2.json research-v2 --data data-v2 --output reports/research-v2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kripto-v2-one-year-report
+          path: reports/research-v2/report.json
+          retention-days: 30

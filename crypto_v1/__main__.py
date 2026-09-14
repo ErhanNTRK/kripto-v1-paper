@@ -7,6 +7,7 @@ from .data import download, load, INTERVAL
 from .risk import validate_config
 from .backtest import run, report
 from .paper_trading import tick
+from .research_v2 import evaluate
 
 
 def main():
@@ -27,6 +28,9 @@ def main():
     paper.add_argument('--state', default='paper/state.json')
     paper.add_argument('--output', default='reports/paper')
     paper.add_argument('--watch', action='store_true')
+    research = sub.add_parser('research-v2')
+    research.add_argument('--data', default='data-v2')
+    research.add_argument('--output', default='reports/research-v2')
     args = parser.parse_args()
     c = validate_config(json.loads(Path(args.config).read_text(encoding='utf-8')))
     if args.command == 'fetch':
@@ -48,6 +52,10 @@ def main():
                         note='Fixed rules; holdout not optimized. Current-universe bias remains.')
             result = report(state, c, meta, Path(args.output)/name)
             print(name, json.dumps(result['metrics']))
+    elif args.command == 'research-v2':
+        manifest, data = load(args.data)
+        result = evaluate(data, manifest['symbols'], c, args.output)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         stop_path = Path(args.state).parent/'stop.request'
         while True:
