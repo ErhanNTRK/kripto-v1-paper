@@ -47,3 +47,24 @@ Canlı pilot için değişmeyen eşik: en az 30 gün ve 100 kapanmış paper iş
 pozitif dış dönem beklentisi, profit factor > 1,2, maksimum düşüş <%10 ve iki
 kat maliyette pozitif sonuç. Tek bir iyi dönem veya tek bir coin bu eşiği
 geçmiş sayılmaz.
+
+## V2 ilk deney sonucu
+
+Önceden belirlenen saatlik Donchian 20/40/80 birleşimi mevcut 90 günlük veri
+üzerinde çalıştırıldı. Bugünkü hacim sırasının geçmişe uygulanması nedeniyle
+evren yanlılığı devam eder; 20 adayın 18'i yeterli geçmişe sahipti.
+
+| Ölçüt | Tüm dönem | Geliştirme | Son %30 | Son %30, 2 kat maliyet |
+|---|---:|---:|---:|---:|
+| İşlem | 110 | 63 | 48 | 45 |
+| Win rate | %38,18 | %42,86 | %37,50 | %35,56 |
+| Expectancy (R) | 0,0226 | 0,0486 | 0,0329 | -0,0800 |
+| Max drawdown | %5,95 | %5,95 | %3,37 | %4,26 |
+| Profit factor | 1,079 | 1,212 | 1,118 | 0,719 |
+| Net getiri | %1,09 | %1,46 | %0,73 | %-1,82 |
+
+V2, V1'den daha iyi olmakla birlikte kabul eşiğini geçmedi. Özellikle tüm
+dönem profit factor 1,2'nin altında ve iki kat maliyet beklentisi negatiftir.
+Bu sürüm Telegram paper stratejisine veya gerçek emre alınmadı. Daha uzun veri
+indirme denemesi TLS zaman aşımında kesildi; veri tamamlanmadan sonuç hakkında
+ek çıkarım yapılmadı.

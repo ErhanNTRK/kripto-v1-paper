@@ -16,9 +16,11 @@ def fresh_state(c):
 
 
 class Engine:
-    def __init__(self, config, symbols, state=None):
+    def __init__(self, config, symbols, state=None, model=None, interval=INTERVAL):
         self.c = config
         self.symbols = symbols
+        self.model = model
+        self.interval = interval
         self.s = state if state is not None else fresh_state(config)
 
     def equity(self):
@@ -44,7 +46,7 @@ class Engine:
         s, c = self.s, self.c
         if s['last_t'] is not None and t <= s['last_t']:
             return
-        if s['last_t'] is not None and t != s['last_t'] + INTERVAL:
+        if s['last_t'] is not None and t != s['last_t'] + self.interval:
             raise ValueError('Missing portfolio bar; refusing to skip time')
         if 'BTCUSDT' not in bars or any(symbol not in bars for symbol in s['positions']):
             raise ValueError('Missing BTC or open-position candle')
@@ -89,7 +91,8 @@ class Engine:
         btc = bars['BTCUSDT']
         for symbol, p in s['positions'].items():
             f = bars[symbol]
-            if sell_signal(f, btc):
+            sell = self.model.sell if self.model else sell_signal
+            if sell(f, btc):
                 s['pending_sells'].setdefault(symbol, 'trend_exit')
             p['high'] = max(p['high'], f['h'])
             if p['high'] >= p['entry'] + p['unit_risk']:
@@ -98,21 +101,23 @@ class Engine:
         if not s['halted']:
             for symbol in self.symbols:
                 f = bars.get(symbol)
-                if symbol not in s['positions'] and f and buy_signal(f, btc, c):
-                    s['pending_buys'][symbol] = dict(stop=initial_stop(f, c), score=f['v']/f['volume_avg'])
-                    s['events'].append(dict(type='AL_ADAYI', time=t+INTERVAL, symbol=symbol,
+                buy = self.model.buy if self.model else buy_signal
+                stop = self.model.stop if self.model else initial_stop
+                if symbol not in s['positions'] and f and buy(f, btc, c):
+                    s['pending_buys'][symbol] = dict(stop=stop(f, c), score=f.get('signal_score', f['v']/f['volume_avg']))
+                    s['events'].append(dict(type='AL_ADAYI', time=t+self.interval, symbol=symbol,
                                             close=f['c'], simulated=True))
         s['last_t'] = t
-        s['curve'].append(dict(time=t+INTERVAL, equity=self.equity(), positions=len(s['positions']), halted=s['halted']))
+        s['curve'].append(dict(time=t+self.interval, equity=self.equity(), positions=len(s['positions']), halted=s['halted']))
 
 
-def prepare(data, c):
-    return {symbol: {r['t']: r for r in features(rows, c)} for symbol, rows in data.items()}
+def prepare(data, c, feature_fn=features):
+    return {symbol: {r['t']: r for r in feature_fn(rows, c)} for symbol, rows in data.items()}
 
 
-def run(data, symbols, c, start=None, end=None):
-    prepared = prepare(data, c)
-    engine = Engine(c, symbols)
+def run(data, symbols, c, start=None, end=None, model=None, interval=INTERVAL):
+    prepared = prepare(data, c, model.features if model else features)
+    engine = Engine(c, symbols, model=model, interval=interval)
     times = sorted(prepared['BTCUSDT'])
     for t in times:
         if (start is not None and t < start) or (end is not None and t >= end):
@@ -122,8 +127,8 @@ def run(data, symbols, c, start=None, end=None):
     s = engine.s
     if s['last_t'] is not None:
         for symbol in list(s['positions']):
-            engine.close(symbol, s['marks'][symbol], s['last_t']+INTERVAL, 'end_of_test')
-        s['curve'].append(dict(time=s['last_t']+INTERVAL, equity=engine.equity(), positions=0, halted=s['halted']))
+            engine.close(symbol, s['marks'][symbol], s['last_t']+interval, 'end_of_test')
+        s['curve'].append(dict(time=s['last_t']+interval, equity=engine.equity(), positions=0, halted=s['halted']))
     return s
 
 
