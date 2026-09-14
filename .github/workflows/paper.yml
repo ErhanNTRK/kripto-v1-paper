@@ -31,6 +31,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CRYPTO_STORAGE: runtime
+          PAPER_RELAX_LIMITS: "1"
+          PAPER_STATE_FILE: state-relaxed.json
         run: python -m crypto_v1.github_worker
       - name: Wake Frankfurt exit monitor
         run: curl --fail --silent --show-error --retry 2 --max-time 120 https://kripto-v1-frankfurt.onrender.com/scan

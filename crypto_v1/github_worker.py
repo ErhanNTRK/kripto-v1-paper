@@ -74,9 +74,12 @@ def main():
         write_json(chat_file, {"chat_id": chat_id})
     os.environ["TELEGRAM_CHAT_ID"] = chat_id
     config = validate_config(json.loads(Path("config.json").read_text(encoding="utf-8")))
+    # Paper-only overrides. Live trading reads live_config.json and is unaffected.
+    if os.environ.get("PAPER_RELAX_LIMITS") == "1":
+        config = dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000)
     now = get("time")["serverTime"] // INTERVAL * INTERVAL
     data_dir = prepare_data(config, runtime, now)
-    state_path = runtime / "state.json"
+    state_path = runtime / os.environ.get("PAPER_STATE_FILE", "state.json")
     output = runtime / "report"
     tick(config, data_dir, state_path, output)
     database = runtime / "telegram.sqlite"
@@ -91,7 +94,7 @@ def main():
     from zoneinfo import ZoneInfo
     status_day = datetime.fromtimestamp(now / 1000, ZoneInfo("Europe/Istanbul")).strftime("%Y-%m-%d")
     deliver_once(
-        "daily-status:" + chat_id + ":" + status_day,
+        "daily-status:" + chat_id + ":" + str(saved["started_at"]) + ":" + status_day,
         format_daily_status(saved, now),
         database,
     )
