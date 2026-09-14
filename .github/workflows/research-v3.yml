@@ -1,0 +1,26 @@
+name: Kripto V3 One Year Research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download one year of public market data
+        run: python -m crypto_v1 --config config_v2.json fetch --days 365 --data data-v3
+      - name: Run V3 cost-aware research
+        run: python -m crypto_v1 --config config_v2.json research-v3 --data data-v3 --output reports/research-v3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kripto-v3-one-year-report
+          path: reports/research-v3/report.json
+          retention-days: 30

@@ -8,6 +8,7 @@ from .risk import validate_config
 from .backtest import run, report
 from .paper_trading import tick
 from .research_v2 import evaluate
+from .research_v3 import evaluate_v3
 
 
 def main():
@@ -31,6 +32,9 @@ def main():
     research = sub.add_parser('research-v2')
     research.add_argument('--data', default='data-v2')
     research.add_argument('--output', default='reports/research-v2')
+    research3 = sub.add_parser('research-v3')
+    research3.add_argument('--data', default='data-v3')
+    research3.add_argument('--output', default='reports/research-v3')
     args = parser.parse_args()
     c = validate_config(json.loads(Path(args.config).read_text(encoding='utf-8')))
     if args.command == 'fetch':
@@ -56,6 +60,9 @@ def main():
         manifest, data = load(args.data)
         result = evaluate(data, manifest['symbols'], c, args.output)
         print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == 'research-v3':
+        _, data = load(args.data)
+        print(json.dumps(evaluate_v3(data, c, args.output), indent=2, ensure_ascii=False))
     else:
         stop_path = Path(args.state).parent/'stop.request'
         while True:
