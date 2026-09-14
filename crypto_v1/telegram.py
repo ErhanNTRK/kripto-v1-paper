@@ -8,6 +8,7 @@ import urllib.request
 from datetime import datetime, timezone
 from contextlib import closing
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 def export_outbox(events, path):
@@ -43,6 +44,22 @@ def format_event(event):
         lines.append('Cikis nedeni: '+event['reason'])
     lines.append('Mum bazli simulasyon. Gercek emir verilmedi.')
     return '\n'.join(lines)
+
+
+def format_daily_status(state, now_ms):
+    """Short heartbeat so silence is never confused with a stopped scanner."""
+    day = datetime.fromtimestamp(now_ms / 1000, ZoneInfo('Europe/Istanbul')).strftime('%d.%m.%Y')
+    trades = [trade for trade in state.get('trades', []) if trade.get('exit_t', 0) >= now_ms - 24 * 60 * 60 * 1000]
+    equity = state.get('cash', 0) + sum(position.get('qty', 0) * position.get('entry', 0) for position in state.get('positions', {}).values())
+    status = 'GUNLUK ZARAR KESICI AKTIF' if state.get('halted') else 'TARAMA DEVAM EDIYOR'
+    return '\n'.join([
+        'KRIPTO V1 | GUNLUK DURUM',
+        day,
+        status,
+        f"Son 24 saat kapanan sanal islem: {len(trades)}",
+        f"Sanal portfoy: {equity:.2f} USDT",
+        'Gercek emir verilmedi.',
+    ])
 
 
 def deliver_once(key, message, database):

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from crypto_v1.telegram import deliver_once, format_event, send_message
+from crypto_v1.telegram import deliver_once, format_daily_status, format_event, send_message
 
 
 class TelegramTests(unittest.TestCase):
@@ -32,6 +32,14 @@ class TelegramTests(unittest.TestCase):
         message = format_event(dict(type='AL', symbol='BTCUSDT', time=0, price=100))
         self.assertIn('SANAL ISLEM', message)
         self.assertIn('Gercek emir verilmedi', message)
+
+    def test_daily_status_reports_halt_and_trade_count(self):
+        state = {'cash': 68.13, 'positions': {}, 'halted': True,
+                 'trades': [{'exit_t': 1000}]}
+        message = format_daily_status(state, 1000)
+        self.assertIn('GUNLUK ZARAR KESICI AKTIF', message)
+        self.assertIn('kapanan sanal islem: 1', message)
+        self.assertIn('68.13 USDT', message)
 
     def test_network_errors_do_not_expose_token(self):
         with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN':'test-secret', 'TELEGRAM_CHAT_ID':'123'}), patch('urllib.request.urlopen', side_effect=ValueError('test-secret')):

@@ -8,7 +8,7 @@ from .backtest import report
 from .data import INTERVAL, candles, get, universe, validate
 from .paper_trading import tick
 from .risk import validate_config
-from .telegram import deliver_paper_events, deliver_once
+from .telegram import deliver_paper_events, deliver_once, format_daily_status
 
 
 def private_chat_id(token):
@@ -86,6 +86,15 @@ def main():
         database,
     )
     deliver_paper_events(state_path, database)
+    saved = json.loads(state_path.read_text(encoding="utf-8"))["state"]
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    status_day = datetime.fromtimestamp(now / 1000, ZoneInfo("Europe/Istanbul")).strftime("%Y-%m-%d")
+    deliver_once(
+        "daily-status:" + chat_id + ":" + status_day,
+        format_daily_status(saved, now),
+        database,
+    )
     shutil.rmtree(data_dir, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
     print("Paper update completed")
