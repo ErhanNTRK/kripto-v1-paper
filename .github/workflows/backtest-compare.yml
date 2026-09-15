@@ -22,6 +22,10 @@ jobs:
         run: python -m crypto_v1 --config config.json backtest --data data --output reports/backtest-strict
       - name: Backtest with loosened config
         run: python -m crypto_v1 --config config_loose.json backtest --data data --output reports/backtest-loose
+      - name: Backtest with loosened config, no fixed 2R exit (trend)
+        run: python -m crypto_v1 --config config_trend.json backtest --data data --output reports/backtest-trend
+      - name: Backtest trend config with 2x costs (stress)
+        run: python -m crypto_v1 --config config_trend_stress.json backtest --data data --output reports/backtest-trend-stress
       - uses: actions/upload-artifact@v4
         with:
           name: kripto-v1-backtest-compare

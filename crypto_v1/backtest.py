@@ -82,7 +82,7 @@ class Engine:
             f = bars[symbol]
             if f['l'] <= p['stop']:
                 self.close(symbol, min(f['o'], p['stop']), t, 'stop')
-            elif f['h'] >= p['target']:
+            elif c.get('cap_at_target', True) and f['h'] >= p['target']:
                 self.close(symbol, p['target'], t, 'target_2R')
         s['marks'].update({symbol: f['c'] for symbol, f in bars.items()})
         if self.equity() <= s['day_equity'] * (1-c['daily_loss_fraction']):
