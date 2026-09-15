@@ -1,0 +1,29 @@
+name: Kripto V1 Backtest Compare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 90 days of data
+        run: python -m crypto_v1 fetch --days 90 --data data
+      - name: Backtest with current (strict) config
+        run: python -m crypto_v1 --config config.json backtest --data data --output reports/backtest-strict
+      - name: Backtest with loosened config
+        run: python -m crypto_v1 --config config_loose.json backtest --data data --output reports/backtest-loose
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kripto-v1-backtest-compare
+          path: reports
+          retention-days: 14
