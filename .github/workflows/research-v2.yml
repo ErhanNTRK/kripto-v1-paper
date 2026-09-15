@@ -19,8 +19,12 @@ jobs:
         run: python -m crypto_v1 --config config_v2.json fetch --days 365 --data data-v2
       - name: Run pre-registered V2 research
         run: python -m crypto_v1 --config config_v2.json research-v2 --data data-v2 --output reports/research-v2
+      - name: Walk-forward validate V2 (5 independent windows + stress)
+        run: python -m crypto_v1 --config config_v2.json walkforward-v2 --data data-v2 --output reports/walkforward-v2 --windows 5
       - uses: actions/upload-artifact@v4
         with:
           name: kripto-v2-one-year-report
-          path: reports/research-v2/report.json
+          path: |
+            reports/research-v2/report.json
+            reports/walkforward-v2
           retention-days: 30

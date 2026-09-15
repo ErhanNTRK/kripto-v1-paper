@@ -5,6 +5,7 @@ from pathlib import Path
 from .backtest import metrics, run
 from .indicators import features
 from .strategy import btc_ok, initial_stop
+from . import walkforward as wf
 
 HOUR = 3_600_000
 
@@ -75,4 +76,14 @@ def evaluate(data, symbols, config, output):
     result["segments"]["holdout_double_cost"] = metrics(state, stressed)
     path = Path(output); path.mkdir(parents=True, exist_ok=True)
     (path / "report.json").write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return result
+
+
+def evaluate_walkforward(data, symbols, config, manifest, count=5, min_trades=15):
+    """Same pre-registered Donchian model, but scored with independent multi-window
+    walk-forward (see crypto_v1.walkforward) instead of a single development/holdout split."""
+    hourly_data = {symbol: hourly(rows) for symbol, rows in data.items()}
+    symbols = [s for s in symbols[:20] if len(hourly_data.get(s, [])) >= 400]
+    result = wf.evaluate(hourly_data, symbols, config, manifest, count,
+                          model=DonchianModel, interval=HOUR, warm=200, min_trades=min_trades)
     return result

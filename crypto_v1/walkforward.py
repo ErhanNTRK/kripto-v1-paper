@@ -10,6 +10,7 @@ and is standard practice before risking real capital.
 import json
 from pathlib import Path
 from .backtest import run, metrics
+from .data import INTERVAL
 
 MIN_TRADES_PER_WINDOW = 30
 
@@ -21,28 +22,29 @@ def stress_config(c):
     return c2
 
 
-def windows_from_times(times, count):
-    usable = times[200:]  # skip indicator warm-up, matches crypto_v1.backtest CLI
+def windows_from_times(times, count, warm=200, min_trades=MIN_TRADES_PER_WINDOW):
+    usable = times[warm:]  # skip indicator warm-up, matches crypto_v1.backtest CLI
     if count < 2:
         raise ValueError('Need at least 2 windows for walk-forward validation')
-    if len(usable) < count * MIN_TRADES_PER_WINDOW * 4:
+    if len(usable) < count * min_trades * 4:
         raise ValueError('Not enough candles for the requested window count')
     chunk = len(usable) // count
     return [usable[i * chunk] for i in range(count)]
 
 
-def evaluate(data, symbols, c, manifest, count=4):
+def evaluate(data, symbols, c, manifest, count=4, model=None, interval=INTERVAL,
+             warm=200, min_trades=MIN_TRADES_PER_WINDOW):
     times = [r['t'] for r in data['BTCUSDT'] if manifest['start'] <= r['t'] < manifest['end']]
     if len(times) < 400:
         raise ValueError('At least 400 BTC candles required')
-    starts = windows_from_times(times, count) + [manifest['end']]
+    starts = windows_from_times(times, count, warm, min_trades) + [manifest['end']]
     windows = []
     for i in range(count):
         start, end = starts[i], starts[i + 1]
-        normal = metrics(run(data, symbols, c, start, end), c)
+        normal = metrics(run(data, symbols, c, start, end, model, interval), c)
         cs = stress_config(c)
-        stress = metrics(run(data, symbols, cs, start, end), cs)
-        ok = (normal['trade_count'] or 0) >= MIN_TRADES_PER_WINDOW
+        stress = metrics(run(data, symbols, cs, start, end, model, interval), cs)
+        ok = (normal['trade_count'] or 0) >= min_trades
         passed = ok and normal['net_return'] > 0 and (normal['profit_factor'] or 0) >= 1.0 \
             and stress['net_return'] > 0 and (stress['profit_factor'] or 0) >= 1.0
         windows.append(dict(window=i, start=start, end=end, enough_trades=ok,

@@ -1,5 +1,10 @@
+import json
 import unittest
-from crypto_v1.research_v2 import DonchianModel, hourly
+from pathlib import Path
+from crypto_v1.research_v2 import DonchianModel, hourly, evaluate_walkforward
+from crypto_v1.data import INTERVAL
+
+C = json.loads((Path(__file__).parents[1] / 'config_v2.json').read_text())
 
 
 class ResearchV2Tests(unittest.TestCase):
@@ -14,3 +19,14 @@ class ResearchV2Tests(unittest.TestCase):
         c = {"atr_multiplier": 2}
         self.assertTrue(DonchianModel.buy(row, btc, c))
         self.assertFalse(DonchianModel.buy(dict(row, donchian_breaks=1), btc, c))
+
+    def test_evaluate_walkforward_runs_without_crashing_on_flat_data(self):
+        n = 1700
+        rows = [dict(t=i * INTERVAL, o=100.0, h=100.5, l=99.5, c=100.0, v=100.0) for i in range(n)]
+        data = {'BTCUSDT': rows}
+        manifest = dict(start=0, end=n * INTERVAL, symbols=['BTCUSDT'])
+        result = evaluate_walkforward(data, ['BTCUSDT'], C, manifest, count=2, min_trades=1)
+        self.assertIn(result['verdict'], ('GO', 'NO_GO'))
+        self.assertEqual(len(result['windows']), 2)
+        # Flat price data has no Donchian breakout, so no trades and a NO_GO verdict.
+        self.assertEqual(result['verdict'], 'NO_GO')
