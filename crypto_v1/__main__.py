@@ -9,6 +9,7 @@ from .backtest import run, report
 from .paper_trading import tick
 from .research_v2 import evaluate
 from .research_v3 import evaluate_v3
+from .walkforward import evaluate as walkforward_evaluate, report as walkforward_report
 
 
 def main():
@@ -29,6 +30,10 @@ def main():
     paper.add_argument('--state', default='paper/state.json')
     paper.add_argument('--output', default='reports/paper')
     paper.add_argument('--watch', action='store_true')
+    walkforward = sub.add_parser('walkforward')
+    walkforward.add_argument('--data', default='data')
+    walkforward.add_argument('--output', default='reports/walkforward')
+    walkforward.add_argument('--windows', type=int, default=4)
     research = sub.add_parser('research-v2')
     research.add_argument('--data', default='data-v2')
     research.add_argument('--output', default='reports/research-v2')
@@ -56,6 +61,16 @@ def main():
                         note='Fixed rules; holdout not optimized. Current-universe bias remains.')
             result = report(state, c, meta, Path(args.output)/name)
             print(name, json.dumps(result['metrics']))
+    elif args.command == 'walkforward':
+        if args.windows < 2:
+            parser.error('windows must be >= 2')
+        manifest, data = load(args.data)
+        result = walkforward_evaluate(data, manifest['symbols'], c, manifest, args.windows)
+        meta = dict(mode='walkforward', config_name=args.config, window_count=args.windows,
+                    universe=manifest,
+                    note='Fixed rules across independent windows; not optimized per window.')
+        full = walkforward_report(result, meta, args.output)
+        print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
     elif args.command == 'research-v2':
         manifest, data = load(args.data)
         result = evaluate(data, manifest['symbols'], c, args.output)

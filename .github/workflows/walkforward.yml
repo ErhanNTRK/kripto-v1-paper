@@ -1,0 +1,31 @@
+name: Kripto V1 Walk-forward Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  walkforward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 300 days of data
+        run: python -m crypto_v1 fetch --days 300 --data data-wf
+      - name: Walk-forward, trend + EMA50 exit (5 independent windows)
+        run: python -m crypto_v1 --config config_trend_ema50.json walkforward --data data-wf --output reports/walkforward-ema50 --windows 5
+      - name: Walk-forward, trend + EMA50 exit + wider trailing (5 independent windows)
+        run: python -m crypto_v1 --config config_trend_ema50_wide.json walkforward --data data-wf --output reports/walkforward-ema50-wide --windows 5
+      - name: Walk-forward, current strict config for baseline comparison (5 independent windows)
+        run: python -m crypto_v1 --config config.json walkforward --data data-wf --output reports/walkforward-strict --windows 5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kripto-v1-walkforward
+          path: reports
+          retention-days: 30
