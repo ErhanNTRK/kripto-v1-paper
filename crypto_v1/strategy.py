@@ -12,8 +12,9 @@ def buy_signal(f, btc, config):
             and f['c'] > f['resistance'])
 
 
-def sell_signal(f, btc):
-    return not btc_ok(btc) or f['c'] < f['ema20'] or f['rsi'] < 45
+def sell_signal(f, btc, config=None):
+    ema_key = 'ema' + str((config or {}).get('exit_ema', 20))
+    return not btc_ok(btc) or f['c'] < f[ema_key] or f['rsi'] < 45
 
 
 def initial_stop(f, config):

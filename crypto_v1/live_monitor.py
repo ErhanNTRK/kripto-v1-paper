@@ -13,7 +13,7 @@ def exit_decision(position, feature, btc, high, config):
     if risk <= 0: return "emergency_risk"
     target = entry + Decimal(str(config["minimum_reward_risk"])) * risk
     if current >= target: return "take_profit"
-    if sell_signal(feature, btc):
+    if sell_signal(feature, btc, config):
         return "profit_signal" if current > entry else "emergency_risk"
     if Decimal(str(high)) >= entry + risk:
         trailing = Decimal(str(high)) - Decimal(str(config["trailing_atr"])) * Decimal(str(feature["atr"]))
