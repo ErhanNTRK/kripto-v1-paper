@@ -88,3 +88,46 @@ Son %30 güçlü görünse de geliştirme dönemi ve iki kat maliyet testi negat
 Tam dönem profit factor da 1,2 eşiğini geçmemiştir. Bu, piyasa rejimine ve
 maliyet varsayımına duyarlı bir modeldir; gerçek para veya ana paper stratejisi
 olarak kabul edilmedi.
+
+## Çok pencereli (walk-forward) doğrulama — 15 Eylül 2026
+
+Tek bir geliştirme/holdout ayrımının şansa dayanabileceği netleşti (bkz. V1
+EMA50 varyantı: tek holdout'ta +%1,42 net getiri, ama o pencere şans çıktı).
+Bunun için `crypto_v1/walkforward.py` eklendi: 300-365 günlük veri, 5 bağımsız
+ve çakışmayan pencereye bölünüyor, her biri hem normal hem 2 kat maliyetle
+sıfırdan test ediliyor. GO kararı yalnızca **tüm pencerelerde** hem normal hem
+stres testinde net getiri > 0 ve profit factor >= 1,0 ise veriliyor.
+
+**V1 ailesi (sıkı, trend+EMA50, trend+EMA50+genis trailing) — NO_GO.**
+300 gün, 5 pencerenin **hepsinde**, normal maliyette bile net getiri negatif
+(-%3 ile -%19 arası), profit factor hep 1,0'ın altında (0,16-0,91). Daha önce
+görülen tekil holdout pozitifliği rastlantıymış; bu strateji ailesinde
+kanıtlanmış bir kenar (edge) yok.
+
+**V2 (saatlik Donchian 20/40/80, en likit 20 coin) — NO_GO ama çok daha
+yakın.** 365 gün, 5 pencere:
+
+| Pencere | İşlem | Net getiri | PF | Stres net getiri | Stres PF |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 50 | +%0,81 | 1,13 | -%0,50 | 0,93 |
+| 1 | 41 | -%2,34 | 0,58 | -%4,23 | 0,35 |
+| 2 | 70 | -%1,71 | 0,80 | -%4,29 | 0,53 |
+| 3 | 50 | +%2,64 | 1,49 | -%0,90 | 0,86 |
+| 4 | 94 | -%0,54 | 0,96 | -%4,41 | 0,67 |
+
+V1'in aksine, **normal maliyette 2/5 pencere gerçekten kârlı** (PF 1,13 ve
+1,49), kalan 3'ü de hafif negatif — V1'deki gibi tekdüze kötü değil. Ama **2x
+maliyet stresinde 5 pencerenin 5'i de negatife dönüyor**. Yorum: gerçek bir
+öngörü gücü (edge) var gibi görünüyor, ama bu edge işlem maliyetlerine göre
+ince — güvenli marj yok. Sonraki araştırma yönü: maliyeti düşürmek (daha az
+sıklıkta/daha büyük işlem, limit emir/maker ücreti ihtimali, en likit
+coin'lere daralt) ya da gerçek Binance maliyetinin 2x varsayımdan daha düşük
+olup olmadığını doğrulamak — bu ikisi, parametre ayarlamaya devam etmekten
+daha üretken bir yön.
+
+**V3 (6 saatlik, sadece BTC/ETH/SOL)** — 90 günde toplam 11 işlem (holdout'ta
+5) üretti, istatistiksel olarak hiçbir sonuç çıkarılamayacak kadar az. Daha
+uzun veri ve/veya daha fazla sembol olmadan bu aday değerlendirilemez.
+
+**Şu anki durum:** Hiçbir aday gerçek emir eşiğini geçmedi. En umut verici yön
+V2 — maliyet duyarlılığını azaltmaya odaklanmak mantıklı sıradaki adım.
