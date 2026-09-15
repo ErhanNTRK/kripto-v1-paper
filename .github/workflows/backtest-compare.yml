@@ -28,6 +28,10 @@ jobs:
         run: python -m crypto_v1 --config config_trend_stress.json backtest --data data --output reports/backtest-trend-stress
       - name: Backtest trend config with slower EMA50 exit
         run: python -m crypto_v1 --config config_trend_ema50.json backtest --data data --output reports/backtest-trend-ema50
+      - name: Backtest EMA50 trend config with 2x costs (stress)
+        run: python -m crypto_v1 --config config_trend_ema50_stress.json backtest --data data --output reports/backtest-trend-ema50-stress
+      - name: Backtest EMA50 trend config with wider trailing stop
+        run: python -m crypto_v1 --config config_trend_ema50_wide.json backtest --data data --output reports/backtest-trend-ema50-wide
       - uses: actions/upload-artifact@v4
         with:
           name: kripto-v1-backtest-compare
