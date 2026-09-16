@@ -1,5 +1,5 @@
 """Render Frankfurt health probe and authenticated Telegram command webhook."""
-import hmac, json, os, time
+import hmac, json, os, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .binance_account import verify_from_environment
@@ -64,6 +64,25 @@ class LiveApp:
             results.append(result)
         return {"status": "scanned", "results": results}
 
+def run_periodic_scans(app, interval_seconds=300, sleep=time.sleep, max_iterations=None):
+    """Exit-monitor loop independent of GitHub Actions' free-tier cron, whose
+    scheduled runs have been observed to lag by hours rather than minutes.
+    Runs only while this Render process is warm; a cold free-tier instance
+    still needs an external request (health check, webhook, cron) to wake it,
+    but does not depend on that request landing on any particular schedule
+    to keep scanning once awake. The exchange-native protective stop placed
+    at entry time (live_controller.approve_buy) does not depend on this loop
+    at all -- it is a real resting order on Binance regardless."""
+    iterations = 0
+    while max_iterations is None or iterations < max_iterations:
+        try:
+            app.scan()
+        except Exception as exc:
+            print(f"Periodic scan failed: {exc}", flush=True)
+        iterations += 1
+        sleep(interval_seconds)
+
+
 class Handler(BaseHTTPRequestHandler):
     def _json(self, status, value):
         body = json.dumps(value, default=str).encode(); self.send_response(status)
@@ -97,6 +116,7 @@ def main():
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ))
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
+    threading.Thread(target=run_periodic_scans, args=(APP,), daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
 
 if __name__ == "__main__": main()
