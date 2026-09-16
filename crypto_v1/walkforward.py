@@ -33,10 +33,13 @@ def windows_from_times(times, count, warm=200, min_trades=MIN_TRADES_PER_WINDOW)
 
 
 def evaluate(data, symbols, c, manifest, count=4, model=None, interval=INTERVAL,
-             warm=200, min_trades=MIN_TRADES_PER_WINDOW):
+             warm=200, min_trades=MIN_TRADES_PER_WINDOW, min_bars=400):
+    """min_bars is a bar-count floor, not a time floor -- callers using a coarser
+    timeframe (e.g. 4h/1d bars instead of native 15m) should lower it accordingly,
+    since 400 daily bars would demand well over a year of data."""
     times = [r['t'] for r in data['BTCUSDT'] if manifest['start'] <= r['t'] < manifest['end']]
-    if len(times) < 400:
-        raise ValueError('At least 400 BTC candles required')
+    if len(times) < min_bars:
+        raise ValueError(f'At least {min_bars} BTC candles required')
     starts = windows_from_times(times, count, warm, min_trades) + [manifest['end']]
     windows = []
     for i in range(count):

@@ -106,5 +106,6 @@ def evaluate_timeframe_walkforward(data, symbols, config, manifest, interval, co
     multi-window + 2x-cost-stress bar."""
     agg_data = {symbol: aggregate(rows, interval) for symbol, rows in data.items()}
     symbols = [s for s in symbols[:20] if len(agg_data.get(s, [])) >= 200]
-    return wf.evaluate(agg_data, symbols, config, manifest, count,
-                        model=DonchianModel, interval=interval, warm=warm, min_trades=min_trades)
+    min_bars = warm + count * min_trades * 4
+    return wf.evaluate(agg_data, symbols, config, manifest, count, model=DonchianModel,
+                        interval=interval, warm=warm, min_trades=min_trades, min_bars=min_bars)
