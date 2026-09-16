@@ -1,0 +1,50 @@
+name: Hisse Temettu Taramasi
+
+on:
+  schedule:
+    - cron: "30 6 * * *"  # ~09:30 Turkey time (UTC+3); GitHub free-tier cron can lag
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hisse-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore alert-delivery state
+        shell: bash
+        run: |
+          mkdir -p hisse_runtime
+          if git fetch origin hisse-state:refs/remotes/origin/hisse-state; then
+            git archive origin/hisse-state | tar -x -C hisse_runtime
+          fi
+      - name: Scan and notify
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          HISSE_STORAGE: hisse_runtime
+        run: python -m hisse.runner
+      - name: Save alert-delivery state
+        shell: bash
+        run: |
+          state_dir="$(mktemp -d)"
+          cp -a hisse_runtime/. "$state_dir/"
+          cd "$state_dir"
+          git init -b hisse-state
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Update hisse alert state"
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" hisse-state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
