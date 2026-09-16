@@ -1,0 +1,78 @@
+import unittest
+from unittest.mock import patch
+from hisse import scan
+
+DAY = 86400
+GOOD_SNAP = dict(symbol='KO', dividend_yield=0.05, dividend_rate=0.5, payout_ratio=0.5,
+                  five_year_avg_yield=0.03, ex_dividend_date=None, dividend_payment_date=None)
+RISING_CLOSES = [100.0] * 180 + list(range(100, 120))
+CHART_RESULT = dict(indicators=dict(quote=[dict(close=RISING_CLOSES)]))
+
+
+class ScanSymbolTests(unittest.TestCase):
+    def test_flags_high_yield_when_quality_trend_and_yield_all_pass(self):
+        with patch('hisse.data.dividend_snapshot', return_value=GOOD_SNAP), \
+             patch('hisse.data.dividend_history', return_value=[{}, {}, {}]), \
+             patch('hisse.data.chart', return_value=CHART_RESULT):
+            events = scan.scan_symbol('KO', now_s=0)
+        kinds = [e['kind'] for e in events]
+        self.assertIn('high_yield', kinds)
+
+    def test_no_high_yield_event_when_trend_is_down(self):
+        falling = dict(indicators=dict(quote=[dict(close=[120.0] * 200)]))
+        with patch('hisse.data.dividend_snapshot', return_value=GOOD_SNAP), \
+             patch('hisse.data.dividend_history', return_value=[{}, {}, {}]), \
+             patch('hisse.data.chart', return_value=falling):
+            events = scan.scan_symbol('KO', now_s=0)
+        self.assertEqual([e for e in events if e['kind'] == 'high_yield'], [])
+
+    def test_last_buy_date_event_within_window(self):
+        snap = dict(GOOD_SNAP, ex_dividend_date=3 * DAY)
+        with patch('hisse.data.dividend_snapshot', return_value=snap), \
+             patch('hisse.data.dividend_history', return_value=[{}, {}]), \
+             patch('hisse.data.chart', return_value=CHART_RESULT):
+            events = scan.scan_symbol('KO', now_s=0)
+        last_buy = [e for e in events if e['kind'] == 'last_buy_date']
+        self.assertEqual(len(last_buy), 1)
+        self.assertEqual(last_buy[0]['dedupe_scope'], 'day')
+
+    def test_post_ex_dividend_event_shortly_after(self):
+        snap = dict(GOOD_SNAP, ex_dividend_date=-1 * DAY)
+        with patch('hisse.data.dividend_snapshot', return_value=snap), \
+             patch('hisse.data.dividend_history', return_value=[{}, {}]), \
+             patch('hisse.data.chart', return_value=CHART_RESULT):
+            events = scan.scan_symbol('KO', now_s=0)
+        post = [e for e in events if e['kind'] == 'post_ex_dividend']
+        self.assertEqual(len(post), 1)
+        self.assertEqual(post[0]['dedupe_scope'], 'once')
+        self.assertEqual(post[0]['dedupe_id'], -1 * DAY)
+
+    def test_no_date_event_far_from_ex_date(self):
+        snap = dict(GOOD_SNAP, ex_dividend_date=60 * DAY)
+        with patch('hisse.data.dividend_snapshot', return_value=snap), \
+             patch('hisse.data.dividend_history', return_value=[{}, {}]), \
+             patch('hisse.data.chart', return_value=CHART_RESULT):
+            events = scan.scan_symbol('KO', now_s=0)
+        self.assertEqual([e for e in events if e['kind'] in ('last_buy_date', 'post_ex_dividend')], [])
+
+
+class ScanAllTests(unittest.TestCase):
+    def test_one_bad_symbol_does_not_stop_the_others(self):
+        def fake_scan_symbol(symbol, now_s):
+            if symbol == 'BAD':
+                raise ValueError('no data')
+            return [dict(kind='high_yield', dedupe_scope='week', message='ok')]
+        with patch('hisse.scan.scan_symbol', side_effect=fake_scan_symbol):
+            results, errors = scan.scan_all(['GOOD', 'BAD'], now_s=0)
+        self.assertIn('GOOD', results)
+        self.assertEqual(errors, {'BAD': 'no data'})
+
+    def test_symbols_with_no_events_are_omitted(self):
+        with patch('hisse.scan.scan_symbol', return_value=[]):
+            results, errors = scan.scan_all(['X'], now_s=0)
+        self.assertEqual(results, {})
+        self.assertEqual(errors, {})
+
+
+if __name__ == '__main__':
+    unittest.main()
