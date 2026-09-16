@@ -87,7 +87,17 @@ def main():
     data_dir = prepare_data(config, runtime, now)
     state_path = runtime / os.environ.get("PAPER_STATE_FILE", "state.json")
     output = runtime / "report"
-    tick(config, data_dir, state_path, output, model=DonchianModel, interval=FOUR_HOUR)
+    try:
+        tick(config, data_dir, state_path, output, model=DonchianModel, interval=FOUR_HOUR)
+    except ValueError as error:
+        # Expected exactly once: an old state from a previous config/model (e.g. the
+        # V1-to-V2 switch) is intentionally incompatible and must not be silently
+        # reused. Starting a fresh state here is the documented, sanctioned response,
+        # not a workaround for the check.
+        if "new paper state" not in str(error):
+            raise
+        state_path.unlink(missing_ok=True)
+        tick(config, data_dir, state_path, output, model=DonchianModel, interval=FOUR_HOUR)
     database = runtime / "telegram.sqlite"
     deliver_once(
         "connection:" + chat_id,
