@@ -8,21 +8,30 @@ from .strategy import btc_ok, initial_stop
 from . import walkforward as wf
 
 HOUR = 3_600_000
+FOUR_HOUR = 14_400_000
+DAY = 86_400_000
 
 
-def hourly(rows):
+def aggregate(rows, interval):
+    """Group 15m rows into `interval`-sized bars, keeping only fully-complete,
+    contiguous groups (no partial trailing bar, no gaps)."""
+    n = interval // 900_000
     groups = {}
     for row in rows:
-        groups.setdefault(row["t"] // HOUR * HOUR, []).append(row)
+        groups.setdefault(row["t"] // interval * interval, []).append(row)
     output = []
     for t in sorted(groups):
         bars = groups[t]
-        if len(bars) != 4 or any(bars[i]["t"] + 900_000 != bars[i + 1]["t"] for i in range(3)):
+        if len(bars) != n or any(bars[i]["t"] + 900_000 != bars[i + 1]["t"] for i in range(n - 1)):
             continue
         output.append({"t": t, "o": bars[0]["o"], "h": max(x["h"] for x in bars),
                        "l": min(x["l"] for x in bars), "c": bars[-1]["c"],
                        "v": sum(x["v"] for x in bars)})
     return output
+
+
+def hourly(rows):
+    return aggregate(rows, HOUR)
 
 
 class DonchianModel:
@@ -87,3 +96,15 @@ def evaluate_walkforward(data, symbols, config, manifest, count=5, min_trades=15
     result = wf.evaluate(hourly_data, symbols, config, manifest, count,
                           model=DonchianModel, interval=HOUR, warm=200, min_trades=min_trades)
     return result
+
+
+def evaluate_timeframe_walkforward(data, symbols, config, manifest, interval, count=5,
+                                    min_trades=8, warm=100):
+    """Same Donchian rules, same model, run on a coarser timeframe than the
+    pre-registered hourly version -- to check whether lower trade frequency
+    (and therefore a smaller total cost drag) is enough to clear the same
+    multi-window + 2x-cost-stress bar."""
+    agg_data = {symbol: aggregate(rows, interval) for symbol, rows in data.items()}
+    symbols = [s for s in symbols[:20] if len(agg_data.get(s, [])) >= 200]
+    return wf.evaluate(agg_data, symbols, config, manifest, count,
+                        model=DonchianModel, interval=interval, warm=warm, min_trades=min_trades)

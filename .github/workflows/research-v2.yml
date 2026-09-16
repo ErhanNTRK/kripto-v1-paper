@@ -21,10 +21,16 @@ jobs:
         run: python -m crypto_v1 --config config_v2.json research-v2 --data data-v2 --output reports/research-v2
       - name: Walk-forward validate V2 (5 independent windows + stress)
         run: python -m crypto_v1 --config config_v2.json walkforward-v2 --data data-v2 --output reports/walkforward-v2 --windows 5
+      - name: Walk-forward validate V2 on 4-hour bars (lower frequency, less cost drag)
+        run: python -m crypto_v1 --config config_v2.json walkforward-v2-timeframe --data data-v2 --output reports/walkforward-v2-4h --timeframe 4h --windows 5 --min-trades 8
+      - name: Walk-forward validate V2 on daily bars (lowest frequency)
+        run: python -m crypto_v1 --config config_v2.json walkforward-v2-timeframe --data data-v2 --output reports/walkforward-v2-1d --timeframe 1d --windows 3 --min-trades 5
       - uses: actions/upload-artifact@v4
         with:
           name: kripto-v2-one-year-report
           path: |
             reports/research-v2/report.json
             reports/walkforward-v2
+            reports/walkforward-v2-4h
+            reports/walkforward-v2-1d
           retention-days: 30
