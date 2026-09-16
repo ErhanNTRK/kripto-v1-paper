@@ -1,5 +1,5 @@
 {
-  "live_trading_enabled": false,
+  "live_trading_enabled": true,
   "pilot_capital_usdt": 34,
   "risk_per_trade_usdt": 0.80,
   "daily_loss_limit_usdt": 4,
