@@ -92,6 +92,18 @@ class MessageTests(unittest.TestCase):
         msg = screen.high_yield_message('KO', snap(), price=None)
         self.assertNotIn('Guncel fiyat', msg)
 
+    def test_high_yield_message_includes_attributed_ak_yatirim_note_when_given(self):
+        ak = dict(target_price=181.5, weight_pct=9.0, potential_pct=50.37)
+        msg = screen.high_yield_message('GARAN.IS', snap(), price=None, ak=ak)
+        self.assertIn('Ak Yatirim', msg)
+        self.assertIn('181.50 TRY', msg)
+        self.assertIn('+50.4%', msg)
+        self.assertIn('bize ait bir tahmin degildir', msg)
+
+    def test_high_yield_message_omits_ak_yatirim_block_when_not_in_portfolio(self):
+        msg = screen.high_yield_message('KO', snap(), price=None, ak=None)
+        self.assertNotIn('Ak Yatirim', msg)
+
     def test_last_buy_date_message_formats_date_and_warns_about_drop(self):
         msg = screen.last_buy_date_message('KO', snap(ex_dividend_date=1775520000), now_s=1774000000)
         self.assertIn('07.04.2026', msg)

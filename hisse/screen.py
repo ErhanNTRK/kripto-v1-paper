@@ -93,36 +93,53 @@ def _price_lines(price):
     return lines
 
 
-def high_yield_message(symbol, snapshot, price=None):
+def _ak_portfolio_lines(ak):
+    """ak: hisse.akyatirim.fetch_model_portfolio()'s per-symbol dict, or None.
+    Always explicitly attributed -- this is Ak Yatirim's own published
+    target, not a figure we generated."""
+    if not ak:
+        return []
+    lines = ['', 'Ayrica Ak Yatirim Arastirma model portfoyunde de yer aliyor (bizim taramamizdan',
+              'bagimsiz, ayri bir kaynak -- hedef fiyat bize ait bir tahmin degildir):']
+    if ak.get('target_price') is not None:
+        lines.append(f"  Ak Yatirim hedef fiyati: {ak['target_price']:.2f} TRY")
+    if ak.get('potential_pct') is not None:
+        lines.append(f"  Ak Yatirim'a gore potansiyel getiri: {ak['potential_pct']:+.1f}%")
+    if ak.get('weight_pct') is not None:
+        lines.append(f"  Model portfoydeki agirligi: %{ak['weight_pct']:.0f}")
+    return lines
+
+
+def high_yield_message(symbol, snapshot, price=None, ak=None):
     return '\n'.join([
         'YUKSEK TEMETTU ADAYI', '', f'Parite: {symbol} [{market_label(symbol)}]',
         f"Guncel verim: {snapshot['dividend_yield']:.2%}",
         f"5 yillik ortalama verim: {snapshot['five_year_avg_yield']:.2%}",
         f"Odeme orani: {snapshot['payout_ratio']:.0%}" if snapshot.get('payout_ratio') is not None else 'Odeme orani: bilinmiyor',
-        *_price_lines(price),
-        '', 'Bu bir alim tavsiyesi degildir, sadece bilgilendirmedir. Fiyat hedefi/beklenen',
+        *_price_lines(price), *_ak_portfolio_lines(ak),
+        '', 'Bu bir alim tavsiyesi degildir, sadece bilgilendirmedir. Kendi fiyat hedefi/beklenen',
         'getiri vermiyoruz -- boyle bir tahmin guvenilir sekilde yapilamaz.',
     ])
 
 
-def last_buy_date_message(symbol, snapshot, now_s, price=None):
+def last_buy_date_message(symbol, snapshot, now_s, price=None, ak=None):
     ex_date = snapshot['ex_dividend_date']
     return '\n'.join([
         'TEMETTU: SON ALIM TARIHI YAKLASIYOR', '', f'Parite: {symbol} [{market_label(symbol)}]',
         f'Hak kullanim (ex-dividend) tarihi: {_fmt_date(ex_date)}',
         'Bu temettuyu almak icin en gec bir onceki is gunu kapanisina kadar elinde bulundurman gerekir.',
-        *_price_lines(price),
+        *_price_lines(price), *_ak_portfolio_lines(ak),
         '', 'Not: bu tarihten sonra fiyatta temettu tutari kadar dusus GORULMESI NORMALDIR, kayip degildir.',
     ])
 
 
-def post_ex_dividend_message(symbol, snapshot, price=None):
+def post_ex_dividend_message(symbol, snapshot, price=None, ak=None):
     rate = snapshot.get('dividend_rate')
     rate_text = f'~{rate:.2f}' if rate is not None else 'temettu tutari kadar'
     return '\n'.join([
         'TEMETTU SONRASI BILGILENDIRME', '', f'Parite: {symbol} [{market_label(symbol)}]',
         f'Hak kullanim tarihi gecti. Fiyatta {rate_text} bir dusus normal, mekanik bir ayarlamadir; kayip degildir.',
-        *_price_lines(price),
+        *_price_lines(price), *_ak_portfolio_lines(ak),
         '', "Onemli: 'temettu avciligi' (hemen once alip hemen sonra satmak) genelde ekstra",
         'kazanc saglamaz -- fiyat dususu temettuyu asagi yukari dengeler, ustune vergi ve',
         'komisyon de eklenir. Satis karari tamamen sana ait, bu bir tavsiye degildir.',

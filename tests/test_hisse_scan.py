@@ -74,20 +74,38 @@ class PriceInfoTests(unittest.TestCase):
 
 class ScanAllTests(unittest.TestCase):
     def test_one_bad_symbol_does_not_stop_the_others(self):
-        def fake_scan_symbol(symbol, now_s):
+        def fake_scan_symbol(symbol, now_s, ak_portfolio=None):
             if symbol == 'BAD':
                 raise ValueError('no data')
             return [dict(kind='high_yield', dedupe_scope='week', message='ok')]
-        with patch('hisse.scan.scan_symbol', side_effect=fake_scan_symbol):
+        with patch('hisse.scan.akyatirim.fetch_model_portfolio', return_value={}), \
+             patch('hisse.scan.scan_symbol', side_effect=fake_scan_symbol):
             results, errors = scan.scan_all(['GOOD', 'BAD'], now_s=0)
         self.assertIn('GOOD', results)
         self.assertEqual(errors, {'BAD': 'no data'})
 
     def test_symbols_with_no_events_are_omitted(self):
-        with patch('hisse.scan.scan_symbol', return_value=[]):
+        with patch('hisse.scan.akyatirim.fetch_model_portfolio', return_value={}), \
+             patch('hisse.scan.scan_symbol', return_value=[]):
             results, errors = scan.scan_all(['X'], now_s=0)
         self.assertEqual(results, {})
         self.assertEqual(errors, {})
+
+    def test_ak_portfolio_fetch_failure_does_not_block_the_scan(self):
+        with patch('hisse.scan.akyatirim.fetch_model_portfolio', side_effect=RuntimeError('down')), \
+             patch('hisse.scan.scan_symbol', return_value=[]) as mock_scan:
+            results, errors = scan.scan_all(['X'], now_s=0)
+        self.assertEqual(results, {})
+        self.assertEqual(errors, {})
+        mock_scan.assert_called_once_with('X', 0, {})
+
+    def test_ak_portfolio_is_fetched_once_and_passed_to_every_symbol(self):
+        ak = {'GARAN.IS': {'target_price': 181.5}}
+        with patch('hisse.scan.akyatirim.fetch_model_portfolio', return_value=ak), \
+             patch('hisse.scan.scan_symbol', return_value=[]) as mock_scan:
+            scan.scan_all(['GARAN.IS', 'KO'], now_s=0)
+        mock_scan.assert_any_call('GARAN.IS', 0, ak)
+        mock_scan.assert_any_call('KO', 0, ak)
 
 
 if __name__ == '__main__':

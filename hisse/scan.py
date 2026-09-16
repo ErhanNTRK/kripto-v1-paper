@@ -9,7 +9,7 @@ dedupe_scope so hisse.notify can avoid re-sending the same thing every run:
   date -- sent exactly once for that date, not once per day it stays in the
   post-ex-dividend window.
 """
-from . import data, screen
+from . import akyatirim, data, screen
 
 LAST_BUY_WINDOW_DAYS = 5    # start reminding this many days before ex-date
 POST_EX_WINDOW_DAYS = 3     # note the price-drop mechanic for this many days after
@@ -33,41 +33,48 @@ def _price_info(chart_result, closes):
     )
 
 
-def scan_symbol(symbol, now_s):
+def scan_symbol(symbol, now_s, ak_portfolio=None):
     """One symbol's full check. Raises on a data/network problem -- the
     caller (scan_all) is responsible for catching that per-symbol so one bad
-    ticker does not stop the whole run."""
+    ticker does not stop the whole run. ak_portfolio (optional): {symbol: {...}}
+    from hisse.akyatirim -- only used to enrich an event this screen already
+    produced on its own; never adds a symbol or an event by itself."""
     snap = data.dividend_snapshot(symbol)
     history = data.dividend_history(symbol)
     chart_result = data.chart(symbol, range='1y', interval='1d')
     closes = _closes_from_chart(chart_result)
     price = _price_info(chart_result, closes)
+    ak = (ak_portfolio or {}).get(symbol)
 
     events = []
     quality_ok, _ = screen.dividend_quality(snap, history)
     if quality_ok and screen.yield_is_notably_high(snap) and screen.trend_ok(closes):
         events.append(dict(kind='high_yield', dedupe_scope='week',
-                            message=screen.high_yield_message(symbol, snap, price)))
+                            message=screen.high_yield_message(symbol, snap, price, ak)))
 
     ex_date = snap.get('ex_dividend_date')
     if ex_date is not None:
         days = screen.days_until(now_s, ex_date)
         if 0 <= days <= LAST_BUY_WINDOW_DAYS:
             events.append(dict(kind='last_buy_date', dedupe_scope='day',
-                                message=screen.last_buy_date_message(symbol, snap, now_s, price)))
+                                message=screen.last_buy_date_message(symbol, snap, now_s, price, ak)))
         elif -POST_EX_WINDOW_DAYS <= days < 0:
             events.append(dict(kind='post_ex_dividend', dedupe_scope='once', dedupe_id=ex_date,
-                                message=screen.post_ex_dividend_message(symbol, snap, price)))
+                                message=screen.post_ex_dividend_message(symbol, snap, price, ak)))
     return events
 
 
 def scan_all(symbols, now_s):
     """{symbol: [event, ...]} for symbols with something to report, plus a
     separate {symbol: error_message} for ones that failed to fetch."""
+    try:
+        ak_portfolio = akyatirim.fetch_model_portfolio()
+    except Exception:
+        ak_portfolio = {}  # cross-reference only; never block the whole scan on it
     results, errors = {}, {}
     for symbol in symbols:
         try:
-            events = scan_symbol(symbol, now_s)
+            events = scan_symbol(symbol, now_s, ak_portfolio)
         except Exception as exc:
             errors[symbol] = str(exc)
             continue
