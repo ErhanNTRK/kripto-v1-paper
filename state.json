@@ -1,0 +1,1876 @@
+{
+  "fingerprint": "b65a63d7da7d5920216a9b1f0907cabe2bd44021532d0a3a2c32016135cae46a",
+  "state": {
+    "cash": 9901.31951791417,
+    "positions": {},
+    "pending_buys": {},
+    "pending_sells": {},
+    "day": "2026-09-14",
+    "day_equity": 10000.0,
+    "halted": true,
+    "losses": 3,
+    "last_t": 1789408800000,
+    "marks": {
+      "AAVEUSDT": 127.54,
+      "ADAUSDT": 0.2112,
+      "APTUSDT": 0.597,
+      "ARBUSDT": 0.1403,
+      "ASTERUSDT": 0.701,
+      "AVAXUSDT": 7.575,
+      "BCHUSDT": 226.0,
+      "BNBUSDT": 726.08,
+      "BTCUSDT": 78848.19,
+      "CRCLBUSDT": 95.71,
+      "DASHUSDT": 55.27,
+      "DOGEUSDT": 0.0847,
+      "DOTUSDT": 1.014,
+      "ENAUSDT": 0.1428,
+      "ETHFIUSDT": 0.6529,
+      "ETHUSDT": 2530.97,
+      "FETUSDT": 0.171,
+      "HOLOUSDT": 0.0593,
+      "INJUSDT": 6.392,
+      "JUPUSDT": 0.2419,
+      "LINKUSDT": 11.596,
+      "LTCUSDT": 54.02,
+      "MARSCOINUSDT": 0.0923,
+      "METUSDT": 0.22,
+      "NEARUSDT": 2.583,
+      "NVDABUSDT": 212.66,
+      "ONDOUSDT": 0.3568,
+      "PEPEUSDT": 3.51e-06,
+      "POLUSDT": 0.09723,
+      "PUMPUSDT": 0.00373,
+      "RAYUSDT": 1.409,
+      "SAHARAUSDT": 0.00891,
+      "SNDKBUSDT": 1572.41,
+      "SOLUSDT": 103.02,
+      "SPCXBUSDT": 151.65,
+      "SUIUSDT": 0.7356,
+      "TAOUSDT": 236.5,
+      "THEUSDT": 0.0664,
+      "TRUMPUSDT": 2.036,
+      "TRXUSDT": 0.3404,
+      "UNIUSDT": 6.463,
+      "UUSDT": 1.0,
+      "VTHOUSDT": 0.000669,
+      "WLDUSDT": 0.3911,
+      "WLFIUSDT": 0.0576,
+      "XLMUSDT": 0.1942,
+      "XPLUSDT": 0.08357,
+      "XRPUSDT": 1.4345,
+      "ZECUSDT": 1155.59,
+      "\u725b\u6765USDT": 0.12542
+    },
+    "trades": [
+      {
+        "symbol": "ASTERUSDT",
+        "entry_time": 1789364700000,
+        "exit_time": 1789372800000,
+        "entry": 0.7013504999999999,
+        "exit": 0.6966515,
+        "qty": 5309.159775110953,
+        "pnl": -32.36995776717049,
+        "risk": 50.0,
+        "r_multiple": -0.6473991553434097,
+        "reason": "trend_exit"
+      },
+      {
+        "symbol": "BTCUSDT",
+        "entry_time": 1789380000000,
+        "exit_time": 1789384500000,
+        "entry": 78180.640785,
+        "exit": 77722.91910000001,
+        "qty": 0.062210191776376676,
+        "pnl": -38.17374416312032,
+        "risk": 49.83815021116415,
+        "r_multiple": -0.7659542740125433,
+        "reason": "trend_exit"
+      },
+      {
+        "symbol": "AAVEUSDT",
+        "entry_time": 1789380000000,
+        "exit_time": 1789384500000,
+        "entry": 127.22357999999998,
+        "exit": 126.446745,
+        "qty": 27.303866824307793,
+        "pnl": -28.136780155538872,
+        "risk": 49.801679042743466,
+        "r_multiple": -0.5649765368631411,
+        "reason": "trend_exit"
+      }
+    ],
+    "curve": [
+      {
+        "time": 1789156800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789157700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789158600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789159500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789160400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789161300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789162200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789163100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789164000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789164900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789165800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789166700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789167600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789168500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789169400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789170300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789171200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789172100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789173000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789173900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789174800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789175700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789176600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789177500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789178400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789179300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789180200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789181100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789182000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789182900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789183800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789184700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789185600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789186500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789187400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789188300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789189200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789190100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789191000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789191900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789192800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789193700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789194600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789195500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789196400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789197300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789198200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789199100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789200000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789200900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789201800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789202700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789203600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789204500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789205400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789206300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789207200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789208100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789209000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789209900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789210800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789211700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789212600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789213500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789214400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789215300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789216200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789217100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789218000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789218900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789219800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789220700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789221600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789222500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789223400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789224300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789225200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789226100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789227000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789227900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789228800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789229700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789230600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789231500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789232400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789233300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789234200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789235100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789236000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789236900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789237800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789238700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789239600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789240500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789241400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789242300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789243200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789244100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789245000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789245900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789246800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789247700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789248600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789249500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789250400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789251300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789252200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789253100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789254000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789254900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789255800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789256700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789257600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789258500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789259400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789260300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789261200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789262100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789263000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789263900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789264800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789265700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789266600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789267500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789268400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789269300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789270200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789271100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789272000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789272900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789273800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789274700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789275600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789276500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789277400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789278300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789279200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789280100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789281000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789281900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789282800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789283700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789284600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789285500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789286400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789287300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789288200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789289100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789290000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789290900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789291800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789292700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789293600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789294500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789295400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789296300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789297200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789298100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789299000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789299900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789300800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789301700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789302600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789303500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789304400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789305300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789306200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789307100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789308000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789308900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789309800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789310700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789311600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789312500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789313400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789314300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789315200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789316100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789317000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789317900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789318800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789319700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789320600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789321500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789322400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789323300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789324200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789325100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789326000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789326900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789327800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789328700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789329600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789330500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789331400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789332300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789333200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789334100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789335000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789335900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789336800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789337700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789338600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789339500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789340400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789341300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789342200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789343100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789344000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789344900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789345800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789346700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789347600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789348500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789349400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789350300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789351200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789352100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789353000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789353900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789354800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789355700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789356600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789357500000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789358400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789359300000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789360200000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789361100000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789362000000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789362900000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789363800000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789364700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789365600000,
+        "equity": 9978.488078310638,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789366500000,
+        "equity": 9983.79723808575,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789367400000,
+        "equity": 9978.488078310638,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789368300000,
+        "equity": 9983.79723808575,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789369200000,
+        "equity": 9973.178918535526,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789370100000,
+        "equity": 9973.178918535526,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789371000000,
+        "equity": 9978.488078310638,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789371900000,
+        "equity": 9978.488078310638,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789372800000,
+        "equity": 9973.178918535526,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789373700000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789374600000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789375500000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789376400000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789377300000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789378200000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789379100000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789380000000,
+        "equity": 9967.63004223283,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789380900000,
+        "equity": 9945.24487700461,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789381800000,
+        "equity": 9936.333734182866,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789382700000,
+        "equity": 9950.576279974965,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789383600000,
+        "equity": 9937.23214023016,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789384500000,
+        "equity": 9913.753055044057,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789385400000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789386300000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789387200000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789388100000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789389000000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789389900000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789390800000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789391700000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789392600000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789393500000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789394400000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789395300000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789396200000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789397100000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789398000000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789398900000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789399800000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789400700000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789401600000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789402500000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789403400000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789404300000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789405200000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789406100000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789407000000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789407900000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789408800000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      },
+      {
+        "time": 1789409700000,
+        "equity": 9901.31951791417,
+        "positions": 0,
+        "halted": true
+      }
+    ],
+    "events": [
+      {
+        "type": "AL_ADAYI",
+        "time": 1789364700000,
+        "symbol": "ASTERUSDT",
+        "close": 0.701,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789364700000,
+        "symbol": "ASTERUSDT",
+        "price": 0.7013504999999999,
+        "stop": 0.6936743290973053,
+        "target": 0.7219698163579805,
+        "risk": 50.0,
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789372800000,
+        "symbol": "ASTERUSDT",
+        "price": 0.6966515,
+        "reason": "trend_exit",
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789380000000,
+        "symbol": "BTCUSDT",
+        "close": 78141.57,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789380000000,
+        "symbol": "AAVEUSDT",
+        "close": 127.16,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789380000000,
+        "symbol": "BTCUSDT",
+        "price": 78180.640785,
+        "stop": 77574.01850056803,
+        "target": 79981.00327210866,
+        "risk": 49.83815021116415,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789380000000,
+        "symbol": "AAVEUSDT",
+        "price": 127.22357999999998,
+        "stop": 125.71533474875964,
+        "target": 131.19548916739868,
+        "risk": 49.801679042743466,
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789384500000,
+        "symbol": "BTCUSDT",
+        "price": 77722.91910000001,
+        "reason": "trend_exit",
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789384500000,
+        "symbol": "AAVEUSDT",
+        "price": 126.446745,
+        "reason": "trend_exit",
+        "simulated": true
+      }
+    ],
+    "started_at": 1789156800000
+  }
+}

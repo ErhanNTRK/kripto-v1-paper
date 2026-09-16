@@ -1,0 +1,959 @@
+{
+  "fingerprint": "99461651a7a1ca5a767749637c8557c04b3a34df9d5fa6dcc993f1b86a744042",
+  "state": {
+    "cash": 9871.715670635554,
+    "positions": {},
+    "pending_buys": {},
+    "pending_sells": {},
+    "day": "2026-09-16",
+    "day_equity": 9871.715670635554,
+    "halted": false,
+    "losses": 0,
+    "last_t": 1789518600000,
+    "marks": {
+      "AAVEUSDT": 122.72,
+      "ADAUSDT": 0.1947,
+      "APTUSDT": 0.546,
+      "ARBUSDT": 0.1501,
+      "ASTERUSDT": 0.683,
+      "AVAXUSDT": 7.26,
+      "BCHUSDT": 217.6,
+      "BNBUSDT": 713.95,
+      "BTCUSDT": 75802.27,
+      "CRCLBUSDT": 85.12,
+      "DASHUSDT": 50.7,
+      "DOGEUSDT": 0.08016,
+      "DOTUSDT": 0.941,
+      "ENAUSDT": 0.1388,
+      "ETHFIUSDT": 0.5954,
+      "ETHUSDT": 2403.73,
+      "FETUSDT": 0.1516,
+      "HOLOUSDT": 0.0572,
+      "INJUSDT": 5.455,
+      "JUPUSDT": 0.216,
+      "LINKUSDT": 10.917,
+      "LTCUSDT": 51.14,
+      "MARSCOINUSDT": 0.0875,
+      "METUSDT": 0.1989,
+      "NEARUSDT": 2.344,
+      "NVDABUSDT": 212.53,
+      "ONDOUSDT": 0.3285,
+      "PEPEUSDT": 3.39e-06,
+      "POLUSDT": 0.09299,
+      "PUMPUSDT": 0.003521,
+      "RAYUSDT": 1.2353,
+      "SAHARAUSDT": 0.00817,
+      "SNDKBUSDT": 1536.89,
+      "SOLUSDT": 97.2,
+      "SPCXBUSDT": 143.63,
+      "SUIUSDT": 0.6877,
+      "TAOUSDT": 217.3,
+      "THEUSDT": 0.0666,
+      "TRUMPUSDT": 1.881,
+      "TRXUSDT": 0.3333,
+      "UNIUSDT": 6.389,
+      "UUSDT": 1.0003,
+      "VTHOUSDT": 0.000732,
+      "WLDUSDT": 0.3628,
+      "WLFIUSDT": 0.0571,
+      "XLMUSDT": 0.1766,
+      "XPLUSDT": 0.08091,
+      "XRPUSDT": 1.2882,
+      "ZECUSDT": 1114.43,
+      "\u725b\u6765USDT": 0.11879
+    },
+    "trades": [
+      {
+        "symbol": "FETUSDT",
+        "entry_time": 1789410600000,
+        "exit_time": 1789414200000,
+        "entry": 0.17258624999999997,
+        "exit": 0.1695152,
+        "qty": 8883.971230817568,
+        "pnl": -30.322339288222793,
+        "risk": 50.0,
+        "r_multiple": -0.6064467857644559,
+        "reason": "trend_exit"
+      },
+      {
+        "symbol": "WLFIUSDT",
+        "entry_time": 1789410600000,
+        "exit_time": 1789420500000,
+        "entry": 0.0582291,
+        "exit": 0.0577711,
+        "qty": 38356.94893625238,
+        "pnl": -22.016896360798455,
+        "risk": 49.98850253100753,
+        "r_multiple": -0.44043920593823593,
+        "reason": "trend_exit"
+      },
+      {
+        "symbol": "TAOUSDT",
+        "entry_time": 1789416900000,
+        "exit_time": 1789420500000,
+        "entry": 239.91989999999998,
+        "exit": 235.38225,
+        "qty": 8.50130597558568,
+        "pnl": -42.61664006811975,
+        "risk": 49.85081838888026,
+        "r_multiple": -0.8548834591976494,
+        "reason": "trend_exit"
+      },
+      {
+        "symbol": "ONDOUSDT",
+        "entry_time": 1789416900000,
+        "exit_time": 1789420500000,
+        "entry": 0.36248115,
+        "exit": 0.35812085000000005,
+        "qty": 6559.5545136090095,
+        "pnl": -33.328453647304286,
+        "risk": 49.83552369355024,
+        "r_multiple": -0.6687690060658013,
+        "reason": "trend_exit"
+      }
+    ],
+    "curve": [
+      {
+        "time": 1789409700000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789410600000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789411500000,
+        "equity": 9990.797239879832,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789412400000,
+        "equity": 9983.690062895177,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789413300000,
+        "equity": 9968.023099000191,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789414200000,
+        "equity": 9969.47570892587,
+        "positions": 2,
+        "halted": false
+      },
+      {
+        "time": 1789415100000,
+        "equity": 9954.820898201553,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789416000000,
+        "equity": 9954.820898201553,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789416900000,
+        "equity": 9970.163677776054,
+        "positions": 1,
+        "halted": false
+      },
+      {
+        "time": 1789417800000,
+        "equity": 9985.185783350904,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789418700000,
+        "equity": 9957.546924635306,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789419600000,
+        "equity": 9924.172034201883,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789420500000,
+        "equity": 9881.37227718255,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789421400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789422300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789423200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789424100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789425000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789425900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789426800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789427700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789428600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789429500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789430400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789431300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789432200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789433100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789434000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789434900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789435800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789436700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789437600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789438500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789439400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789440300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789441200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789442100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789443000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789443900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789444800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789445700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789446600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789447500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789448400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789449300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789450200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789451100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789452000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789452900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789453800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789454700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789455600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789456500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789457400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789458300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789459200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789460100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789461000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789461900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789462800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789463700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789464600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789465500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789466400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789467300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789468200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789469100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789470000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789470900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789471800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789472700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789473600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789474500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789475400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789476300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789477200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789478100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789479000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789479900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789480800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789481700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789482600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789483500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789484400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789485300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789486200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789487100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789488000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789488900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789489800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789490700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789491600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789492500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789493400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789494300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789495200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789496100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789497000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789497900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789498800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789499700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789500600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789501500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789502400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789503300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789504200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789505100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789506000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789506900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789507800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789508700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789509600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789510500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789511400000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789512300000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789513200000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789514100000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789515000000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789515900000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789516800000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789517700000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789518600000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789519500000,
+        "equity": 9871.715670635554,
+        "positions": 0,
+        "halted": false
+      }
+    ],
+    "events": [
+      {
+        "type": "AL_ADAYI",
+        "time": 1789410600000,
+        "symbol": "WLFIUSDT",
+        "close": 0.0581,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789410600000,
+        "symbol": "FETUSDT",
+        "close": 0.1725,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789410600000,
+        "symbol": "FETUSDT",
+        "price": 0.17258624999999997,
+        "stop": 0.16738171144821778,
+        "target": 0.18429140857335313,
+        "risk": 50.0,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789410600000,
+        "symbol": "WLFIUSDT",
+        "price": 0.0582291,
+        "stop": 0.05706966003920609,
+        "target": 0.06098526653922092,
+        "risk": 49.98850253100753,
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789414200000,
+        "symbol": "FETUSDT",
+        "price": 0.1695152,
+        "reason": "trend_exit",
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789416900000,
+        "symbol": "TAOUSDT",
+        "close": 239.8,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789416900000,
+        "symbol": "ONDOUSDT",
+        "close": 0.3623,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789416900000,
+        "symbol": "TAOUSDT",
+        "price": 239.91989999999998,
+        "stop": 234.6477730265869,
+        "target": 252.26589502772683,
+        "risk": 49.85081838888026,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789416900000,
+        "symbol": "ONDOUSDT",
+        "price": 0.36248115,
+        "stop": 0.35577972830542504,
+        "target": 0.3786061401514949,
+        "risk": 49.83552369355024,
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789420500000,
+        "symbol": "WLFIUSDT",
+        "price": 0.0577711,
+        "reason": "trend_exit",
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789420500000,
+        "symbol": "TAOUSDT",
+        "price": 235.38225,
+        "reason": "trend_exit",
+        "simulated": true
+      },
+      {
+        "type": "SAT",
+        "time": 1789420500000,
+        "symbol": "ONDOUSDT",
+        "price": 0.35812085000000005,
+        "reason": "trend_exit",
+        "simulated": true
+      }
+    ],
+    "started_at": 1789409700000
+  }
+}
