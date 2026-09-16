@@ -56,6 +56,22 @@ class ScanSymbolTests(unittest.TestCase):
         self.assertEqual([e for e in events if e['kind'] in ('last_buy_date', 'post_ex_dividend')], [])
 
 
+class PriceInfoTests(unittest.TestCase):
+    def test_computes_realized_one_year_change_and_reads_meta_fields(self):
+        chart_result = dict(
+            meta=dict(regularMarketPrice=127.8, currency='TRY', fiftyTwoWeekLow=90.0, fiftyTwoWeekHigh=140.0),
+        )
+        price = scan._price_info(chart_result, closes=[100.0, 142.0])
+        self.assertEqual(price['current'], 127.8)
+        self.assertEqual(price['currency'], 'TRY')
+        self.assertAlmostEqual(price['change_1y_pct'], 0.42)
+        self.assertEqual(price['week52_low'], 90.0)
+
+    def test_change_1y_pct_is_none_with_too_little_history(self):
+        price = scan._price_info(dict(meta={}), closes=[100.0])
+        self.assertIsNone(price['change_1y_pct'])
+
+
 class ScanAllTests(unittest.TestCase):
     def test_one_bad_symbol_does_not_stop_the_others(self):
         def fake_scan_symbol(symbol, now_s):

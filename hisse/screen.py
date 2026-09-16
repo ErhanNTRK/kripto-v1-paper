@@ -71,32 +71,58 @@ def _fmt_date(epoch_s):
     return datetime.fromtimestamp(epoch_s, timezone.utc).strftime('%d.%m.%Y')
 
 
-def high_yield_message(symbol, snapshot):
+def market_label(symbol):
+    """Purely a display label from the symbol's own suffix convention --
+    '.IS' = Borsa Istanbul, anything else here = a US ticker."""
+    return 'BIST (Turkiye)' if symbol.endswith('.IS') else 'ABD (US)'
+
+
+def _price_lines(price):
+    """price: dict from hisse.scan (current, currency, change_1y_pct,
+    week52_low, week52_high), or None if unavailable. All of this is
+    already-realized, historical fact -- never a forecast or target."""
+    if not price or price.get('current') is None:
+        return []
+    currency = price.get('currency') or ''
+    lines = [f"Guncel fiyat: {price['current']:.2f} {currency}"]
+    if price.get('change_1y_pct') is not None:
+        lines.append(f"Son 1 yildaki gerceklesen degisim: {price['change_1y_pct']:+.1%}")
+    if price.get('week52_low') is not None and price.get('week52_high') is not None:
+        lines.append(f"52 haftalik aralik: {price['week52_low']:.2f} - {price['week52_high']:.2f} {currency}")
+    lines.append('Bu rakamlar gecmise ait gerceklesmis verilerdir, gelecek fiyat tahmini degildir.')
+    return lines
+
+
+def high_yield_message(symbol, snapshot, price=None):
     return '\n'.join([
-        'YUKSEK TEMETTU ADAYI', '', f'Parite: {symbol}',
+        'YUKSEK TEMETTU ADAYI', '', f'Parite: {symbol} [{market_label(symbol)}]',
         f"Guncel verim: {snapshot['dividend_yield']:.2%}",
         f"5 yillik ortalama verim: {snapshot['five_year_avg_yield']:.2%}",
         f"Odeme orani: {snapshot['payout_ratio']:.0%}" if snapshot.get('payout_ratio') is not None else 'Odeme orani: bilinmiyor',
-        '', 'Bu bir alim tavsiyesi degildir, sadece bilgilendirmedir.',
+        *_price_lines(price),
+        '', 'Bu bir alim tavsiyesi degildir, sadece bilgilendirmedir. Fiyat hedefi/beklenen',
+        'getiri vermiyoruz -- boyle bir tahmin guvenilir sekilde yapilamaz.',
     ])
 
 
-def last_buy_date_message(symbol, snapshot, now_s):
+def last_buy_date_message(symbol, snapshot, now_s, price=None):
     ex_date = snapshot['ex_dividend_date']
     return '\n'.join([
-        'TEMETTU: SON ALIM TARIHI YAKLASIYOR', '', f'Parite: {symbol}',
+        'TEMETTU: SON ALIM TARIHI YAKLASIYOR', '', f'Parite: {symbol} [{market_label(symbol)}]',
         f'Hak kullanim (ex-dividend) tarihi: {_fmt_date(ex_date)}',
         'Bu temettuyu almak icin en gec bir onceki is gunu kapanisina kadar elinde bulundurman gerekir.',
+        *_price_lines(price),
         '', 'Not: bu tarihten sonra fiyatta temettu tutari kadar dusus GORULMESI NORMALDIR, kayip degildir.',
     ])
 
 
-def post_ex_dividend_message(symbol, snapshot):
+def post_ex_dividend_message(symbol, snapshot, price=None):
     rate = snapshot.get('dividend_rate')
     rate_text = f'~{rate:.2f}' if rate is not None else 'temettu tutari kadar'
     return '\n'.join([
-        'TEMETTU SONRASI BILGILENDIRME', '', f'Parite: {symbol}',
+        'TEMETTU SONRASI BILGILENDIRME', '', f'Parite: {symbol} [{market_label(symbol)}]',
         f'Hak kullanim tarihi gecti. Fiyatta {rate_text} bir dusus normal, mekanik bir ayarlamadir; kayip degildir.',
+        *_price_lines(price),
         '', "Onemli: 'temettu avciligi' (hemen once alip hemen sonra satmak) genelde ekstra",
         'kazanc saglamaz -- fiyat dususu temettuyu asagi yukari dengeler, ustune vergi ve',
         'komisyon de eklenir. Satis karari tamamen sana ait, bu bir tavsiye degildir.',

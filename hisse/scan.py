@@ -20,29 +20,44 @@ def _closes_from_chart(chart_result):
     return [c for c in (quotes[0].get('close') or []) if c is not None]
 
 
+def _price_info(chart_result, closes):
+    """Already-realized historical facts only -- never a forecast or target."""
+    meta = chart_result.get('meta') or {}
+    change_1y = (closes[-1] / closes[0] - 1) if len(closes) >= 2 and closes[0] else None
+    return dict(
+        current=meta.get('regularMarketPrice'),
+        currency=meta.get('currency'),
+        change_1y_pct=change_1y,
+        week52_low=meta.get('fiftyTwoWeekLow'),
+        week52_high=meta.get('fiftyTwoWeekHigh'),
+    )
+
+
 def scan_symbol(symbol, now_s):
     """One symbol's full check. Raises on a data/network problem -- the
     caller (scan_all) is responsible for catching that per-symbol so one bad
     ticker does not stop the whole run."""
     snap = data.dividend_snapshot(symbol)
     history = data.dividend_history(symbol)
-    closes = _closes_from_chart(data.chart(symbol, range='1y', interval='1d'))
+    chart_result = data.chart(symbol, range='1y', interval='1d')
+    closes = _closes_from_chart(chart_result)
+    price = _price_info(chart_result, closes)
 
     events = []
     quality_ok, _ = screen.dividend_quality(snap, history)
     if quality_ok and screen.yield_is_notably_high(snap) and screen.trend_ok(closes):
         events.append(dict(kind='high_yield', dedupe_scope='week',
-                            message=screen.high_yield_message(symbol, snap)))
+                            message=screen.high_yield_message(symbol, snap, price)))
 
     ex_date = snap.get('ex_dividend_date')
     if ex_date is not None:
         days = screen.days_until(now_s, ex_date)
         if 0 <= days <= LAST_BUY_WINDOW_DAYS:
             events.append(dict(kind='last_buy_date', dedupe_scope='day',
-                                message=screen.last_buy_date_message(symbol, snap, now_s)))
+                                message=screen.last_buy_date_message(symbol, snap, now_s, price)))
         elif -POST_EX_WINDOW_DAYS <= days < 0:
             events.append(dict(kind='post_ex_dividend', dedupe_scope='once', dedupe_id=ex_date,
-                                message=screen.post_ex_dividend_message(symbol, snap)))
+                                message=screen.post_ex_dividend_message(symbol, snap, price)))
     return events
 
 

@@ -64,12 +64,33 @@ class TrendOkTests(unittest.TestCase):
         self.assertFalse(screen.trend_ok(closes))
 
 
+class MarketLabelTests(unittest.TestCase):
+    def test_is_suffix_is_bist(self):
+        self.assertEqual(screen.market_label('GARAN.IS'), 'BIST (Turkiye)')
+
+    def test_no_suffix_is_us(self):
+        self.assertEqual(screen.market_label('KO'), 'ABD (US)')
+
+
 class MessageTests(unittest.TestCase):
     def test_high_yield_message_includes_key_numbers_and_disclaimer(self):
         msg = screen.high_yield_message('GARAN.IS', snap(dividend_yield=0.0393, five_year_avg_yield=0.021, payout_ratio=0.18))
         self.assertIn('GARAN.IS', msg)
+        self.assertIn('BIST (Turkiye)', msg)
         self.assertIn('3.93%', msg)
         self.assertIn('alim tavsiyesi degildir', msg)
+
+    def test_high_yield_message_includes_price_context_when_given(self):
+        price = dict(current=127.8, currency='TRY', change_1y_pct=0.42, week52_low=90.0, week52_high=140.0)
+        msg = screen.high_yield_message('GARAN.IS', snap(), price)
+        self.assertIn('127.80 TRY', msg)
+        self.assertIn('+42.0%', msg)
+        self.assertIn('90.00 - 140.00 TRY', msg)
+        self.assertIn('gelecek fiyat tahmini degildir', msg)
+
+    def test_high_yield_message_omits_price_block_when_unavailable(self):
+        msg = screen.high_yield_message('KO', snap(), price=None)
+        self.assertNotIn('Guncel fiyat', msg)
 
     def test_last_buy_date_message_formats_date_and_warns_about_drop(self):
         msg = screen.last_buy_date_message('KO', snap(ex_dividend_date=1775520000), now_s=1774000000)
