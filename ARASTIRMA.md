@@ -129,5 +129,32 @@ daha üretken bir yön.
 5) üretti, istatistiksel olarak hiçbir sonuç çıkarılamayacak kadar az. Daha
 uzun veri ve/veya daha fazla sembol olmadan bu aday değerlendirilemez.
 
-**Şu anki durum:** Hiçbir aday gerçek emir eşiğini geçmedi. En umut verici yön
-V2 — maliyet duyarlılığını azaltmaya odaklanmak mantıklı sıradaki adım.
+**Bir arkadaşın (bağımsız yazılmış) sinyal botu — karşılaştırma amaçlı.**
+Kullanıcının bir arkadaşının kendi yazdığı bot (MA9/21 + RSI 50-68 + hacim
+>1,2x, tek pozisyon/8 parite, sabit -%2 stop + %3 başabaş + %5/%3 trailing,
+09:00-23:00 TR giriş penceresi) `crypto_v1/friend_v1.py` ile mümkün olduğunca
+sadık şekilde tekrar üretildi (5dk yerine 15dk, 1sa aynı — canlı botu 5dk
+kullanıyor, elimizdeki en yakın çözünürlük bu) ve aynı 5 pencereli walk-forward
+ile test edildi:
+
+| Pencere | İşlem | Net getiri | PF | Stres net getiri | Stres PF | Geçti mi |
+|---:|---:|---:|---:|---:|---:|:---:|
+| 0 | 23 | +%1,66 | 1,20 | +%0,13 | 1,01 | EVET |
+| 1 | 35 | -%1,70 | 0,86 | -%3,90 | 0,71 | hayır |
+| 2 | 22 | -%4,95 | 0,38 | -%6,40 | 0,29 | hayır |
+| 3 | 28 | -%5,29 | 0,47 | -%6,98 | 0,38 | hayır |
+| 4 | 28 | +%2,62 | 1,28 | -%1,12 | 0,91 | hayır |
+
+NO_GO, ama pencere 0 bu araştırmada **hem normal hem 2x maliyet stresini
+geçen ilk pencere** oldu (V1 ve V2'nin hiçbir penceresi bunu başaramamıştı).
+Ama 4/5 pencere geçmedi, 2'si ciddi kötü (PF 0,38-0,47). Yorum: V1'den daha
+gürültülü/tutarsız, kanıtlanmış bir kenar değil — rastgele iyi bir dönem
+yakalamış görünüyor. Pozisyon boyutlandırması botun sabit 5 USDC pilot
+tavanı yerine özkaynağın %25'i olarak alındı (o tavan küçük pilot sermaye
+kısıtıydı, strateji parametresi değil); -%2 stopla bu, bizim
+`risk_fraction`imizle aynı %0,5 özkaynak riskine denk geliyor, sonuçlar
+karşılaştırılabilir.
+
+**Şu anki durum:** Hiçbir aday (V1 ailesi, V2, arkadaşın botu) gerçek emir
+eşiğini geçmedi. En umut verici yön hâlâ V2 — maliyet duyarlılığını
+azaltmaya odaklanmak mantıklı sıradaki adım.
