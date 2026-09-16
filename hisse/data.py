@@ -37,9 +37,15 @@ def _get_json(url, params=None):
 
 def crumb_token():
     """One process-lifetime crumb; Yahoo's anti-scraping handshake needs a
-    seeded session cookie first, then this token on every quoteSummary call."""
+    seeded session cookie first, then this token on every quoteSummary call.
+    fc.yahoo.com returns HTTP 404 by design (confirmed: it still sends the
+    needed Set-Cookie header) -- only the cookie side effect matters, so a
+    non-2xx status there is expected and ignored, not an error."""
     if 'value' not in _crumb_cache:
-        _get(SEED_URL)
+        try:
+            _get(SEED_URL)
+        except urllib.error.HTTPError:
+            pass
         _crumb_cache['value'] = _get(CRUMB_URL).decode('utf-8').strip()
     return _crumb_cache['value']
 

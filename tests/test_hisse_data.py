@@ -1,5 +1,6 @@
 import json
 import unittest
+import urllib.error
 from unittest.mock import patch
 from hisse import data
 
@@ -33,6 +34,13 @@ class HisseDataTests(unittest.TestCase):
             self.assertEqual(data.crumb_token(), 'abc123')
             self.assertEqual(data.crumb_token(), 'abc123')
         self.assertEqual(get.call_count, 2)  # seed + crumb, once total across both calls
+
+    def test_crumb_token_tolerates_the_seed_urls_expected_404(self):
+        # fc.yahoo.com returns 404 by design but still sets the needed
+        # cookie; only the crumb call's own failure should be fatal.
+        seed_error = urllib.error.HTTPError('https://fc.yahoo.com', 404, 'Not Found', {}, None)
+        with patch('hisse.data._get', side_effect=[seed_error, b'  abc123  ']):
+            self.assertEqual(data.crumb_token(), 'abc123')
 
     def test_quote_summary_includes_crumb_and_returns_first_result(self):
         payload = {"quoteSummary": {"result": [{"summaryDetail": {"dividendYield": {"raw": 0.04}}}], "error": None}}
