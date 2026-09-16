@@ -28,6 +28,12 @@ jobs:
           if git fetch origin hisse-state:refs/remotes/origin/hisse-state; then
             git archive origin/hisse-state | tar -x -C hisse_runtime
           fi
+      - name: DEBUG network probe
+        run: |
+          echo "=== plain curl to yahoo chart ==="
+          curl -s -i --max-time 15 "https://query1.finance.yahoo.com/v8/finance/chart/KO?range=5d&interval=1d" -H "User-Agent: Mozilla/5.0" | head -20
+          echo "=== plain curl to yahoo crumb seed ==="
+          curl -s -i --max-time 15 "https://fc.yahoo.com" -H "User-Agent: Mozilla/5.0" | head -10
       - name: Scan and notify
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
