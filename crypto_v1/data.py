@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 INTERVAL = 900000
 BASE = 'https://data-api.binance.vision'
+BINANCE_CODE = {900_000: '15m', 3_600_000: '1h', 14_400_000: '4h', 21_600_000: '6h', 86_400_000: '1d'}
 
 
 def get(path, params=None):
@@ -42,24 +43,25 @@ def universe(config):
     return [t['symbol'] for t in ranked[:config['top_n']]]
 
 
-def validate(rows):
+def validate(rows, interval=INTERVAL):
     previous = None
     for r in rows:
         if any(not math.isfinite(r[k]) for k in ('o', 'h', 'l', 'c', 'v')):
             raise ValueError('Non-finite OHLCV value')
-        if r['t'] % INTERVAL or (previous is not None and r['t'] != previous + INTERVAL):
-            raise ValueError('Duplicate, unordered or missing 15m candle')
+        if r['t'] % interval or (previous is not None and r['t'] != previous + interval):
+            raise ValueError('Duplicate, unordered or missing candle')
         if not (0 < r['l'] <= min(r['o'], r['c']) <= max(r['o'], r['c']) <= r['h']) or r['v'] < 0:
             raise ValueError('Invalid OHLCV candle')
         previous = r['t']
     return rows
 
 
-def candles(symbol, start, end):
+def candles(symbol, start, end, interval=INTERVAL):
+    code = BINANCE_CODE[interval]
     result = []
     cursor = start
     while cursor < end:
-        batch = get('klines', {'symbol': symbol, 'interval': '15m',
+        batch = get('klines', {'symbol': symbol, 'interval': code,
                              'startTime': cursor, 'endTime': end - 1, 'limit': 1000})
         if not batch:
             break
@@ -67,33 +69,34 @@ def candles(symbol, start, end):
             if int(b[6]) < end:
                 result.append(dict(t=int(b[0]), o=float(b[1]), h=float(b[2]),
                                    l=float(b[3]), c=float(b[4]), v=float(b[5])))
-        next_cursor = int(batch[-1][0]) + INTERVAL
+        next_cursor = int(batch[-1][0]) + interval
         if next_cursor <= cursor:
             raise ValueError('Non advancing pagination')
         cursor = next_cursor
         time.sleep(0.08)
-    return validate(result)
+    return validate(result, interval)
 
 
-def download(config, directory, days):
+def download(config, directory, days, interval=INTERVAL):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    end = get('time')['serverTime'] // INTERVAL * INTERVAL
-    start = end - int(days * 96) * INTERVAL
+    end = get('time')['serverTime'] // interval * interval
+    bars_per_day = 86_400_000 // interval
+    start = end - int(days * bars_per_day) * interval
     symbols = universe(config)
     manifest = dict(source=BASE, captured_at=end, start=start, end=end,
-                    symbols=symbols, timeframe='15m',
+                    symbols=symbols, timeframe=BINANCE_CODE[interval], interval=interval,
                     universe_bias='Current 24h-volume snapshot: survivorship and selection bias; not historical top 50')
     def fetch_symbol(symbol):
         path = directory / (symbol + '.json')
-        cached = validate(json.loads(path.read_text(encoding='utf-8'))) if path.exists() else []
+        cached = validate(json.loads(path.read_text(encoding='utf-8')), interval) if path.exists() else []
         rows = [r for r in cached if start <= r['t'] < end]
         if rows:
-            prefix = candles(symbol, start, rows[0]['t']) if rows[0]['t'] > start else []
-            rows = prefix + rows + candles(symbol, rows[-1]['t']+INTERVAL, end)
+            prefix = candles(symbol, start, rows[0]['t'], interval) if rows[0]['t'] > start else []
+            rows = prefix + rows + candles(symbol, rows[-1]['t']+interval, end, interval)
         else:
-            rows = candles(symbol, start, end)
-        validate(rows)
+            rows = candles(symbol, start, end, interval)
+        validate(rows, interval)
         path.write_text(json.dumps(rows), encoding='utf-8')
         print(f'{symbol}: {len(rows)} candles', flush=True)
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -102,9 +105,9 @@ def download(config, directory, days):
     return manifest
 
 
-def load(directory):
+def load(directory, interval=INTERVAL):
     directory = Path(directory)
     manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
-    data = {s: validate(json.loads((directory / (s + '.json')).read_text(encoding='utf-8')))
+    data = {s: validate(json.loads((directory / (s + '.json')).read_text(encoding='utf-8')), interval)
             for s in sorted(set(manifest['symbols'] + ['BTCUSDT']))}
     return manifest, data

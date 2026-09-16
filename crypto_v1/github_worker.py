@@ -5,8 +5,9 @@ import shutil
 from pathlib import Path
 
 from .backtest import report
-from .data import INTERVAL, candles, get, universe, validate
+from .data import candles, get, universe, validate
 from .paper_trading import tick
+from .research_v2 import DonchianModel, FOUR_HOUR
 from .risk import validate_config
 from .telegram import deliver_paper_events, deliver_once, format_daily_status
 
@@ -48,12 +49,14 @@ def prepare_data(config, runtime, now):
         symbols = manifest["symbols"]
     else:
         symbols = universe(config)
-        manifest = {"symbols": symbols, "timeframe": "15m", "source": "Binance public market data"}
+        manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data"}
         write_json(manifest_path, manifest)
-    start = now - 14 * 24 * 60 * 60 * 1000
+    # >80 four-hour bars (Donchian's longest lookback) with a comfortable margin,
+    # since this cache is rebuilt from scratch on every 15-minute cron run.
+    start = now - 30 * 24 * 60 * 60 * 1000
     data_dir.mkdir(parents=True, exist_ok=True)
     for symbol in sorted(set(symbols + ["BTCUSDT"])):
-        rows = validate(candles(symbol, start, now))
+        rows = validate(candles(symbol, start, now, FOUR_HOUR), FOUR_HOUR)
         write_json(data_dir / f"{symbol}.json", rows)
     run_manifest = dict(manifest, start=start, end=now, captured_at=now)
     write_json(data_dir / "manifest.json", run_manifest)
@@ -73,15 +76,18 @@ def main():
         chat_id = private_chat_id(token)
         write_json(chat_file, {"chat_id": chat_id})
     os.environ["TELEGRAM_CHAT_ID"] = chat_id
-    config = validate_config(json.loads(Path("config.json").read_text(encoding="utf-8")))
+    # V2 (hourly Donchian 20/40/80, re-run on 4h bars) drives the live AL_ADAYI
+    # candidates published to runtime-state; see ARASTIRMA.md. V1 (config.json)
+    # was dropped from this path after failing walk-forward (0/5 windows).
+    config = validate_config(json.loads(Path("config_v2.json").read_text(encoding="utf-8")))
     # Paper-only overrides. Live trading reads live_config.json and is unaffected.
     if os.environ.get("PAPER_RELAX_LIMITS") == "1":
         config = dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000)
-    now = get("time")["serverTime"] // INTERVAL * INTERVAL
+    now = get("time")["serverTime"] // FOUR_HOUR * FOUR_HOUR
     data_dir = prepare_data(config, runtime, now)
     state_path = runtime / os.environ.get("PAPER_STATE_FILE", "state.json")
     output = runtime / "report"
-    tick(config, data_dir, state_path, output)
+    tick(config, data_dir, state_path, output, model=DonchianModel, interval=FOUR_HOUR)
     database = runtime / "telegram.sqlite"
     deliver_once(
         "connection:" + chat_id,

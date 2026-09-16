@@ -5,7 +5,10 @@ from .live_controller import _known_or_place
 from .strategy import sell_signal
 
 
-def exit_decision(position, feature, btc, high, config):
+def exit_decision(position, feature, btc, high, config, sell_fn=None):
+    """sell_fn(feature, btc) -> bool overrides the trend-exit check for a
+    non-default model (e.g. research_v2.DonchianModel.sell); defaults to
+    V1's EMA/RSI-based sell_signal, config-driven via exit_ema."""
     entry = Decimal(str(position["entry"]))
     stop = Decimal(str(position["stop_price"]))
     current = Decimal(str(feature["c"]))
@@ -13,7 +16,8 @@ def exit_decision(position, feature, btc, high, config):
     if risk <= 0: return "emergency_risk"
     target = entry + Decimal(str(config["minimum_reward_risk"])) * risk
     if current >= target: return "take_profit"
-    if sell_signal(feature, btc, config):
+    sell_fn = sell_fn or (lambda f, b: sell_signal(f, b, config))
+    if sell_fn(feature, btc):
         return "profit_signal" if current > entry else "emergency_risk"
     if Decimal(str(high)) >= entry + risk:
         trailing = Decimal(str(high)) - Decimal(str(config["trailing_atr"])) * Decimal(str(feature["atr"]))

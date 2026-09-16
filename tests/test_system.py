@@ -147,6 +147,24 @@ class Tests(unittest.TestCase):
                 self.assertEqual(first, json.loads((root/'state.json').read_text()))
                 self.assertEqual(first['state']['trades'], [])
 
+    def test_paper_tick_with_model_and_interval_uses_a_distinct_fingerprint(self):
+        from crypto_v1.research_v2 import DonchianModel
+        four_hour = 14_400_000
+        rows = [dict(t=i*four_hour, o=100, h=101, l=99, c=100, v=100) for i in range(90)]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root/'manifest.json').write_text(json.dumps(dict(symbols=['BTCUSDT'], start=0)))
+            (root/'BTCUSDT.json').write_text(json.dumps(rows))
+            with patch('crypto_v1.paper_trading.get', return_value={'serverTime': 90*four_hour}), \
+                 patch('crypto_v1.paper_trading.candles', return_value=[]):
+                tick(C, root, root/'state_v1.json', root/'reports_v1', interval=four_hour)
+                tick(C, root, root/'state_v2.json', root/'reports_v2', model=DonchianModel, interval=four_hour)
+            state_v1 = json.loads((root/'state_v1.json').read_text())
+            state_v2 = json.loads((root/'state_v2.json').read_text())
+            self.assertNotEqual(state_v1['fingerprint'], state_v2['fingerprint'])
+            self.assertEqual(state_v1['state']['last_t'], 89*four_hour)
+            self.assertEqual(state_v2['state']['last_t'], 89*four_hour)
+
     def test_validate_data(self):
         with self.assertRaises(ValueError):
             validate([bar(), bar(t=2*INTERVAL)])

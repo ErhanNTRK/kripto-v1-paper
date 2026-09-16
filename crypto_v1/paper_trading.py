@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from .data import get, candles, load, validate, INTERVAL
 from .backtest import Engine, prepare, report, fresh_state
+from .indicators import features
 
 
 def atomic_json(path, value):
@@ -25,39 +26,42 @@ def metadata(state, now, manifest):
                 assessment='At least 30 days and 100 closed trades required before review; no automatic promotion')
 
 
-def tick(c, data_dir, state_path, output):
+def tick(c, data_dir, state_path, output, model=None, interval=INTERVAL):
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     lock = state_path.with_suffix('.lock')
     fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     try:
         manifest = json.loads((Path(data_dir)/'manifest.json').read_text(encoding='utf-8'))
-        fingerprint = hashlib.sha256(json.dumps(dict(config=c, symbols=manifest['symbols']), sort_keys=True).encode()).hexdigest()
-        now = get('time')['serverTime'] // INTERVAL * INTERVAL
+        model_name = type(model).__name__ if model else None
+        fingerprint = hashlib.sha256(json.dumps(dict(config=c, symbols=manifest['symbols'],
+                                                       model=model_name, interval=interval),
+                                                 sort_keys=True).encode()).hexdigest()
+        now = get('time')['serverTime'] // interval * interval
         saved = None
         if state_path.exists():
             saved = json.loads(state_path.read_text(encoding='utf-8'))
             if saved['fingerprint'] != fingerprint:
-                raise ValueError('Config or universe changed; use a new paper state')
-            if saved['state']['last_t'] == now-INTERVAL:
+                raise ValueError('Config, universe or model changed; use a new paper state')
+            if saved['state']['last_t'] == now-interval:
                 return report(saved['state'], c, metadata(saved['state'], now, manifest), output)
-        _, data = load(data_dir)
-        # Update the complete stored history to keep EMA seed stable across restarts.
+        _, data = load(data_dir, interval)
+        # Update the complete stored history to keep the indicator seed stable across restarts.
         for symbol, rows in data.items():
-            start = rows[-1]['t']+INTERVAL if rows else manifest['start']
-            rows.extend(candles(symbol, start, now))
-            validate(rows)
+            start = rows[-1]['t']+interval if rows else manifest['start']
+            rows.extend(candles(symbol, start, now, interval))
+            validate(rows, interval)
             atomic_json(Path(data_dir)/(symbol+'.json'), rows)
-        prepared = prepare(data, c)
+        prepared = prepare(data, c, model.features if model else features)
         if saved:
-            engine = Engine(c, manifest['symbols'], saved['state'])
-            times = range(engine.s['last_t']+INTERVAL, now, INTERVAL)
+            engine = Engine(c, manifest['symbols'], saved['state'], model=model, interval=interval)
+            times = range(engine.s['last_t']+interval, now, interval)
         else:
             # Start at latest closed bar with empty portfolio; do not backfill profits.
             state = fresh_state(c)
             state['started_at'] = now
-            engine = Engine(c, manifest['symbols'], state)
-            times = [now-INTERVAL]
+            engine = Engine(c, manifest['symbols'], state, model=model, interval=interval)
+            times = [now-interval]
         for t in times:
             bars = {s: d[t] for s, d in prepared.items() if t in d}
             engine.step(t, bars)

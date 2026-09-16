@@ -105,12 +105,13 @@ class BinanceMarket:
                               "buy_time": int(buy.get("time", buy.get("updateTime", 0)))})
         return positions
 
-    def analysis(self, position):
-        now = get("time")["serverTime"] // INTERVAL * INTERVAL
-        start = min(position["buy_time"], now - 220 * INTERVAL)
-        coin_rows = candles(position["symbol"], start, now)
-        btc_rows = coin_rows if position["symbol"] == "BTCUSDT" else candles("BTCUSDT", start, now)
-        coin = features(coin_rows, self.strategy_config)[-1]
-        btc = features(btc_rows, self.strategy_config)[-1]
-        high = max(row["h"] for row in coin_rows if row["t"] >= position["buy_time"] // INTERVAL * INTERVAL)
+    def analysis(self, position, feature_fn=None, interval=INTERVAL):
+        feature_fn = feature_fn or features
+        now = get("time")["serverTime"] // interval * interval
+        start = min(position["buy_time"], now - 220 * interval)
+        coin_rows = candles(position["symbol"], start, now, interval)
+        btc_rows = coin_rows if position["symbol"] == "BTCUSDT" else candles("BTCUSDT", start, now, interval)
+        coin = feature_fn(coin_rows, self.strategy_config)[-1]
+        btc = feature_fn(btc_rows, self.strategy_config)[-1]
+        high = max(row["h"] for row in coin_rows if row["t"] >= position["buy_time"] // interval * interval)
         return coin, btc, high

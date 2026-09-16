@@ -14,6 +14,13 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertEqual(exit_decision(P,dict(F,c=104,ema20=100),B,110,C),"trailing_profit")
         self.assertEqual(exit_decision(P,dict(F,c=103,ema20=104),B,104,C),"profit_signal")
         self.assertIsNone(exit_decision(P,dict(F,c=103,ema20=100),B,103,C))
+    def test_sell_fn_override_replaces_default_ema_exit(self):
+        # Price/EMA say hold (default sell_signal would return False here), but a
+        # custom sell_fn (e.g. a Donchian model's) can still force the trend exit.
+        held = dict(F, c=103, ema20=100)
+        self.assertIsNone(exit_decision(P, held, B, 103, C))
+        self.assertEqual(exit_decision(P, held, B, 103, C, sell_fn=lambda f, b: True), "profit_signal")
+
     def test_cancel_stop_then_sell_once(self):
         e=Mock(); e.cancel.return_value={"status":"CANCELED"}
         e.query.side_effect=OrderRejected(-2013); e.market_sell.return_value={"status":"FILLED"}
