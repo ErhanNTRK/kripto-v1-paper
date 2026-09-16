@@ -10,6 +10,7 @@ from .paper_trading import tick
 from .research_v2 import evaluate, evaluate_walkforward as evaluate_v2_walkforward
 from .research_v3 import evaluate_v3
 from .walkforward import evaluate as walkforward_evaluate, report as walkforward_report
+from .friend_v1 import evaluate as friend_v1_evaluate
 
 
 def main():
@@ -38,6 +39,10 @@ def main():
     walkforward_v2.add_argument('--data', default='data-v2')
     walkforward_v2.add_argument('--output', default='reports/walkforward-v2')
     walkforward_v2.add_argument('--windows', type=int, default=5)
+    friend_v1 = sub.add_parser('friend-v1-walkforward')
+    friend_v1.add_argument('--data', default='data-wf')
+    friend_v1.add_argument('--output', default='reports/friend-v1')
+    friend_v1.add_argument('--windows', type=int, default=5)
     research = sub.add_parser('research-v2')
     research.add_argument('--data', default='data-v2')
     research.add_argument('--output', default='reports/research-v2')
@@ -83,6 +88,17 @@ def main():
         meta = dict(mode='walkforward', config_name=args.config, window_count=args.windows,
                     universe=manifest,
                     note='Hourly Donchian 20/40/80 ensemble, top-20 liquid; not optimized per window.')
+        full = walkforward_report(result, meta, args.output)
+        print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
+    elif args.command == 'friend-v1-walkforward':
+        if args.windows < 2:
+            parser.error('windows must be >= 2')
+        manifest, data = load(args.data)
+        result = friend_v1_evaluate(data, c, manifest, args.windows)
+        meta = dict(mode='walkforward', config_name=args.config, window_count=args.windows,
+                    universe=manifest,
+                    note='Replica of a friend\'s MA9/21+RSI50-68+volume1.2x signal bot; '
+                         '15m/1h bars substitute for the live 5m/1h feed; not optimized per window.')
         full = walkforward_report(result, meta, args.output)
         print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
     elif args.command == 'research-v2':

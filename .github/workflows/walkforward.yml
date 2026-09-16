@@ -24,6 +24,8 @@ jobs:
         run: python -m crypto_v1 --config config_trend_ema50_wide.json walkforward --data data-wf --output reports/walkforward-ema50-wide --windows 5
       - name: Walk-forward, current strict config for baseline comparison (5 independent windows)
         run: python -m crypto_v1 --config config.json walkforward --data data-wf --output reports/walkforward-strict --windows 5
+      - name: Walk-forward, friend's MA9/21+RSI+volume signal bot replica (5 independent windows)
+        run: python -m crypto_v1 --config config.json friend-v1-walkforward --data data-wf --output reports/friend-v1 --windows 5
       - uses: actions/upload-artifact@v4
         with:
           name: kripto-v1-walkforward
