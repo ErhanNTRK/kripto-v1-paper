@@ -2,17 +2,35 @@
 universe once and deliver any new alerts to Telegram. Informational only --
 this module never places or proposes an order.
 
-Reuses crypto_v1.github_worker's private-chat resolution/caching so no new
-Telegram secret is needed beyond the existing TELEGRAM_BOT_TOKEN; delivery
-state (which alerts have already been sent) persists on its own 'hisse-state'
-git branch, kept separate from the crypto pilot's own runtime-state branch.
+The chat id is read (read-only) from the crypto pilot's already-resolved
+telegram_chat.json on its runtime-state branch, rather than re-resolving it
+via Telegram's getUpdates: that bot has an active webhook (Render's
+/telegram endpoint) for the crypto pilot, and Telegram rejects getUpdates
+entirely while a webhook is registered (409 Conflict) -- this is the same
+bot/token, so the conflict applies here too. Delivery state (which alerts
+have already been sent) persists on its own 'hisse-state' git branch, kept
+separate from the crypto pilot's own runtime-state branch.
 """
 import json
 import os
 import time
+import urllib.request
 from pathlib import Path
-from crypto_v1.github_worker import private_chat_id, write_json
 from . import notify, scan, universe
+
+CRYPTO_CHAT_ID_URL = 'https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/telegram_chat.json'
+
+
+def resolve_chat_id(runtime):
+    chat_file = runtime / 'telegram_chat.json'
+    if chat_file.exists():
+        return json.loads(chat_file.read_text(encoding='utf-8'))['chat_id']
+    request = urllib.request.Request(CRYPTO_CHAT_ID_URL, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        chat_id = json.load(response)['chat_id']
+    chat_file.parent.mkdir(parents=True, exist_ok=True)
+    chat_file.write_text(json.dumps({'chat_id': chat_id}), encoding='utf-8')
+    return chat_id
 
 
 def main():
@@ -21,14 +39,7 @@ def main():
         raise SystemExit('TELEGRAM_BOT_TOKEN secret is required')
     runtime = Path(os.environ.get('HISSE_STORAGE', 'hisse_runtime'))
     runtime.mkdir(parents=True, exist_ok=True)
-
-    chat_file = runtime / 'telegram_chat.json'
-    if chat_file.exists():
-        chat_id = json.loads(chat_file.read_text(encoding='utf-8'))['chat_id']
-    else:
-        chat_id = private_chat_id(token)
-        write_json(chat_file, {'chat_id': chat_id})
-    os.environ['TELEGRAM_CHAT_ID'] = chat_id
+    os.environ['TELEGRAM_CHAT_ID'] = resolve_chat_id(runtime)
 
     now_s = int(time.time())
     symbols = universe.BIST_WATCHLIST + universe.sp500_dividend_aristocrats()
