@@ -48,6 +48,8 @@ def main():
     sent = notify.deliver_scan_results(results, now_s, database)
     notify.notify_errors(errors, database, run_id=str(now_s // 86400))
     print(f'Scanned {len(symbols)} symbols, {sent} messages sent, {len(errors)} errors', flush=True)
+    for symbol, message in list(errors.items())[:5]:
+        print(f'DEBUG sample error [{symbol}]: {message}', flush=True)
 
 
 if __name__ == '__main__':
