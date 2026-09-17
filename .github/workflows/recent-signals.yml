@@ -1,0 +1,62 @@
+name: Kripto V2 Son Hafta Sinyal Sayimi
+
+on:
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'Kac gunluk gecmise bakilsin (varsayilan 7)'
+        default: '7'
+
+permissions:
+  contents: read
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 25 days of 4h data (>80-bar Donchian warm-up + 7 day window)
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import download
+          from crypto_v1.research_v2 import FOUR_HOUR
+          config = json.loads(open('config_v2.json', encoding='utf-8').read())
+          download(config, 'data-recent', 25, interval=FOUR_HOUR)
+          "
+      - name: Run V2 model over the fetched range and count AL_ADAYI events
+        run: |
+          python -c "
+          import json, time
+          from crypto_v1.data import load
+          from crypto_v1.backtest import run
+          from crypto_v1.research_v2 import DonchianModel, FOUR_HOUR
+          from crypto_v1.risk import validate_config
+
+          days_back = int('${{ inputs.days_back }}' or 7)
+          config = validate_config(json.loads(open('config_v2.json', encoding='utf-8').read()))
+          manifest, data = load('data-recent', FOUR_HOUR)
+          symbols = manifest['symbols']
+          state = run(data, symbols, config, manifest['start'], manifest['end'], DonchianModel, FOUR_HOUR)
+
+          now_ms = manifest['end']
+          cutoff = now_ms - days_back * 86400000
+          candidates = [e for e in state['events'] if e['type'] == 'AL_ADAYI' and e['time'] >= cutoff]
+          trades = [t for t in state['trades'] if t['entry_time'] >= cutoff]
+
+          print(f'Evren: {len(symbols)} coin')
+          print(f'Son {days_back} gunde AL adayi (sinyal) sayisi: {len(candidates)}')
+          for e in candidates:
+              t = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(e['time']/1000))
+              print(f\"  {t} | {e['symbol']} | kapanis={e['close']}\")
+          print(f'Son {days_back} gunde (eger AL onaylansaydi) acilacak islem sayisi: {len(trades)}')
+          for t in trades:
+              entry_t = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(t['entry_time']/1000))
+              exit_t = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(t['exit_time']/1000))
+              print(f\"  {t['symbol']} | giris {entry_t} -> cikis {exit_t} | sonuc={t['reason']} | pnl={t['pnl']:.2f}\")
+          "
