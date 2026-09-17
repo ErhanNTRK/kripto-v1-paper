@@ -20,14 +20,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Fetch 25 days of 4h data (>80-bar Donchian warm-up + 7 day window)
+      - name: Fetch data (>80-bar Donchian warm-up + requested window, with margin)
         run: |
           python -c "
           import json
           from crypto_v1.data import download
           from crypto_v1.research_v2 import FOUR_HOUR
           config = json.loads(open('config_v2.json', encoding='utf-8').read())
-          download(config, 'data-recent', 25, interval=FOUR_HOUR)
+          days_back = int('${{ inputs.days_back }}' or 7)
+          fetch_days = max(25, days_back + 15)
+          download(config, 'data-recent', fetch_days, interval=FOUR_HOUR)
           "
       - name: Run V2 model over the fetched range and count AL_ADAYI events
         run: |
