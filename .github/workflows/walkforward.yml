@@ -28,6 +28,8 @@ jobs:
         run: python -m crypto_v1 --config config.json friend-v1-walkforward --data data-wf --output reports/friend-v1 --windows 5
       - name: Walk-forward, user-requested no-breakout/no-BTC-filter variant on 4h (5 windows)
         run: python -m crypto_v1 --config config_v2.json walkforward-v4 --data data-wf --output reports/walkforward-v4 --windows 5
+      - name: Walk-forward, user-requested symmetric long+short, shorter lookback (5 windows)
+        run: python -m crypto_v1 --config config_v2.json walkforward-v5 --data data-wf --output reports/walkforward-v5 --windows 5
       - uses: actions/upload-artifact@v4
         with:
           name: kripto-v1-walkforward

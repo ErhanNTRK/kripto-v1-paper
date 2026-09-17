@@ -13,6 +13,7 @@ from .research_v3 import evaluate_v3
 from .walkforward import evaluate as walkforward_evaluate, report as walkforward_report
 from .friend_v1 import evaluate as friend_v1_evaluate
 from .research_v4 import evaluate_walkforward as evaluate_v4_walkforward
+from .research_v5 import evaluate as evaluate_v5_walkforward
 
 
 def main():
@@ -56,6 +57,11 @@ def main():
     v4.add_argument('--output', default='reports/walkforward-v4')
     v4.add_argument('--windows', type=int, default=5)
     v4.add_argument('--min-trades', type=int, default=8)
+    v5 = sub.add_parser('walkforward-v5')
+    v5.add_argument('--data', default='data-wf')
+    v5.add_argument('--output', default='reports/walkforward-v5')
+    v5.add_argument('--windows', type=int, default=5)
+    v5.add_argument('--min-trades', type=int, default=8)
     research = sub.add_parser('research-v2')
     research.add_argument('--data', default='data-v2')
     research.add_argument('--output', default='reports/research-v2')
@@ -139,6 +145,19 @@ def main():
                     note='User-requested exploratory variant (17 Sep 2026, not pre-registered): '
                          'no Donchian breakout wait (ema20 reclaim instead), no BTC-wide uptrend '
                          'requirement (only a BTC-decline floor), no leverage. 4h bars, matches live.')
+        full = walkforward_report(result, meta, args.output)
+        print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
+    elif args.command == 'walkforward-v5':
+        if args.windows < 2:
+            parser.error('windows must be >= 2')
+        manifest, data = load(args.data)
+        result = evaluate_v5_walkforward(data, manifest['symbols'], c, manifest,
+                                          args.windows, args.min_trades)
+        meta = dict(mode='walkforward', config_name=args.config, window_count=args.windows,
+                    universe=manifest,
+                    note='User-requested exploratory variant (17 Sep 2026, not pre-registered): '
+                         'symmetric LONG+SHORT, shorter 10/20/40-bar Donchian lookback (vs V2 '
+                         '20/40/80), no leverage, short borrow/funding cost not modeled.')
         full = walkforward_report(result, meta, args.output)
         print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
     elif args.command == 'research-v2':
