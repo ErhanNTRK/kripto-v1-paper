@@ -4,6 +4,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONUTF8=1
 COPY crypto_v1 ./crypto_v1
 COPY config.json ./config.json
 COPY config_v2.json ./config_v2.json
+COPY config_v5_long.json ./config_v5_long.json
 COPY live_config.json ./live_config.json
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

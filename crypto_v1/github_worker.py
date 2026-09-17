@@ -7,7 +7,8 @@ from pathlib import Path
 from .backtest import report
 from .data import candles, get, universe, validate
 from .paper_trading import tick
-from .research_v2 import DonchianModel, FOUR_HOUR
+from .research_v2 import FOUR_HOUR
+from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
 from .telegram import deliver_paper_events, deliver_once, format_daily_status
 
@@ -52,7 +53,7 @@ def prepare_data(config, runtime, now):
         manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data"}
         write_json(manifest_path, manifest)
     symbols = manifest["symbols"]
-    # >80 four-hour bars (Donchian's longest lookback) with a comfortable margin,
+    # >40 four-hour bars (v5's longest lookback) with a comfortable margin,
     # since this cache is rebuilt from scratch on every 15-minute cron run.
     start = now - 30 * 24 * 60 * 60 * 1000
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -77,10 +78,13 @@ def main():
         chat_id = private_chat_id(token)
         write_json(chat_file, {"chat_id": chat_id})
     os.environ["TELEGRAM_CHAT_ID"] = chat_id
-    # V2 (hourly Donchian 20/40/80, re-run on 4h bars) drives the live AL_ADAYI
-    # candidates published to runtime-state; see ARASTIRMA.md. V1 (config.json)
-    # was dropped from this path after failing walk-forward (0/5 windows).
-    config = validate_config(json.loads(Path("config_v2.json").read_text(encoding="utf-8")))
+    # v5 long side (shorter 10/20/40-bar Donchian, uncapped winners via
+    # cap_at_target=false) drives the live AL_ADAYI candidates published to
+    # runtime-state, per the user's 17 Sep 2026 request; see ARASTIRMA.md.
+    # V2 (20/40/80) was dropped from this path after only 2/5 walk-forward
+    # windows passed; v5 passed 5/5 (deterministic, manually spot-checked --
+    # still a first-time result on one dataset, watch it closely).
+    config = validate_config(json.loads(Path("config_v5_long.json").read_text(encoding="utf-8")))
     # Paper-only overrides. Live trading reads live_config.json and is unaffected.
     if os.environ.get("PAPER_RELAX_LIMITS") == "1":
         config = dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000)
@@ -89,16 +93,16 @@ def main():
     state_path = runtime / os.environ.get("PAPER_STATE_FILE", "state.json")
     output = runtime / "report"
     try:
-        tick(config, data_dir, state_path, output, model=DonchianModel, interval=FOUR_HOUR)
+        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
     except ValueError as error:
-        # Expected exactly once: an old state from a previous config/model (e.g. the
-        # V1-to-V2 switch) is intentionally incompatible and must not be silently
-        # reused. Starting a fresh state here is the documented, sanctioned response,
-        # not a workaround for the check.
+        # Expected exactly once per model/config switch (e.g. V1->V2, now
+        # V2->v5): an old state is intentionally incompatible and must not
+        # be silently reused. Starting a fresh state here is the
+        # documented, sanctioned response, not a workaround for the check.
         if "new paper state" not in str(error):
             raise
         state_path.unlink(missing_ok=True)
-        tick(config, data_dir, state_path, output, model=DonchianModel, interval=FOUR_HOUR)
+        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
     database = runtime / "telegram.sqlite"
     deliver_once(
         "connection:" + chat_id,

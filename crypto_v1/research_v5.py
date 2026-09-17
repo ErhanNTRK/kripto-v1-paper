@@ -68,6 +68,45 @@ def short_entry(row, btc, config):
     return stop
 
 
+def long_stop(f, config):
+    return f["c"] - config["atr_multiplier"] * f["atr"]
+
+
+class ShortWindowLongModel:
+    """Long-only, live-deployable version of the v5 signal (Part 1 of the
+    long+short roadmap, 17 Sep 2026): same shorter 10/20/40-bar Donchian
+    lookback tested in run_symmetric/evaluate, but shaped as a
+    features/buy/sell/stop model so it plugs directly into the existing,
+    already-validated crypto_v1.backtest.Engine and the live Spot
+    pipeline (github_worker.py, render_web.py) that DonchianModel (V2)
+    already uses -- no new exchange integration needed for the long side.
+
+    IMPORTANT: the walk-forward test that passed (5/5 windows GO) used
+    run_symmetric(), which has NO take-profit cap -- winners run until
+    long_exit fires. Engine caps at 2R by default (cap_at_target=True);
+    deploying this model with the default cap would NOT match what was
+    actually tested (one window's result depended heavily on a single
+    +26R trade that a 2R cap would have cut short). The live config MUST
+    set "cap_at_target": false to faithfully match the tested behaviour.
+
+    The short side (Part 2 of the roadmap) is NOT in this model -- it
+    needs Binance Margin/Futures infrastructure that does not exist yet.
+    """
+    @staticmethod
+    def features(rows, config):
+        return symmetric_features(rows, config)
+
+    @staticmethod
+    def buy(row, btc, config):
+        return long_entry(row, btc, config) is not None
+
+    @staticmethod
+    def sell(row, btc):
+        return long_exit(row, btc)
+
+    stop = staticmethod(long_stop)
+
+
 def long_exit(row, btc):
     return not btc_up_ok(btc) or row.get("long_exit") is None or row["c"] < row["long_exit"]
 

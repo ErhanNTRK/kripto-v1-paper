@@ -21,6 +21,15 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertIsNone(exit_decision(P, held, B, 103, C))
         self.assertEqual(exit_decision(P, held, B, 103, C, sell_fn=lambda f, b: True), "profit_signal")
 
+    def test_cap_at_target_false_skips_the_fixed_take_profit(self):
+        # Same inputs that trigger take_profit under the default cap...
+        self.assertEqual(exit_decision(P, F, B, 111, C), "take_profit")
+        # ...are skipped when cap_at_target is False, so a real winner
+        # (like the walk-forward-tested uncapped model) keeps running
+        # until sell_fn/trailing actually ends it.
+        uncapped = dict(C, cap_at_target=False)
+        self.assertIsNone(exit_decision(P, F, B, 111, uncapped))
+
     def test_cancel_stop_then_sell_once(self):
         e=Mock(); e.cancel.return_value={"status":"CANCELED"}
         e.query.side_effect=OrderRejected(-2013); e.market_sell.return_value={"status":"FILLED"}

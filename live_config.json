@@ -7,6 +7,7 @@
   "max_open_positions": 5,
   "max_buys_per_day": 40,
   "minimum_reward_risk": 2.0,
+  "cap_at_target": false,
   "telegram_buy_confirmation_required": true,
   "telegram_buy_command": "AL",
   "signal_confirmation_expiry_minutes": 10,

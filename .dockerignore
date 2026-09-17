@@ -3,6 +3,7 @@
 !crypto_v1/*.py
 !config.json
 !config_v2.json
+!config_v5_long.json
 !live_config.json
 !requirements.txt
 !Dockerfile

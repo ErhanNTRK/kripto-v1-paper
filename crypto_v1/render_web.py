@@ -9,7 +9,8 @@ from .live_execution import execution_enabled
 from .live_market import BinanceMarket
 from .live_monitor import execute_exit, exit_decision
 from .live_signal import fetch_runtime_state
-from .research_v2 import DonchianModel, FOUR_HOUR
+from .research_v2 import FOUR_HOUR
+from .research_v5 import ShortWindowLongModel
 from .telegram import send_message
 
 STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False}
@@ -51,10 +52,10 @@ class LiveApp:
     def scan(self):
         results = []
         for position in self.market.live_positions():
-            feature, btc, high = self.market.analysis(position, DonchianModel.features, FOUR_HOUR)
+            feature, btc, high = self.market.analysis(position, ShortWindowLongModel.features, FOUR_HOUR)
             reason = exit_decision(position, feature, btc, high,
                                    {**self.config, **{"trailing_atr": self.market.strategy_config["trailing_atr"]}},
-                                   sell_fn=DonchianModel.sell)
+                                   sell_fn=ShortWindowLongModel.sell)
             if not reason: continue
             if not execution_enabled(self.config, self.environment):
                 results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
@@ -107,9 +108,9 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     verify_from_environment()
     config = json.loads(Path("live_config.json").read_text(encoding="utf-8"))
-    # V2 (hourly Donchian 20/40/80, re-run on 4h bars) drives live candidates and exits;
-    # see ARASTIRMA.md for why V1's config.json was dropped from the live path.
-    strategy = json.loads(Path("config_v2.json").read_text(encoding="utf-8"))
+    # v5 long side (shorter 10/20/40-bar Donchian, uncapped winners via
+    # cap_at_target=false) drives live candidates and exits; see ARASTIRMA.md.
+    strategy = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
     global APP
     APP = LiveApp(config, strategy, os.environ)
     telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET"))
