@@ -12,6 +12,7 @@ from .research_v2 import evaluate, evaluate_walkforward as evaluate_v2_walkforwa
 from .research_v3 import evaluate_v3
 from .walkforward import evaluate as walkforward_evaluate, report as walkforward_report
 from .friend_v1 import evaluate as friend_v1_evaluate
+from .research_v4 import evaluate_walkforward as evaluate_v4_walkforward
 
 
 def main():
@@ -50,6 +51,11 @@ def main():
     friend_v1.add_argument('--data', default='data-wf')
     friend_v1.add_argument('--output', default='reports/friend-v1')
     friend_v1.add_argument('--windows', type=int, default=5)
+    v4 = sub.add_parser('walkforward-v4')
+    v4.add_argument('--data', default='data-wf')
+    v4.add_argument('--output', default='reports/walkforward-v4')
+    v4.add_argument('--windows', type=int, default=5)
+    v4.add_argument('--min-trades', type=int, default=8)
     research = sub.add_parser('research-v2')
     research.add_argument('--data', default='data-v2')
     research.add_argument('--output', default='reports/research-v2')
@@ -120,6 +126,19 @@ def main():
                     universe=manifest,
                     note='Replica of a friend\'s MA9/21+RSI50-68+volume1.2x signal bot; '
                          '15m/1h bars substitute for the live 5m/1h feed; not optimized per window.')
+        full = walkforward_report(result, meta, args.output)
+        print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
+    elif args.command == 'walkforward-v4':
+        if args.windows < 2:
+            parser.error('windows must be >= 2')
+        manifest, data = load(args.data)
+        result = evaluate_v4_walkforward(data, manifest['symbols'], c, manifest,
+                                          args.windows, args.min_trades)
+        meta = dict(mode='walkforward', config_name=args.config, window_count=args.windows,
+                    universe=manifest,
+                    note='User-requested exploratory variant (17 Sep 2026, not pre-registered): '
+                         'no Donchian breakout wait (ema20 reclaim instead), no BTC-wide uptrend '
+                         'requirement (only a BTC-decline floor), no leverage. 4h bars, matches live.')
         full = walkforward_report(result, meta, args.output)
         print(json.dumps(dict(verdict=full['verdict'], reasons=full['reasons'])))
     elif args.command == 'research-v2':
