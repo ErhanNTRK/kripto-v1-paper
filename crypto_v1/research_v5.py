@@ -115,7 +115,7 @@ def short_exit(row, btc):
     return not btc_down_ok(btc) or row.get("short_exit") is None or row["c"] > row["short_exit"]
 
 
-def run_symmetric(data, symbols, c, start, end):
+def run_symmetric(data, symbols, c, start, end, funding=None):
     prepared = {s: {r["t"]: r for r in symmetric_features(rows, c)} for s, rows in data.items()}
     times = sorted(t for t in prepared.get("BTCUSDT", {}) if start <= t < end)
     cash = c["initial_cash"]
@@ -124,6 +124,12 @@ def run_symmetric(data, symbols, c, start, end):
     pending = {}
     trades, curve = [], []
     marks = {}
+    # Real perpetual funding events (every 8h on Binance USD-M Futures; a
+    # BTCUSDT-wide proxy rate applied to every held position, long or
+    # short) -- unmodeled before this was added, per the module docstring's
+    # warning that short P&L here excludes borrow/funding cost.
+    funding_events = sorted(funding or [], key=lambda e: e["t"])
+    funding_index = 0
 
     def equity_now():
         # Full mark value (like backtest.Engine.equity()), NOT a delta from
@@ -153,6 +159,15 @@ def run_symmetric(data, symbols, c, start, end):
     for t in times:
         bars = {s: prepared[s][t] for s in prepared if t in prepared[s]}
         marks.update({s: f["o"] for s, f in bars.items()})
+        # Longs pay shorts when rate>0 (the normal, bullish-market case);
+        # shorts pay longs when rate<0. Charged on whatever is held at the
+        # moment the event fires, at that position's current mark price.
+        while funding_index < len(funding_events) and funding_events[funding_index]["t"] <= t:
+            rate = funding_events[funding_index]["rate"]
+            for symbol, p in positions.items():
+                notional = p["qty"] * marks.get(symbol, p["entry"])
+                cash += -notional * rate if p["side"] == "long" else notional * rate
+            funding_index += 1
         for symbol, side in list(pending.items()):
             if symbol in positions or symbol not in bars:
                 continue
@@ -217,10 +232,15 @@ def run_symmetric(data, symbols, c, start, end):
     return dict(trades=trades, curve=curve, positions={})
 
 
-def evaluate(data, symbols, c, manifest, count=5, min_trades=8, warm=100):
+def evaluate(data, symbols, c, manifest, count=5, min_trades=8, warm=100, funding=None):
     """data: native 15m rows (as loaded by crypto_v1.data.load) -- aggregated
     to 4h internally, so the same cached 15m dataset used by every other
-    variant here can be reused without a new fetch."""
+    variant here can be reused without a new fetch.
+
+    funding: optional real BTCUSDT-proxy funding events (see run_symmetric)
+    applied to every window's normal and stress runs alike, so a real
+    leveraged-perpetual cost/benefit is reflected in the GO/NO_GO verdict
+    rather than only unleveraged spot-style fee/slippage."""
     agg_data = {symbol: aggregate(rows, FOUR_HOUR) for symbol, rows in data.items()}
     symbols = [s for s in symbols if len(agg_data.get(s, [])) >= 200]
     times = [r["t"] for r in agg_data["BTCUSDT"] if manifest["start"] <= r["t"] < manifest["end"]]
@@ -231,9 +251,9 @@ def evaluate(data, symbols, c, manifest, count=5, min_trades=8, warm=100):
     windows = []
     for i in range(count):
         start, end = starts[i], starts[i + 1]
-        normal = metrics(run_symmetric(agg_data, symbols, c, start, end), c)
+        normal = metrics(run_symmetric(agg_data, symbols, c, start, end, funding), c)
         cs = wf.stress_config(c)
-        stress = metrics(run_symmetric(agg_data, symbols, cs, start, end), cs)
+        stress = metrics(run_symmetric(agg_data, symbols, cs, start, end, funding), cs)
         ok = (normal["trade_count"] or 0) >= min_trades
         passed = ok and normal["net_return"] > 0 and (normal["profit_factor"] or 0) >= 1.0 \
             and stress["net_return"] > 0 and (stress["profit_factor"] or 0) >= 1.0

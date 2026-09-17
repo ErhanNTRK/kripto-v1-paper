@@ -1,0 +1,59 @@
+name: V5 Short Sinyali - Gercek Funding Maliyetiyle Yeniden Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  funding-walkforward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 300 days of data (same as walkforward.yml)
+        run: python -m crypto_v1 fetch --days 300 --data data-wf
+      - name: Re-run v5 walk-forward with real BTCUSDT funding-rate history applied
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import load
+          from crypto_v1.risk import validate_config
+          from crypto_v1.research_v5 import evaluate
+          from crypto_v1.funding import funding_rates
+
+          config = validate_config(json.loads(open('config_v5_long.json', encoding='utf-8').read()))
+          manifest, data = load('data-wf')
+          symbols = manifest['symbols']
+
+          real_funding = funding_rates('BTCUSDT', manifest['start'], manifest['end'])
+          print(f'Cekilen funding olay sayisi: {len(real_funding)}')
+          if real_funding:
+              rates = [e[\"rate\"] for e in real_funding]
+              avg = sum(rates) / len(rates)
+              positive = sum(1 for r in rates if r > 0)
+              print(f'Ortalama funding orani (8 saatte bir): {avg:.6f} ({avg*100:.4f}%)')
+              print(f'Pozitif (long odemesi) oran: {positive}/{len(rates)}')
+              print(f'Min/Max: {min(rates):.6f} / {max(rates):.6f}')
+
+          print()
+          print('=== FUNDING MALIYETI OLMADAN (mevcut, dogrulanmis sonuc) ===')
+          without = evaluate(data, symbols, config, manifest, count=5)
+          print('Verdict:', without['verdict'])
+          for w in without['windows']:
+              print(f\"  pencere {w['window']}: normal={w['normal']['net_return']:.4f} PF={w['normal']['profit_factor']}, \"
+                    f\"stress={w['stress']['net_return']:.4f} PF={w['stress']['profit_factor']}, gecti={w['passed']}\")
+
+          print()
+          print('=== GERCEK BTCUSDT FUNDING MALIYETIYLE (short icin gercekci) ===')
+          withf = evaluate(data, symbols, config, manifest, count=5, funding=real_funding)
+          print('Verdict:', withf['verdict'])
+          for w in withf['windows']:
+              print(f\"  pencere {w['window']}: normal={w['normal']['net_return']:.4f} PF={w['normal']['profit_factor']}, \"
+                    f\"stress={w['stress']['net_return']:.4f} PF={w['stress']['profit_factor']}, gecti={w['passed']}\")
+          "

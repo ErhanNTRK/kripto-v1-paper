@@ -94,6 +94,51 @@ class RunSymmetricTests(unittest.TestCase):
         state = run_symmetric(data, ['BTCUSDT'], C, start=0, end=n * INTERVAL)
         self.assertEqual(state['trades'], [])
 
+    def test_flat_data_with_funding_matches_no_funding_when_nothing_is_held(self):
+        # No positions ever open on flat data, so funding events (which
+        # only accrue against open positions) must be a pure no-op.
+        n = 200
+        rows = [dict(t=i * INTERVAL, o=100.0, h=100.5, l=99.5, c=100.0, v=100.0) for i in range(n)]
+        data = {'BTCUSDT': rows}
+        funding = [dict(t=50 * INTERVAL, rate=0.001)]
+        without = run_symmetric(data, ['BTCUSDT'], C, start=0, end=n * INTERVAL)
+        withf = run_symmetric(data, ['BTCUSDT'], C, start=0, end=n * INTERVAL, funding=funding)
+        self.assertEqual(without['curve'], withf['curve'])
+
+    def _trending_rows(self, n, step):
+        # step>0 => uptrend (drives long entries), step<0 => downtrend
+        # (drives short entries); steady enough that ema20>ema50>ema200
+        # stacks correctly and breakout/exit levels never reverse, so
+        # exactly one position opens early and stays open throughout.
+        out = []
+        price = 1000.0
+        for i in range(n):
+            price += step
+            out.append(dict(t=i * INTERVAL, o=price, h=price + 1, l=price - 1, c=price, v=100.0))
+        return out
+
+    def test_funding_charges_a_held_long_position_when_rate_is_positive(self):
+        n = 260
+        btc = self._trending_rows(n, 0.5)
+        alt = self._trending_rows(n, 0.5)
+        data = {'BTCUSDT': btc, 'ALTUSDT': alt}
+        end = n * INTERVAL
+        without = run_symmetric(data, ['ALTUSDT'], C, start=0, end=end)
+        funding = [dict(t=t, rate=0.001) for t in range(150 * INTERVAL, n * INTERVAL, 8 * INTERVAL)]
+        withf = run_symmetric(data, ['ALTUSDT'], C, start=0, end=end, funding=funding)
+        self.assertLess(withf['curve'][-1]['equity'], without['curve'][-1]['equity'])
+
+    def test_funding_pays_a_held_short_position_when_rate_is_positive(self):
+        n = 260
+        btc = self._trending_rows(n, -0.5)
+        alt = self._trending_rows(n, -0.5)
+        data = {'BTCUSDT': btc, 'ALTUSDT': alt}
+        end = n * INTERVAL
+        without = run_symmetric(data, ['ALTUSDT'], C, start=0, end=end)
+        funding = [dict(t=t, rate=0.001) for t in range(150 * INTERVAL, n * INTERVAL, 8 * INTERVAL)]
+        withf = run_symmetric(data, ['ALTUSDT'], C, start=0, end=end, funding=funding)
+        self.assertGreater(withf['curve'][-1]['equity'], without['curve'][-1]['equity'])
+
 
 class EvaluateTests(unittest.TestCase):
     def test_runs_without_crashing_on_flat_data_and_reports_no_go(self):
