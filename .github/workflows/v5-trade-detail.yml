@@ -1,0 +1,46 @@
+name: V5 Islem Detayi Kontrolu (tek pencere, elle sağlama)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 300 days of data (same as walkforward.yml)
+        run: python -m crypto_v1 fetch --days 300 --data data-wf
+      - name: Print every trade in window 0 for manual verification
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import load
+          from crypto_v1.risk import validate_config
+          from crypto_v1.research_v5 import run_symmetric
+
+          config = validate_config(json.loads(open('config_v2.json', encoding='utf-8').read()))
+          manifest, data = load('data-wf')
+          from crypto_v1.research_v2 import aggregate, FOUR_HOUR
+          agg_data = {s: aggregate(rows, FOUR_HOUR) for s, rows in data.items()}
+          symbols = manifest['symbols']
+
+          start, end = 1765180800000, 1770062400000
+          state = run_symmetric(agg_data, symbols, config, start, end)
+          print(f'Toplam islem: {len(state[\"trades\"])}')
+          total_pnl = 0.0
+          for tr in state['trades']:
+              total_pnl += tr['pnl']
+              print(f\"{tr['symbol']:10s} | {tr['side']:5s} | giris={tr['entry']:.6f} cikis={tr['exit']:.6f} \"
+                    f\"qty={tr['qty']:.4f} | pnl={tr['pnl']:+.4f} | r={tr['r_multiple']:+.3f} | {tr['reason']}\")
+          print(f'Toplam pnl (test hesabi, 10000 baslangic): {total_pnl:+.2f}')
+          print(f'Baslangic sermaye: {config[\"initial_cash\"]}')
+          print(f'Curve ilk/son equity: {state[\"curve\"][0][\"equity\"]:.2f} -> {state[\"curve\"][-1][\"equity\"]:.2f}')
+          "
