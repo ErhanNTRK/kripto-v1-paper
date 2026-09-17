@@ -86,19 +86,30 @@ def run_symmetric(data, symbols, c, start, end):
     trades, curve = [], []
     marks = {}
 
-    def close(symbol, price, t, reason):
+    def equity_now():
+        # Full mark value (like backtest.Engine.equity()), NOT a delta from
+        # entry -- that distinction matters: cash below is debited/credited
+        # the FULL position cost/proceeds at open, so equity must add back
+        # the FULL current mark value, signed by direction, to stay correct.
+        return cash + sum(
+            p["qty"] * marks.get(s, p["entry"]) * (1 if p["side"] == "long" else -1)
+            for s, p in positions.items()
+        )
+
+    def close(symbol, price, t):
+        nonlocal cash
         p = positions.pop(symbol)
         if p["side"] == "long":
             fill = price * (1 - slippage)
             received = p["qty"] * fill * (1 - fee)
             pnl = received - p["qty"] * p["entry"] * (1 + fee)
-            cash_delta = received
+            cash += received  # mirrors the full cost debited at open
         else:
             fill = price * (1 + slippage)
             cost = p["qty"] * fill * (1 + fee)
             pnl = p["qty"] * p["entry"] * (1 - fee) - cost
-            cash_delta = pnl  # margin-free approximation: only the P&L moves cash
-        return fill, pnl, cash_delta, p
+            cash -= cost  # mirrors the full proceeds credited at open
+        return fill, pnl, p
 
     for t in times:
         bars = {s: prepared[s][t] for s in prepared if t in prepared[s]}
@@ -106,19 +117,31 @@ def run_symmetric(data, symbols, c, start, end):
         for symbol, side in list(pending.items()):
             if symbol in positions or symbol not in bars:
                 continue
+            if len(positions) >= c["max_positions"]:
+                continue
             f = bars[symbol]
             entry = f["o"] * (1 + slippage) if side == "long" else f["o"] * (1 - slippage)
-            equity = cash + sum(
-                (marks.get(s, p["entry"]) - p["entry"]) * p["qty"] * (1 if p["side"] == "long" else -1)
-                for s, p in positions.items()
-            )
-            notional = equity * c["risk_fraction"] / 0.02  # ~fixed fractional exposure, matches V2 scale
-            qty = min(notional, cash * 0.9) / entry if entry else 0
-            if qty * entry >= 10 and len(positions) < c["max_positions"]:
-                stop = long_entry(f, bars.get("BTCUSDT"), c) if side == "long" else short_entry(f, bars.get("BTCUSDT"), c)
-                if stop is not None:
-                    cash -= qty * entry * fee  # only fee leaves cash; notional itself is tracked via mark-to-market
-                    positions[symbol] = dict(side=side, qty=qty, entry=entry, stop=stop, entry_time=t)
+            stop = long_entry(f, bars.get("BTCUSDT"), c) if side == "long" else short_entry(f, bars.get("BTCUSDT"), c)
+            if stop is None:
+                continue
+            unit_risk = abs(entry - stop)
+            if unit_risk <= 0:
+                continue
+            # Real risk-based sizing (mirrors risk.size_position): a FIXED
+            # dollar risk (fraction of equity) divided by the ACTUAL stop
+            # distance -- not an assumed distance. The first version here
+            # assumed a flat 2% stop for sizing regardless of the real ATR
+            # stop, AND only debited/credited the entry fee (not the full
+            # notional) while the close side moved the full amount -- a
+            # double-count that compounded into an exponential blow-up
+            # (caught in the first real run: >20,000% window returns, not
+            # a real result). Both are fixed now: real unit_risk, and cash
+            # moves the FULL notional symmetrically at open and close.
+            risk_usdt = equity_now() * c["risk_fraction"]
+            qty = min(risk_usdt / unit_risk, cash * 0.9 / entry) if entry else 0
+            if qty * entry >= 10:
+                cash = cash - qty * entry * (1 + fee) if side == "long" else cash + qty * entry * (1 - fee)
+                positions[symbol] = dict(side=side, qty=qty, entry=entry, stop=stop, entry_time=t)
         pending = {}
         for symbol, p in list(positions.items()):
             if symbol not in bars:
@@ -126,10 +149,7 @@ def run_symmetric(data, symbols, c, start, end):
             f = bars[symbol]
             hit_stop = (f["l"] <= p["stop"]) if p["side"] == "long" else (f["h"] >= p["stop"])
             if hit_stop:
-                fill, pnl, cash_delta, pos = close(symbol, p["stop"], t, "stop")
-                cash += cash_delta if pos["side"] == "long" else 0
-                if pos["side"] == "short":
-                    cash += pnl
+                fill, pnl, pos = close(symbol, p["stop"], t)
                 trades.append(dict(symbol=symbol, side=pos["side"], entry_time=pos["entry_time"], exit_time=t,
                                     entry=pos["entry"], exit=fill, qty=pos["qty"], pnl=pnl,
                                     risk=abs(pos["entry"] - pos["stop"]) * pos["qty"],
@@ -140,10 +160,7 @@ def run_symmetric(data, symbols, c, start, end):
             f = bars[symbol]
             exited = long_exit(f, bars.get("BTCUSDT")) if p["side"] == "long" else short_exit(f, bars.get("BTCUSDT"))
             if exited:
-                fill, pnl, cash_delta, pos = close(symbol, f["c"], t, "trend_exit")
-                cash += cash_delta if pos["side"] == "long" else 0
-                if pos["side"] == "short":
-                    cash += pnl
+                fill, pnl, pos = close(symbol, f["c"], t)
                 trades.append(dict(symbol=symbol, side=pos["side"], entry_time=pos["entry_time"], exit_time=t,
                                     entry=pos["entry"], exit=fill, qty=pos["qty"], pnl=pnl,
                                     risk=abs(pos["entry"] - pos["stop"]) * pos["qty"],
@@ -157,11 +174,7 @@ def run_symmetric(data, symbols, c, start, end):
                 pending[symbol] = "long"
             elif short_entry(f, bars.get("BTCUSDT"), c) is not None:
                 pending[symbol] = "short"
-        equity = cash + sum(
-            (marks.get(s, p["entry"]) - p["entry"]) * p["qty"] * (1 if p["side"] == "long" else -1)
-            for s, p in positions.items()
-        )
-        curve.append(dict(time=t + FOUR_HOUR, equity=equity, positions=len(positions)))
+        curve.append(dict(time=t + FOUR_HOUR, equity=equity_now(), positions=len(positions)))
     return dict(trades=trades, curve=curve, positions={})
 
 
