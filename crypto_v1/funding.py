@@ -1,53 +1,64 @@
-"""Public Binance USD-M Futures funding-rate history (read-only, no auth,
-no order endpoints) -- used to model the real cost/benefit of holding a
-leveraged perpetual short, which research_v5's unleveraged spot-style
-simulator does not include (see its module docstring)."""
-import json
+"""Public Binance USD-M Futures funding-rate history, via the bulk-data CDN
+(data.binance.vision) -- the same trusted, non-geo-restricted endpoint
+family this project already relies on for klines (data-api.binance.vision).
+The regular trading REST API (fapi.binance.com) returns HTTP 451 from
+GitHub Actions runners (confirmed by a live run), so it cannot be used
+here; the CDN's monthly archives are the only public source that works
+from CI."""
+import csv
+import io
 import time
-import urllib.request
-import urllib.parse
 import urllib.error
+import urllib.request
+import zipfile
+from datetime import datetime, timezone
 
-FAPI_BASE = 'https://fapi.binance.com'
-
-
-def get(path, params=None):
-    if path != 'fundingRate':
-        raise ValueError('Only the public funding-rate endpoint is allowed')
-    url = FAPI_BASE + '/fapi/v1/' + path + '?' + urllib.parse.urlencode(params or {})
-    for attempt in range(5):
-        try:
-            with urllib.request.urlopen(url, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 418:
-                raise RuntimeError('Binance temporary IP ban; stop requests') from exc
-            if exc.code not in (429, 500, 502, 503, 504) or attempt == 4:
-                raise
-            time.sleep(max(float(exc.headers.get('Retry-After', 0)), 2 ** attempt))
-        except (urllib.error.URLError, TimeoutError):
-            if attempt == 4:
-                raise
-            time.sleep(2 ** attempt)
+BASE = 'https://data.binance.vision/data/futures/um/monthly/fundingRate'
 
 
-def funding_rates(symbol, start, end):
-    """Historical funding events (every 8h) for symbol's USD-M perpetual,
-    covering [start, end) in ms. Returns [{t, rate}] sorted ascending; rate
-    is the fraction paid by longs to shorts each event (negative means
-    shorts pay longs instead)."""
+def _month_url(symbol, year, month):
+    return f'{BASE}/{symbol}/{symbol}-fundingRate-{year:04d}-{month:02d}.zip'
+
+
+def _months_between(start_ms, end_ms):
+    start = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
+    end = datetime.fromtimestamp((end_ms - 1) / 1000, tz=timezone.utc)
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        yield y, m
+        m = m + 1 if m < 12 else 1
+        y = y if m != 1 else y + 1
+
+
+def _fetch_month(symbol, year, month, opener):
+    url = _month_url(symbol, year, month)
+    try:
+        with opener(url, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []
+        raise
+    events = []
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        with archive.open(archive.namelist()[0]) as fh:
+            for row in csv.DictReader(io.TextIOWrapper(fh, encoding='utf-8')):
+                events.append(dict(t=int(float(row['calc_time'])), rate=float(row['last_funding_rate'])))
+    return events
+
+
+def funding_rates(symbol, start, end, opener=urllib.request.urlopen, sleep=time.sleep):
+    """Historical funding events for symbol's USD-M perpetual, covering
+    [start, end) in ms, from Binance's public monthly data archives.
+    Returns [{t, rate}] sorted ascending. A month not yet published
+    (Binance publishes each month's archive a few days after it closes,
+    so the most recent weeks are typically missing) is silently skipped --
+    callers get a real but slightly shorter tail, not an error."""
     result = []
-    cursor = start
-    while cursor < end:
-        batch = get('fundingRate', {'symbol': symbol, 'startTime': cursor,
-                                     'endTime': end - 1, 'limit': 1000})
-        if not batch:
-            break
-        for b in batch:
-            result.append(dict(t=int(b['fundingTime']), rate=float(b['fundingRate'])))
-        next_cursor = int(batch[-1]['fundingTime']) + 1
-        if next_cursor <= cursor:
-            raise ValueError('Non advancing pagination')
-        cursor = next_cursor
-        time.sleep(0.08)
+    months = list(_months_between(start, end))
+    for i, (year, month) in enumerate(months):
+        result.extend(e for e in _fetch_month(symbol, year, month, opener) if start <= e['t'] < end)
+        if i < len(months) - 1:
+            sleep(0.1)
+    result.sort(key=lambda e: e['t'])
     return result
