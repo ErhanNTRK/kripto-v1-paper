@@ -31,7 +31,13 @@ class EarlyReversalModel:
 
     @staticmethod
     def buy(row, btc, config):
-        if not row.get("atr") or not row.get("ema20") or row.get("rsi") is None:
+        # volume_avg needs 20 bars, same as ema20, but its warm-up landing
+        # bar is one later (i>=20 vs ema20's i>=19) -- without this check a
+        # signal could fire on that one bar before volume_avg exists, and
+        # Engine.step's default candidate-score expression (f['v']/f['volume_avg'])
+        # would crash on None. DonchianModel never hits this because its own
+        # donchian_breaks warm-up (i>=80) is already well past it.
+        if not row.get("atr") or not row.get("ema20") or row.get("rsi") is None or not row.get("volume_avg"):
             return False
         if not (row["c"] > row["ema20"] and 40 <= row["rsi"] <= 70):
             return False

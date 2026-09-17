@@ -5,7 +5,7 @@ from crypto_v1.data import INTERVAL
 
 def row(**kw):
     base = dict(t=0, o=100.0, h=101.0, l=99.0, c=100.0, v=100.0, atr=1.0,
-                ema20=98.0, ema50=96.0, ema200=90.0, rsi=55.0)
+                ema20=98.0, ema50=96.0, ema200=90.0, rsi=55.0, volume_avg=80.0)
     base.update(kw)
     return base
 
@@ -40,6 +40,12 @@ class EarlyReversalModelTests(unittest.TestCase):
     def test_rejects_when_btc_in_meaningful_decline(self):
         declining_btc = btc(c=90, ema20=100)  # 10% below its own average
         self.assertFalse(EarlyReversalModel.buy(row(support=90), declining_btc, self.C))
+
+    def test_rejects_before_volume_avg_warm_up_even_if_ema20_already_exists(self):
+        # ema20 lands one bar earlier than volume_avg; without this guard
+        # Engine.step's default score expression (v/volume_avg) would crash
+        # on None instead of just skipping the candidate.
+        self.assertFalse(EarlyReversalModel.buy(row(support=90, volume_avg=None), btc(), self.C))
 
     def test_sell_when_price_falls_back_below_its_average(self):
         self.assertTrue(EarlyReversalModel.sell(row(c=95, ema20=98), btc()))
