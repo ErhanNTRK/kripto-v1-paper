@@ -44,13 +44,14 @@ def write_json(path, value):
 def prepare_data(config, runtime, now):
     data_dir = runtime / "data"
     manifest_path = runtime / "manifest.json"
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        symbols = manifest["symbols"]
-    else:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+    if manifest is None or manifest.get("timeframe") != "4h":
+        # No cache yet, or a stale pre-V2 cache (15m, top-50 V1 universe) left
+        # over from before the V1->V2 switch -- must not be silently reused.
         symbols = universe(config)
         manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data"}
         write_json(manifest_path, manifest)
+    symbols = manifest["symbols"]
     # >80 four-hour bars (Donchian's longest lookback) with a comfortable margin,
     # since this cache is rebuilt from scratch on every 15-minute cron run.
     start = now - 30 * 24 * 60 * 60 * 1000

@@ -1,9 +1,11 @@
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from crypto_v1.github_worker import private_chat_id
+from crypto_v1.github_worker import prepare_data, private_chat_id
 
 
 class Response:
@@ -15,6 +17,40 @@ class Response:
         return False
     def read(self):
         return json.dumps(self.payload).encode()
+
+
+class PrepareDataTests(unittest.TestCase):
+    def _run(self, runtime, existing_manifest=None):
+        if existing_manifest is not None:
+            (runtime / 'manifest.json').write_text(json.dumps(existing_manifest), encoding='utf-8')
+        with patch('crypto_v1.github_worker.universe', return_value=['ETHUSDT']) as mock_universe, \
+             patch('crypto_v1.github_worker.candles', return_value=[]), \
+             patch('crypto_v1.github_worker.validate', return_value=[]):
+            prepare_data({}, runtime, now=0)
+        return mock_universe, json.loads((runtime / 'manifest.json').read_text(encoding='utf-8'))
+
+    def test_no_cache_fetches_a_fresh_4h_universe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_universe, manifest = self._run(Path(tmp))
+        mock_universe.assert_called_once()
+        self.assertEqual(manifest['timeframe'], '4h')
+        self.assertEqual(manifest['symbols'], ['ETHUSDT'])
+
+    def test_stale_pre_v2_cache_is_discarded_not_reused(self):
+        stale = {'symbols': ['DOGEUSDT', '牛USDT'], 'timeframe': '15m'}
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_universe, manifest = self._run(Path(tmp), existing_manifest=stale)
+        # Old 15m/top-50 cache must trigger a fresh pick, not be trusted as-is.
+        mock_universe.assert_called_once()
+        self.assertEqual(manifest['timeframe'], '4h')
+        self.assertEqual(manifest['symbols'], ['ETHUSDT'])
+
+    def test_matching_4h_cache_is_reused_without_a_fresh_fetch(self):
+        cached = {'symbols': ['SOLUSDT'], 'timeframe': '4h', 'source': 'x'}
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_universe, manifest = self._run(Path(tmp), existing_manifest=cached)
+        mock_universe.assert_not_called()
+        self.assertEqual(manifest['symbols'], ['SOLUSDT'])
 
 
 class GithubWorkerTests(unittest.TestCase):
