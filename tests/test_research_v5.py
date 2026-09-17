@@ -107,20 +107,22 @@ class RunSymmetricTests(unittest.TestCase):
 
     def _trending_rows(self, n, step):
         # step>0 => uptrend (drives long entries), step<0 => downtrend
-        # (drives short entries); steady enough that ema20>ema50>ema200
-        # stacks correctly and breakout/exit levels never reverse, so
-        # exactly one position opens early and stays open throughout.
+        # (drives short entries); the per-bar move must clear the fixed
+        # +-0.5 high/low margin (i.e. abs(step) > 0.5) for row['c'] to
+        # actually exceed the prior bar's high/low -- otherwise breaks_up/
+        # breaks_down never fires and no position ever opens (caught by
+        # this test itself failing with a flat 10000.0 curve).
         out = []
         price = 1000.0
         for i in range(n):
             price += step
-            out.append(dict(t=i * INTERVAL, o=price, h=price + 1, l=price - 1, c=price, v=100.0))
+            out.append(dict(t=i * INTERVAL, o=price, h=price + 0.5, l=price - 0.5, c=price, v=100.0))
         return out
 
     def test_funding_charges_a_held_long_position_when_rate_is_positive(self):
         n = 260
-        btc = self._trending_rows(n, 0.5)
-        alt = self._trending_rows(n, 0.5)
+        btc = self._trending_rows(n, 2.0)
+        alt = self._trending_rows(n, 2.0)
         data = {'BTCUSDT': btc, 'ALTUSDT': alt}
         end = n * INTERVAL
         without = run_symmetric(data, ['ALTUSDT'], C, start=0, end=end)
@@ -130,8 +132,8 @@ class RunSymmetricTests(unittest.TestCase):
 
     def test_funding_pays_a_held_short_position_when_rate_is_positive(self):
         n = 260
-        btc = self._trending_rows(n, -0.5)
-        alt = self._trending_rows(n, -0.5)
+        btc = self._trending_rows(n, -2.0)
+        alt = self._trending_rows(n, -2.0)
         data = {'BTCUSDT': btc, 'ALTUSDT': alt}
         end = n * INTERVAL
         without = run_symmetric(data, ['ALTUSDT'], C, start=0, end=end)
