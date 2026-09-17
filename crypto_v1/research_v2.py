@@ -69,14 +69,16 @@ class DonchianModel:
 
 def evaluate(data, symbols, config, output):
     hourly_data = {symbol: hourly(rows) for symbol, rows in data.items()}
-    symbols = [s for s in symbols[:20] if len(hourly_data.get(s, [])) >= 400]
+    # symbols already reflects config['top_n'] from the fetch-time universe
+    # selection (crypto_v1.data.universe) -- do not re-cap it here.
+    symbols = [s for s in symbols if len(hourly_data.get(s, [])) >= 400]
     times = [r["t"] for r in hourly_data["BTCUSDT"]]
     warm = max(200, len(times) // 5)
     split = times[warm + int((len(times) - warm) * 0.7)]
     segments = {"full": (times[warm], times[-1] + HOUR),
                 "development": (times[warm], split),
                 "holdout": (split, times[-1] + HOUR)}
-    result = {"model": "hourly_donchian_20_40_80_top20", "symbols": symbols, "segments": {}}
+    result = {"model": "hourly_donchian_20_40_80", "symbols": symbols, "segments": {}}
     for name, (start, end) in segments.items():
         state = run(hourly_data, symbols, config, start, end, DonchianModel, HOUR)
         result["segments"][name] = metrics(state, config)
@@ -92,7 +94,7 @@ def evaluate_walkforward(data, symbols, config, manifest, count=5, min_trades=15
     """Same pre-registered Donchian model, but scored with independent multi-window
     walk-forward (see crypto_v1.walkforward) instead of a single development/holdout split."""
     hourly_data = {symbol: hourly(rows) for symbol, rows in data.items()}
-    symbols = [s for s in symbols[:20] if len(hourly_data.get(s, [])) >= 400]
+    symbols = [s for s in symbols if len(hourly_data.get(s, [])) >= 400]
     result = wf.evaluate(hourly_data, symbols, config, manifest, count,
                           model=DonchianModel, interval=HOUR, warm=200, min_trades=min_trades)
     return result
@@ -105,7 +107,7 @@ def evaluate_timeframe_walkforward(data, symbols, config, manifest, interval, co
     (and therefore a smaller total cost drag) is enough to clear the same
     multi-window + 2x-cost-stress bar."""
     agg_data = {symbol: aggregate(rows, interval) for symbol, rows in data.items()}
-    symbols = [s for s in symbols[:20] if len(agg_data.get(s, [])) >= 200]
+    symbols = [s for s in symbols if len(agg_data.get(s, [])) >= 200]
     min_bars = warm + count * min_trades * 4
     return wf.evaluate(agg_data, symbols, config, manifest, count, model=DonchianModel,
                         interval=interval, warm=warm, min_trades=min_trades, min_bars=min_bars)
