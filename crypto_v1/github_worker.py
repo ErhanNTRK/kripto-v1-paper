@@ -11,7 +11,7 @@ from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
 from .short_signal import detect_short_candidates
-from .telegram import deliver_paper_events, deliver_once, deliver_short_events, format_daily_status
+from .telegram import deliver_paper_events, deliver_once, deliver_short_events
 
 
 def private_chat_id(token):
@@ -138,15 +138,12 @@ def main():
     )
     deliver_paper_events(state_path, database)
     deliver_short_events(runtime / "short_state.json", database)
-    saved = json.loads(state_path.read_text(encoding="utf-8"))["state"]
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    status_day = datetime.fromtimestamp(now / 1000, ZoneInfo("Europe/Istanbul")).strftime("%Y-%m-%d")
-    deliver_once(
-        "daily-status:" + chat_id + ":" + str(saved["started_at"]) + ":" + status_day,
-        format_daily_status(saved, now),
-        database,
-    )
+    # The once-a-day "Sanal portfoy / Gercek emir verilmedi" status heartbeat
+    # was dropped per the user's 18 Sep 2026 request -- it read as confusing
+    # noise once live trading was actually turned on (real AL/SHORT_ADAYI
+    # alerts and real fill/exit confirmations already show the system is
+    # alive; format_daily_status is kept, unused, in case a heartbeat is
+    # wanted again later).
     shutil.rmtree(data_dir, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
     print("Paper update completed")
