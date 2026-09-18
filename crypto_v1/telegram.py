@@ -37,11 +37,18 @@ def send_message(message):
 def format_event(event):
     # Was labeled "SANAL ISLEM / Gercek emir verilmedi" (virtual trade, no
     # real order given) from when this project was paper-only. Live
-    # trading has been on since 17-18 Sep 2026 -- AL_ADAYI/SHORT_ADAYI is
-    # now a real trade candidate that a plain "AL" reply actually executes
-    # for real money, so the old wording was actively misleading. Fixed
-    # per the user's 18 Sep 2026 report that it still read as if nothing
-    # real was happening.
+    # trading has been on since 17-18 Sep 2026, so that wording was fixed
+    # to say AL_ADAYI/SHORT_ADAYI is a real candidate. Then entries became
+    # fully automatic (render_web.LiveApp.auto_enter, 18 Sep 2026) -- no
+    # Telegram reply is read or required at all to open the position, it
+    # opens on the next periodic scan (usually within ~5 minutes)
+    # regardless of what the user does. The "Onaylamak icin AL yaz" wording
+    # was left over from the manual-confirmation era and was actively
+    # misleading: a user replying AL after the automatic entry already
+    # fired saw a confusing rejection ("no pending signal"), reported
+    # 18 Sep 2026 as "AL dedim ama almadi". A plain "AL" reply still works
+    # (render_web.LiveApp.telegram, harmlessly redundant with auto-entry)
+    # but is no longer presented as a required or meaningful step.
     stamp = datetime.fromtimestamp(event['time']/1000, timezone.utc).strftime('%d.%m %H:%M UTC')
     lines = ['KRIPTO V1 | SINYAL', f"{event['type']} — {event['symbol']}", stamp]
     for key, label in [('price','Fiyat'),('close','Sinyal kapanisi'),('stop','Stop'),('target','Hedef'),('risk','Planlanan risk (USDT)')]:
@@ -50,7 +57,7 @@ def format_event(event):
     if 'reason' in event:
         lines.append('Cikis nedeni: '+event['reason'])
     if event.get('type') in ('AL_ADAYI', 'SHORT_ADAYI'):
-        lines.append('Onaylamak icin AL yaz. Onaylanirsa gercek emir verilir.')
+        lines.append('Bu sinyal otomatik islenecek, bir sey yazmaniza gerek yok.')
     return '\n'.join(lines)
 
 

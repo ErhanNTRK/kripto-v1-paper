@@ -34,19 +34,24 @@ class TelegramTests(unittest.TestCase):
         message = format_event(dict(type='AL', symbol='BTCUSDT', time=0, price=100))
         self.assertIn('SINYAL', message)
 
-    def test_al_adayi_prompts_for_a_real_al_confirmation(self):
+    def test_al_adayi_no_longer_asks_for_a_manual_al_reply(self):
         # Regression (18 Sep 2026): with live trading on, this must no
         # longer claim "SANAL ISLEM / Gercek emir verilmedi" (virtual
-        # trade, no real order given) -- AL_ADAYI is a real candidate that
-        # a plain "AL" reply actually executes for real money.
+        # trade, no real order given) -- AL_ADAYI is a real candidate.
+        # Then entries became fully automatic (render_web.LiveApp.
+        # auto_enter): telling the user to reply "AL yaz" was actively
+        # misleading once the position opened on its own regardless of
+        # any reply, reported 18 Sep 2026 as "AL dedim ama almadi".
         message = format_event(dict(type='AL_ADAYI', symbol='BTCUSDT', time=0, close=100))
         self.assertNotIn('SANAL ISLEM', message)
         self.assertNotIn('Gercek emir verilmedi', message)
-        self.assertIn('AL yaz', message)
+        self.assertNotIn('AL yaz', message)
+        self.assertIn('otomatik', message)
 
-    def test_short_adayi_also_prompts_for_a_real_al_confirmation(self):
+    def test_short_adayi_also_says_it_is_automatic(self):
         message = format_event(dict(type='SHORT_ADAYI', symbol='BTCUSDT', time=0, close=100))
-        self.assertIn('AL yaz', message)
+        self.assertNotIn('AL yaz', message)
+        self.assertIn('otomatik', message)
 
     def test_daily_status_reports_halt_and_trade_count(self):
         state = {'cash': 68.13, 'positions': {}, 'halted': True,
