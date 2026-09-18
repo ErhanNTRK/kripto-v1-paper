@@ -12,7 +12,8 @@ from .live_monitor import execute_exit, exit_decision
 from .live_short_controller import approve_short
 from .live_short_market import BinanceFuturesMarket
 from .live_short_monitor import execute_short_exit, short_exit_decision
-from .live_signal import fetch_runtime_state, fetch_runtime_state_short
+from .live_signal import (fetch_runtime_state, fetch_runtime_state_short,
+                          pending_candidates, pending_short_candidates)
 from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel, symmetric_features
 from .telegram import send_message
@@ -34,10 +35,13 @@ class LiveApp:
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor)
         self.short_config = short_config
-        self.futures_executor = FuturesExecutor(short_config, environment) if short_config else None
+        # `is not None`, not truthiness: an empty-but-present short_config
+        # dict must still enable the short subsystem, not silently disable
+        # it the way a falsy `if short_config` check would.
+        self.futures_executor = FuturesExecutor(short_config, environment) if short_config is not None else None
         self.futures_market = (BinanceFuturesMarket(short_config, short_strategy_config, environment,
                                                      self.futures_executor)
-                               if short_config else None)
+                               if short_config is not None else None)
 
     def _approve_long(self, parsed):
         result = approve_buy(parsed["update_id"], parsed["command"], int(time.time() * 1000),
@@ -71,16 +75,34 @@ class LiveApp:
         return result
 
     def telegram(self, payload):
+        """A single "AL" confirms whichever one signal is pending -- long or
+        short -- per the user's 18 Sep 2026 preference for one consistent
+        reply word instead of separate AL/SHORT commands (the notification
+        text itself still says AL_ADAYI or SHORT_ADAYI so the direction is
+        never ambiguous to read, only the reply is unified). Both sides'
+        pending lists are checked together here so "exactly one signal
+        pending" is enforced across the combined set, not just within one
+        side -- two simultaneously pending candidates (one long, one short)
+        must never be silently resolved by guessing; they fail closed as
+        ambiguous, same as two pending candidates on one side today."""
         parsed = telegram_command(payload, self.environment["TELEGRAM_CHAT_ID"])
         if not parsed: return {"status": "ignored"}
         command = parsed["command"].strip().upper()
-        if command == "AL":
+        if command != "AL":
+            send_message("Komut reddedildi. Yalniz guncel tek AL sinyali icin AL yazin.")
+            return {"status": "rejected", "reason": "invalid_command"}
+        now_ms = int(time.time() * 1000)
+        long_pending = pending_candidates(fetch_runtime_state(), now_ms, self.config)
+        short_pending = (pending_short_candidates(fetch_runtime_state_short(), now_ms, self.short_config)
+                        if self.futures_executor else [])
+        total = len(long_pending) + len(short_pending)
+        if total != 1:
+            reason = "no_pending_signal" if total == 0 else "ambiguous_pending_signals"
+            send_message("AL yapilmadi: " + reason)
+            return {"status": "rejected", "reason": reason}
+        if long_pending:
             return self._approve_long(parsed)
-        short_command = (self.short_config or {}).get("telegram_buy_command", "SHORT")
-        if self.futures_executor and command == short_command:
-            return self._approve_short(parsed)
-        send_message("Komut reddedildi. Yalniz guncel tek AL veya SHORT sinyali icin yazin.")
-        return {"status": "rejected", "reason": "invalid_command"}
+        return self._approve_short(parsed)
 
     def scan(self):
         results = []
