@@ -11,7 +11,7 @@ from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
 from .short_signal import detect_short_candidates
-from .telegram import deliver_paper_events, deliver_once, format_daily_status
+from .telegram import deliver_paper_events, deliver_once, deliver_short_events, format_daily_status
 
 
 def private_chat_id(token):
@@ -137,6 +137,7 @@ def main():
         database,
     )
     deliver_paper_events(state_path, database)
+    deliver_short_events(runtime / "short_state.json", database)
     saved = json.loads(state_path.read_text(encoding="utf-8"))["state"]
     from datetime import datetime
     from zoneinfo import ZoneInfo

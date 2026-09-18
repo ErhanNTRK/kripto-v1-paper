@@ -1,9 +1,11 @@
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from crypto_v1.telegram import deliver_once, format_daily_status, format_event, send_message
+from crypto_v1.telegram import (deliver_once, deliver_short_events, format_daily_status,
+                                format_event, send_message)
 
 
 class TelegramTests(unittest.TestCase):
@@ -46,3 +48,29 @@ class TelegramTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as exc:
                 send_message('test')
             self.assertNotIn('test-secret', str(exc.exception))
+
+    def test_deliver_short_events_sends_each_short_adayi_once(self):
+        saved = {'state': {'events': [
+            {'type': 'SHORT_ADAYI', 'time': 1000, 'symbol': 'SOLUSDT', 'close': 100},
+        ], 'pending_shorts': {'SOLUSDT': {'stop': 105, 'leverage': 3}}}}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('crypto_v1.telegram.send_message', return_value=1) as send, \
+             patch('crypto_v1.telegram.time.sleep'):
+            path = Path(folder) / 'short_state.json'
+            path.write_text(json.dumps(saved), encoding='utf-8')
+            db = Path(folder) / 'delivery.sqlite'
+            sent = deliver_short_events(path, db)
+            self.assertEqual(sent, 1)
+            # Re-running against the same (unchanged) file must not resend.
+            self.assertEqual(deliver_short_events(path, db), 0)
+            self.assertEqual(send.call_count, 1)
+
+    def test_deliver_short_events_ignores_non_short_adayi_events(self):
+        saved = {'state': {'events': [{'type': 'AL_ADAYI', 'time': 1000, 'symbol': 'SOLUSDT', 'close': 100}],
+                           'pending_shorts': {}}}
+        with tempfile.TemporaryDirectory() as folder, patch('crypto_v1.telegram.send_message') as send:
+            path = Path(folder) / 'short_state.json'
+            path.write_text(json.dumps(saved), encoding='utf-8')
+            db = Path(folder) / 'delivery.sqlite'
+            self.assertEqual(deliver_short_events(path, db), 0)
+            send.assert_not_called()

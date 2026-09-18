@@ -92,3 +92,22 @@ def deliver_paper_events(state_path, database):
             sent += 1
             time.sleep(1.1)
     return sent
+
+
+def deliver_short_events(short_state_path, database):
+    """SHORT_ADAYI candidates (see github_worker.write_short_state) have no
+    persistent session/started_at to filter by -- short_state.json is
+    overwritten fresh each cron tick with only that tick's candidates, so
+    every event in it is new by construction; deliver_once's own key-based
+    idempotency is still the guard against a duplicate send."""
+    saved = json.loads(Path(short_state_path).read_text(encoding='utf-8'))
+    recipient = os.environ.get('TELEGRAM_CHAT_ID', '')
+    sent = 0
+    for event in saved['state']['events']:
+        if event['type'] != 'SHORT_ADAYI':
+            continue
+        key = hashlib.sha256(('short:'+recipient+':'+json.dumps(event, sort_keys=True)).encode()).hexdigest()
+        if deliver_once(key, format_event(event), database):
+            sent += 1
+            time.sleep(1.1)
+    return sent
