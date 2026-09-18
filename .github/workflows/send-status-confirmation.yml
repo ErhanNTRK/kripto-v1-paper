@@ -1,0 +1,35 @@
+name: Kripto V1 Durum Onay Mesaji Gonder
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Send a confirmation message to the verified Telegram chat
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "1505732236"
+        run: |
+          python -c "
+          from crypto_v1.telegram import send_message
+          msg = (
+              'KRIPTO V1 | SISTEM DURUM ONAYI\n'
+              'Render: canli ve saglikli (ready, orders_enabled).\n'
+              'Ayarlar: min_breaks=1, btc_filter=very_loose, top_n=50, islem basi risk=5 USDT.\n'
+              'Long (Spot) ve Short (Futures) ikisi de aktif, giris AL onayli, cikis otomatik.\n'
+              'Bu mesaj sistemin uctan uca calistigini dogrulamak icin gonderildi.'
+          )
+          message_id = send_message(msg)
+          print('Gonderildi, message_id:', message_id)
+          "
