@@ -119,6 +119,20 @@ class ShortWindowLongModel:
 
     The short side (Part 2 of the roadmap) is NOT in this model -- it
     needs Binance Margin/Futures infrastructure that does not exist yet.
+
+    KNOWN LIMITATION: .sell's signature (backtest.Engine's fixed sell_fn
+    interface: sell(row, btc), no config) can't see config["btc_filter"],
+    so it always checks the strict BTC condition on exit regardless of
+    what entry mode opened the position. This is currently safe ONLY
+    because config_v5_long.json leaves btc_filter unset (defaults to
+    "strict" on both sides, consistent). If btc_filter is ever loosened
+    for this live model, entry and exit would use DIFFERENT modes and
+    reproduce the exact bug caught in run_symmetric on 18 Sep 2026 (a
+    position opened under a loose filter gets force-exited on the very
+    next bar by the mismatched strict exit check, producing a fake,
+    suspiciously high win rate instead of a real result). Do not loosen
+    btc_filter for this model without first plumbing the mode through
+    Engine's sell_fn interface.
     """
     @staticmethod
     def features(rows, config):
@@ -135,12 +149,19 @@ class ShortWindowLongModel:
     stop = staticmethod(long_stop)
 
 
-def long_exit(row, btc):
-    return not btc_up_ok(btc) or row.get("long_exit") is None or row["c"] < row["long_exit"]
+def long_exit(row, btc, mode="strict"):
+    # mode MUST match whatever mode opened the position (see btc_up_ok):
+    # a position opened under a loosened entry filter but checked against
+    # the strict filter on exit would almost always fail the strict check
+    # on the very next bar, forcing a near-immediate exit regardless of
+    # the real trade thesis -- caught via a suspicious 28/28-win, all-
+    # trend_exit, sub-1R result when testing btc_filter="loose" (18 Sep
+    # 2026); real trades were never given a chance to develop.
+    return not btc_up_ok(btc, mode) or row.get("long_exit") is None or row["c"] < row["long_exit"]
 
 
-def short_exit(row, btc):
-    return not btc_down_ok(btc) or row.get("short_exit") is None or row["c"] > row["short_exit"]
+def short_exit(row, btc, mode="strict"):
+    return not btc_down_ok(btc, mode) or row.get("short_exit") is None or row["c"] > row["short_exit"]
 
 
 def run_symmetric(data, symbols, c, start, end, funding=None):
@@ -240,7 +261,9 @@ def run_symmetric(data, symbols, c, start, end, funding=None):
             if symbol not in bars:
                 continue
             f = bars[symbol]
-            exited = long_exit(f, bars.get("BTCUSDT")) if p["side"] == "long" else short_exit(f, bars.get("BTCUSDT"))
+            btc_mode = c.get("btc_filter", "strict")
+            exited = (long_exit(f, bars.get("BTCUSDT"), btc_mode) if p["side"] == "long"
+                     else short_exit(f, bars.get("BTCUSDT"), btc_mode))
             if exited:
                 fill, pnl, pos = close(symbol, f["c"], t)
                 trades.append(dict(symbol=symbol, side=pos["side"], entry_time=pos["entry_time"], exit_time=t,

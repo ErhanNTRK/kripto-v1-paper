@@ -95,6 +95,20 @@ class EntryExitTests(unittest.TestCase):
         self.assertTrue(short_exit(row(c=100, short_exit=105), up_btc()))
         self.assertFalse(short_exit(row(c=100, short_exit=105), down_btc()))
 
+    def test_exit_mode_must_match_the_mode_that_opened_the_position(self):
+        # Regression (18 Sep 2026): a position opened under btc_filter=
+        # "loose" was being force-exited on the very next bar because the
+        # exit check silently defaulted to "strict" -- producing a fake,
+        # suspiciously high win rate (28/28) instead of a real result.
+        # A BTC state that clears "loose" but not "strict" must NOT force
+        # an exit when the exit check itself uses "loose".
+        choppy_up = dict(c=100, ema20=101, ema50=99, ema200=90)  # loose-up-ok, strict-up-fails
+        self.assertTrue(long_exit(row(c=100, long_exit=95), choppy_up))  # strict (default): exits
+        self.assertFalse(long_exit(row(c=100, long_exit=95), choppy_up, "loose"))  # loose: does not
+        choppy_down = dict(c=100, ema20=99, ema50=101, ema200=110)
+        self.assertTrue(short_exit(row(c=100, short_exit=105), choppy_down))
+        self.assertFalse(short_exit(row(c=100, short_exit=105), choppy_down, "loose"))
+
 
 class ShortWindowLongModelTests(unittest.TestCase):
     """ShortWindowLongModel is the live-deployable, long-only wrapper around
