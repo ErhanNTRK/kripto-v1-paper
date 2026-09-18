@@ -1,5 +1,5 @@
 import unittest
-from crypto_v1.live_signal import pending_candidates
+from crypto_v1.live_signal import pending_candidates, pending_short_candidates
 
 
 class LiveSignalTests(unittest.TestCase):
@@ -28,3 +28,28 @@ class LiveSignalTests(unittest.TestCase):
         result = pending_candidates(saved, 3000, {"signal_confirmation_expiry_minutes": 10})
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["close"], 100)
+
+
+class PendingShortCandidatesTests(unittest.TestCase):
+    def test_only_current_pending_short_is_returned(self):
+        saved = {"state": {"pending_shorts": {"SOLUSDT": {"stop": 105, "leverage": 3}},
+                           "events": [
+                               {"type": "SHORT_ADAYI", "time": 1000, "symbol": "OLDUSDT", "close": 1},
+                               {"type": "SHORT_ADAYI", "time": 500000, "symbol": "SOLUSDT", "close": 100}]}}
+        result = pending_short_candidates(saved, 501000, {"signal_confirmation_expiry_minutes": 10})
+        self.assertEqual(result, [{"symbol": "SOLUSDT", "created_at": 500000,
+                                   "close": 100.0, "stop": 105.0, "leverage": 3}])
+
+    def test_expired_short_candidate_is_rejected(self):
+        saved = {"state": {"pending_shorts": {"SOLUSDT": {"stop": 105, "leverage": 3}},
+                           "events": [{"type": "SHORT_ADAYI", "time": 1,
+                                       "symbol": "SOLUSDT", "close": 100}]}}
+        self.assertEqual(pending_short_candidates(saved, 700000,
+                                                   {"signal_confirmation_expiry_minutes": 10}), [])
+
+    def test_long_candidates_never_leak_into_short_results(self):
+        saved = {"state": {"pending_shorts": {}, "pending_buys": {"SOLUSDT": {"stop": 95}},
+                           "events": [{"type": "AL_ADAYI", "time": 1000,
+                                       "symbol": "SOLUSDT", "close": 100}]}}
+        self.assertEqual(pending_short_candidates(saved, 1500,
+                                                   {"signal_confirmation_expiry_minutes": 10}), [])

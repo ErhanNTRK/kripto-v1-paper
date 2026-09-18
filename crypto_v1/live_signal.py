@@ -1,14 +1,30 @@
-"""Read the latest paper candidate as the sole source of a live AL approval."""
+"""Read the latest paper/short candidates as the sole source of a live
+AL/SHORT approval."""
 import json
 import urllib.request
 
-RUNTIME_STATE = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/state.json"
+# paper.yml always sets PAPER_STATE_FILE=state-relaxed.json (so the paper
+# tracker's own daily-loss/consecutive-loss halt never silently starves the
+# live signal feed) -- plain "state.json" is a stale leftover from before
+# that env var existed and is never written by the current pipeline. This
+# URL previously pointed at "state.json", meaning the live AL confirmation
+# flow could never see a real candidate; fixed 18 Sep 2026.
+RUNTIME_STATE = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/state-relaxed.json"
+RUNTIME_STATE_SHORT = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/short_state.json"
+
+
+def _fetch(url, opener):
+    request = urllib.request.Request(url, headers={"User-Agent": "kripto-v1"})
+    with opener(request, timeout=20) as response:
+        return json.load(response)
 
 
 def fetch_runtime_state(opener=urllib.request.urlopen):
-    request = urllib.request.Request(RUNTIME_STATE, headers={"User-Agent": "kripto-v1"})
-    with opener(request, timeout=20) as response:
-        return json.load(response)
+    return _fetch(RUNTIME_STATE, opener)
+
+
+def fetch_runtime_state_short(opener=urllib.request.urlopen):
+    return _fetch(RUNTIME_STATE_SHORT, opener)
 
 
 def pending_candidates(saved, now_ms, config):
@@ -24,5 +40,23 @@ def pending_candidates(saved, now_ms, config):
             latest[event["symbol"]] = {
                 "symbol": event["symbol"], "created_at": int(event["time"]),
                 "close": float(event["close"]), "stop": float(pending[event["symbol"]]["stop"]),
+            }
+    return [latest[s] for s in sorted(latest)]
+
+
+def pending_short_candidates(saved, now_ms, config):
+    state = saved.get("state", {})
+    expiry = config["signal_confirmation_expiry_minutes"] * 60_000
+    pending = state.get("pending_shorts", {})
+    latest = {}
+    for event in state.get("events", []):
+        if event.get("type") != "SHORT_ADAYI":
+            continue
+        age = now_ms - int(event["time"])
+        if 0 <= age <= expiry and event.get("symbol") in pending:
+            latest[event["symbol"]] = {
+                "symbol": event["symbol"], "created_at": int(event["time"]),
+                "close": float(event["close"]), "stop": float(pending[event["symbol"]]["stop"]),
+                "leverage": int(pending[event["symbol"]]["leverage"]),
             }
     return [latest[s] for s in sorted(latest)]
