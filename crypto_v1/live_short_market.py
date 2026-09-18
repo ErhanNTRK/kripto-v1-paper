@@ -3,6 +3,7 @@ fail safely -- mirrors live_market.py's BinanceMarket/summarize_pilot,
 adapted for a Futures account (single USDT-margined wallet, not a
 per-asset balance list) and short-specific order pairing (open=SELL,
 close=BUY reduceOnly)."""
+import threading
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -80,21 +81,24 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
 
 
 class BinanceFuturesMarket:
-    # See live_market.BinanceMarket's matching cache for why: this fans
-    # out an all_orders() call to every symbol in the scanning universe
-    # (~50, ~20 weight each) once per pending short candidate, and a
-    # single tick can trigger this from two tagged systems (4H/2H) within
-    # seconds of each other -- live-observed 18 Sep 2026 as a real
-    # contributor to repeated -1003 bans alongside the spot side.
+    # See live_market.BinanceMarket's matching cache for why: the raw
+    # fetch (account, open orders, per-symbol order history) is tag-
+    # agnostic, so it is cached at class level and shared by the 4H and 2H
+    # apps behind a lock -- one fetch per 90s window instead of one per
+    # app per candidate. Live-observed 18 Sep 2026 as a real contributor
+    # to repeated -1003 bans alongside the spot side. The universe scan is
+    # kept here (unlike Spot): a closed Futures position leaves no dust
+    # balance to find its history by, and /fapi/v1/allOrders is only ~5
+    # weight per symbol on the separate Futures rate-limit pool.
     _PILOT_STATUS_CACHE_SECONDS = 90
+    _raw_pilot_cache = None
+    _raw_pilot_lock = threading.Lock()
 
     def __init__(self, config, strategy_config, environment, executor, tag="", now=time.time):
         self.config, self.strategy_config = config, strategy_config
         self.environment, self.executor = environment, executor
         self.tag = tag
         self._now = now
-        self._pilot_status_cache = None
-        self._pilot_status_cache_at = None
 
     def price(self, symbol):
         risk = self.executor.position_risk(symbol)
@@ -107,23 +111,27 @@ class BinanceFuturesMarket:
         info = self.executor.request("GET", {"symbol": symbol}, path="/fapi/v1/exchangeInfo")
         return futures_symbol_rules(info["symbols"][0])
 
+    def _raw_pilot_data(self):
+        with BinanceFuturesMarket._raw_pilot_lock:
+            now = self._now()
+            cached = BinanceFuturesMarket._raw_pilot_cache
+            if cached is not None and now - cached[0] < self._PILOT_STATUS_CACHE_SECONDS:
+                return cached[1:]
+            account = self.executor.account()
+            open_orders = self.executor.open_orders()
+            symbols = set(universe(self.strategy_config))
+            symbols.update(o["symbol"] for o in open_orders)
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
+            orders = [order for batch in batches for order in batch]
+            BinanceFuturesMarket._raw_pilot_cache = (now, account, open_orders, orders)
+            return account, open_orders, orders
+
     def pilot_status(self):
-        now = self._now()
-        if (self._pilot_status_cache is not None
-                and now - self._pilot_status_cache_at < self._PILOT_STATUS_CACHE_SECONDS):
-            return self._pilot_status_cache
-        account = self.executor.account()
-        open_orders = self.executor.open_orders()
-        symbols = set(universe(self.strategy_config))
-        symbols.update(o["symbol"] for o in open_orders)
+        account, open_orders, orders = self._raw_pilot_data()
         start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0,
                                                    microsecond=0).timestamp() * 1000
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
-        orders = [order for batch in batches for order in batch]
-        status = summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag)
-        self._pilot_status_cache, self._pilot_status_cache_at = status, now
-        return status
+        return summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag)
 
     def live_positions(self):
         positions = []

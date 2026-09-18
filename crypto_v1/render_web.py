@@ -115,6 +115,11 @@ class LiveApp:
         # write_2h_signal_state) instead of always reading the 4H files.
         self.tag = tag
         self.state_url, self.state_short_url = state_url, state_short_url
+        self._tick_lock = threading.Lock()
+        # Most recent tick's full result (rejection reasons included) -- what
+        # /status serves so a rejected entry can be diagnosed without Render
+        # log access and without spending any Binance weight.
+        self.last_tick = None
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor, tag=tag)
         self.short_config = short_config
@@ -189,20 +194,38 @@ class LiveApp:
         now_ms = int(time.time() * 1000)
         saved_long = fetch_runtime_state(url=self.state_url)
         saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
-        long_pending = pending_candidates(saved_long, now_ms, self.config)[:self.ENTRIES_PER_TICK]
-        short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)[:self.ENTRIES_PER_TICK]
-                        if self.futures_executor else [])
+        long_pending = pending_candidates(saved_long, now_ms, self.config)
+        short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
+                         if self.futures_executor else [])
         results = []
+        # A candidate that approve_buy/approve_short rejects before placing
+        # anything (limit hit, price drifted past max_entry_drift_fraction,
+        # already holding the symbol) costs no order and no fresh account
+        # scan (pilot_status is cached), so it must not consume the per-tick
+        # budget: pending_candidates() is sorted by symbol, and until 18 Sep
+        # 2026 taking [:ENTRIES_PER_TICK] meant one persistently-rejected
+        # symbol (e.g. its price had moved too far) was retried every tick
+        # while every candidate sorted after it was never even looked at.
+        taken = 0
         for candidate in long_pending:
+            if taken >= self.ENTRIES_PER_TICK:
+                break
             isolated = isolate_candidate(saved_long, candidate["symbol"])
             update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
-            results.append({"symbol": candidate["symbol"], "side": "long",
-                            "result": self._approve_long(update_id, isolated, tag=self.tag)})
+            result = self._approve_long(update_id, isolated, tag=self.tag)
+            results.append({"symbol": candidate["symbol"], "side": "long", "result": result})
+            if result.get("status") != "rejected":
+                taken += 1
+        taken = 0
         for candidate in short_pending:
+            if taken >= self.ENTRIES_PER_TICK:
+                break
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
             update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
-            results.append({"symbol": candidate["symbol"], "side": "short",
-                            "result": self._approve_short(update_id, isolated, tag=self.tag)})
+            result = self._approve_short(update_id, isolated, tag=self.tag)
+            results.append({"symbol": candidate["symbol"], "side": "short", "result": result})
+            if result.get("status") != "rejected":
+                taken += 1
         return {"status": "auto_entry", "results": results}
 
     def telegram(self, payload):
@@ -308,6 +331,28 @@ class LiveApp:
         further violation. The exchange-native protective stop placed at
         entry time does not depend on this loop running -- it is a real
         resting order on Binance regardless of whether we can poll it."""
+        # The periodic thread and an external /scan (GitHub Actions' wake-up
+        # ping, or a person opening the URL) can call this at the same
+        # instant. Two concurrent ticks would evaluate the same pending
+        # candidate twice: _known_or_place's query-before-place makes a
+        # FILLED buy idempotent once it exists, but not while both are still
+        # between "query said nothing" and "place" -- and Binance only
+        # enforces client-id uniqueness among OPEN orders, so a second
+        # market buy would go through. Non-blocking: the late caller just
+        # reports busy instead of queueing up a redundant tick.
+        if not self._tick_lock.acquire(blocking=False):
+            return {"status": "busy", "entries": {"status": "skipped"}, "exits": {"status": "skipped"}}
+        try:
+            result = self._tick()
+        except Exception as exc:
+            self.last_tick = {"at": time.time(), "result": {"status": "failed", "error": str(exc)}}
+            raise
+        finally:
+            self._tick_lock.release()
+        self.last_tick = {"at": time.time(), "result": result}
+        return result
+
+    def _tick(self):
         if _rate_limited():
             return {"status": "cooling_down", "entries": {"status": "skipped"}, "exits": {"status": "skipped"}}
         hits_before = _consecutive_rate_limit_hits
@@ -326,6 +371,25 @@ class LiveApp:
         if _consecutive_rate_limit_hits == hits_before:
             _note_rate_limit_cleared()
         return {"entries": entry_result, "exits": exits}
+
+def status_snapshot(apps=None, now=time.time):
+    """Read-only view for GET /status: the real-order switch, the shared
+    rate-limit breaker, and each app's last tick verbatim. Unlike /scan it
+    performs no tick and touches Binance not at all. Added 18 Sep 2026
+    after a day of diagnosing "AL_ADAYI arrived, ALDIM never did" blind:
+    approve_buy's rejections are deliberately silent on Telegram (they
+    recur every cycle), so this is the one place their reason is visible."""
+    apps = APPS if apps is None else apps
+    return {
+        "orders_enabled": STATUS["orders_enabled"],
+        "rate_limit": {
+            "cooling_down": now() < _rate_limited_until,
+            "cooldown_ends_in_s": max(0, int(_rate_limited_until - now())),
+            "consecutive_hits": _consecutive_rate_limit_hits,
+        },
+        "apps": {app.tag or "default": app.last_tick for app in apps},
+    }
+
 
 def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs
@@ -359,6 +423,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(body)
     def do_GET(self):
         if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
+        if self.path == "/status": self._json(200, status_snapshot()); return
         if self.path == "/scan":
             # tick() already catches its own auto-entry/exit errors per app
             # and per market side (see LiveApp.tick/scan) -- this try/except
