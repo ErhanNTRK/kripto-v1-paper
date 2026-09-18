@@ -1,0 +1,44 @@
+name: V5 2H Walk-forward Sonucu (kisa cikti)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verdict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 300 days of NATIVE 15m data
+        run: python -m crypto_v1 fetch --days 300 --data data-wf
+      - name: Print ONLY the 2H walk-forward verdict (short output)
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import load
+          from crypto_v1.research_v2 import TWO_HOUR
+          from crypto_v1.research_v5 import evaluate
+          from crypto_v1.funding import funding_rates
+          from crypto_v1.risk import validate_config
+
+          config = validate_config(json.loads(open('config_v5_long.json', encoding='utf-8').read()))
+          manifest, data = load('data-wf')
+          symbols = manifest['symbols']
+          real_funding = funding_rates('BTCUSDT', manifest['start'], manifest['end'])
+
+          result = evaluate(data, symbols, config, manifest, count=5, funding=real_funding, interval=TWO_HOUR)
+          print('2H VERDICT:', result['verdict'])
+          for w in result['windows']:
+              print(f\"pencere {w['window']}: normal={w['normal']['net_return']:.4f} PF={w['normal']['profit_factor']} trades={w['normal']['trade_count']} | stress={w['stress']['net_return']:.4f} PF={w['stress']['profit_factor']} | gecti={w['passed']}\")
+          if result['reasons']:
+              print('Basarisiz pencere nedenleri:')
+              for r in result['reasons']:
+                  print(' -', r)
+          "
