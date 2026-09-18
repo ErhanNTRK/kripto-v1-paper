@@ -1,0 +1,67 @@
+name: V5 Son Hafta - Yeni Sistem (min_breaks=1, hepsini al) Kar-Zarar Simulasyonu
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 60 days of data (45-day EMA200 warm-up + 7-day test window, with margin)
+        run: python -m crypto_v1 fetch --days 60 --data data-recent
+      - name: Simulate the last 7 real days under old (min_breaks=2, one-at-a-time) vs new (min_breaks=1, take-all) rules
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import load
+          from crypto_v1.research_v2 import aggregate, FOUR_HOUR
+          from crypto_v1.research_v5 import run_symmetric
+          from crypto_v1.funding import funding_rates
+          from crypto_v1.backtest import metrics
+          from crypto_v1.risk import validate_config
+
+          base_config = validate_config(json.loads(open('config_v5_long.json', encoding='utf-8').read()))
+          manifest, data = load('data-recent')
+          agg_data = {s: aggregate(rows, FOUR_HOUR) for s, rows in data.items()}
+          symbols = manifest['symbols']
+
+          end = manifest['end']
+          start = end - 7 * 86400000
+          real_funding = funding_rates('BTCUSDT', start, end)
+          print(f'Cekilen funding olay sayisi: {len(real_funding)}')
+
+          # run_symmetric already opens every symbol that signals on a bar,
+          # up to max_positions -- i.e. it already behaves like the NEW
+          # 'take every pending candidate' live logic, not the old
+          # 'exactly one or reject' Telegram-confirmation rule. This makes
+          # it the right direct simulation of what the new system would
+          # actually have done.
+          for min_breaks, label in ((2, 'ESKI (min_breaks=2, mevcut canli)'),
+                                     (1, 'YENI (min_breaks=1, hepsini al)')):
+              config = dict(base_config, min_breaks=min_breaks)
+              state = run_symmetric(agg_data, symbols, config, start, end, funding=real_funding)
+              m = metrics(state, config)
+              trades = state['trades']
+              wins = [t for t in trades if t['pnl'] > 0]
+              losses = [t for t in trades if t['pnl'] <= 0]
+              print()
+              print(f'==================== {label} ====================')
+              print(f'Islem sayisi (son 7 gun): {len(trades)}')
+              print(f'Kazanan: {len(wins)} | Kaybeden: {len(losses)}')
+              print(f'Net getiri (baslangic sermayesine gore): {m[\"net_return\"]*100:.2f}%')
+              print(f'Kar faktoru: {m[\"profit_factor\"]}')
+              print(f'Baslangic/son equity: {state[\"curve\"][0][\"equity\"] if state[\"curve\"] else config[\"initial_cash\"]:.2f} -> '
+                    f'{state[\"curve\"][-1][\"equity\"] if state[\"curve\"] else config[\"initial_cash\"]:.2f}')
+              for t in trades:
+                  print(f\"  {t['symbol']:10s} | {t['side']:5s} | giris={t['entry']:.6f} cikis={t['exit']:.6f} | \"
+                        f\"pnl={t['pnl']:+.4f} | r={t['r_multiple']:+.3f} | {t['reason']}\")
+          "
