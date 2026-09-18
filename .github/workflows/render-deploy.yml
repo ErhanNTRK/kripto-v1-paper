@@ -1,0 +1,40 @@
+name: Render Deploy
+
+# Render's own "Auto-Deploy: On Commit" silently deployed nothing for four
+# merges on 18 Sep 2026 (the live service kept running the morning's
+# build; /health showed no commit, /status was 404) while the process sat
+# in a rate-limit cooldown that only a restart clears. This triggers the
+# service's private Deploy Hook from here instead, on every push to main
+# and on demand. RENDER_DEPLOY_HOOK is the hook URL from the Render
+# dashboard (Settings -> Deploy -> Deploy Hook), stored as a repository
+# Actions secret; the step is a no-op with a clear message if it is not
+# set, never a silent success.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK secret is not set -- add it under Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          curl --fail --silent --show-error --retry 2 --max-time 60 -X POST "$RENDER_DEPLOY_HOOK"
+          echo
+          echo "Deploy requested for commit ${GITHUB_SHA}"
