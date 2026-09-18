@@ -13,6 +13,7 @@ from .live_short_controller import approve_short
 from .live_short_market import BinanceFuturesMarket
 from .live_short_monitor import execute_short_exit, short_exit_decision
 from .live_signal import (fetch_runtime_state, fetch_runtime_state_short,
+                          isolate_candidate, isolate_short_candidate,
                           pending_candidates, pending_short_candidates)
 from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel, symmetric_features
@@ -43,9 +44,9 @@ class LiveApp:
                                                      self.futures_executor)
                                if short_config is not None else None)
 
-    def _approve_long(self, parsed):
-        result = approve_buy(parsed["update_id"], parsed["command"], int(time.time() * 1000),
-                             fetch_runtime_state(), self.config, self.environment,
+    def _approve_long(self, update_id, saved):
+        result = approve_buy(update_id, "AL", int(time.time() * 1000),
+                             saved, self.config, self.environment,
                              self.market, self.executor)
         if result["status"] == "preview":
             plan = result["plan"]
@@ -54,12 +55,13 @@ class LiveApp:
             send_message(f"ALIM TAMAMLANDI VE KORUYUCU STOP AKTIF: {result['plan']['symbol']}")
         elif result["status"] == "bought_then_emergency_sold":
             send_message(f"ACIL GUVENLIK SATISI: {result['plan']['symbol']} koruyucu stop kurulamadi ve alim geri satildi.")
-        else: send_message("AL yapilmadi: " + result.get("reason", "guvenlik kontrolu"))
+        else: send_message(f"AL yapilmadi ({saved['state']['events'][0]['symbol'] if saved['state'].get('events') else '?'}): "
+                           + result.get("reason", "guvenlik kontrolu"))
         return result
 
-    def _approve_short(self, parsed):
-        result = approve_short(parsed["update_id"], parsed["command"], int(time.time() * 1000),
-                               fetch_runtime_state_short(), self.short_config, self.environment,
+    def _approve_short(self, update_id, saved):
+        result = approve_short(update_id, "AL", int(time.time() * 1000),
+                               saved, self.short_config, self.environment,
                                self.futures_market, self.futures_executor)
         if result["status"] == "preview":
             plan = result["plan"]
@@ -71,20 +73,24 @@ class LiveApp:
         elif result["status"] == "opened_then_emergency_closed":
             send_message(f"ACIL GUVENLIK KAPATMASI: {result['plan']['symbol']} "
                          f"({result.get('reason')}) short geri kapatildi.")
-        else: send_message("SHORT yapilmadi: " + result.get("reason", "guvenlik kontrolu"))
+        else: send_message(f"SHORT yapilmadi ({saved['state']['events'][0]['symbol'] if saved['state'].get('events') else '?'}): "
+                           + result.get("reason", "guvenlik kontrolu"))
         return result
 
     def telegram(self, payload):
-        """A single "AL" confirms whichever one signal is pending -- long or
-        short -- per the user's 18 Sep 2026 preference for one consistent
-        reply word instead of separate AL/SHORT commands (the notification
-        text itself still says AL_ADAYI or SHORT_ADAYI so the direction is
-        never ambiguous to read, only the reply is unified). Both sides'
-        pending lists are checked together here so "exactly one signal
-        pending" is enforced across the combined set, not just within one
-        side -- two simultaneously pending candidates (one long, one short)
-        must never be silently resolved by guessing; they fail closed as
-        ambiguous, same as two pending candidates on one side today."""
+        """A single "AL" takes EVERY signal currently pending -- long and
+        short alike -- not just one, per the user's 18 Sep 2026 request:
+        most raw breakouts were being thrown away as "ambiguous" simply
+        because more than one symbol signaled on the same bar (measured:
+        ~97% of raw signals over 30 days). Each candidate is confirmed and
+        executed one at a time through the unmodified, already-tested
+        approve_buy/approve_short (via isolate_candidate/
+        isolate_short_candidate, so each call still sees exactly the one
+        candidate it expects) -- existing per-trade safety limits
+        (max_open_positions, max_buys_per_day, daily/pilot loss limits,
+        available margin) are re-checked fresh before every single one, so
+        the loop naturally stops taking new positions once capacity runs
+        out rather than needing new capital-tracking logic."""
         parsed = telegram_command(payload, self.environment["TELEGRAM_CHAT_ID"])
         if not parsed: return {"status": "ignored"}
         command = parsed["command"].strip().upper()
@@ -92,17 +98,25 @@ class LiveApp:
             send_message("Komut reddedildi. Yalniz guncel tek AL sinyali icin AL yazin.")
             return {"status": "rejected", "reason": "invalid_command"}
         now_ms = int(time.time() * 1000)
-        long_pending = pending_candidates(fetch_runtime_state(), now_ms, self.config)
-        short_pending = (pending_short_candidates(fetch_runtime_state_short(), now_ms, self.short_config)
+        saved_long = fetch_runtime_state()
+        saved_short = fetch_runtime_state_short() if self.futures_executor else {"state": {}}
+        long_pending = pending_candidates(saved_long, now_ms, self.config)
+        short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
                         if self.futures_executor else [])
-        total = len(long_pending) + len(short_pending)
-        if total != 1:
-            reason = "no_pending_signal" if total == 0 else "ambiguous_pending_signals"
-            send_message("AL yapilmadi: " + reason)
-            return {"status": "rejected", "reason": reason}
-        if long_pending:
-            return self._approve_long(parsed)
-        return self._approve_short(parsed)
+        if not long_pending and not short_pending:
+            send_message("AL yapilmadi: su an bekleyen bir sinyal yok.")
+            return {"status": "rejected", "reason": "no_pending_signal"}
+        base_id = parsed["update_id"] * 1000
+        results = []
+        for i, candidate in enumerate(long_pending):
+            isolated = isolate_candidate(saved_long, candidate["symbol"])
+            results.append({"symbol": candidate["symbol"], "side": "long",
+                            "result": self._approve_long(base_id + i, isolated)})
+        for i, candidate in enumerate(short_pending, start=len(long_pending)):
+            isolated = isolate_short_candidate(saved_short, candidate["symbol"])
+            results.append({"symbol": candidate["symbol"], "side": "short",
+                            "result": self._approve_short(base_id + i, isolated)})
+        return {"status": "batch", "results": results}
 
     def scan(self):
         results = []

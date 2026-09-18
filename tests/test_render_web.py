@@ -23,73 +23,82 @@ class RenderWebTests(unittest.TestCase):
 
 
 class LiveAppTelegramRoutingTests(unittest.TestCase):
-    """A single "AL" reply must resolve to whichever ONE side (long or
-    short) actually has a pending signal, per the user's 18 Sep 2026
-    preference for one consistent reply word -- never guess between two
-    simultaneously pending candidates, and never silently do nothing when
-    the reply can't be resolved."""
+    """A single "AL" reply takes EVERY currently pending signal -- long and
+    short alike -- not just one, per the user's 18 Sep 2026 request that
+    simultaneous candidates should all be attempted rather than thrown
+    away as ambiguous (existing per-trade limits, re-checked fresh inside
+    approve_buy/approve_short for every candidate, naturally cap how many
+    actually open)."""
+
+    NOW_S = 1_700_000_000
+    CONFIG = {"signal_confirmation_expiry_minutes": 10}
+    LONG_SAVED = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95}, "ETHUSDT": {"stop": 2400}},
+                            "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000,
+                                       "symbol": "SOLUSDT", "close": 100},
+                                      {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000,
+                                       "symbol": "ETHUSDT", "close": 2500}]}}
+    SHORT_SAVED = {"state": {"pending_shorts": {"BNBUSDT": {"stop": 800, "leverage": 3}},
+                             "events": [{"type": "SHORT_ADAYI", "time": NOW_S * 1000 - 1000,
+                                        "symbol": "BNBUSDT", "close": 750}]}}
+    EMPTY_SAVED = {"state": {}}
 
     def _app(self):
-        return LiveApp({}, {}, {"TELEGRAM_CHAT_ID": "123"}, short_config={}, short_strategy_config={})
+        return LiveApp(self.CONFIG, {}, {"TELEGRAM_CHAT_ID": "123"},
+                       short_config=self.CONFIG, short_strategy_config={})
 
     def _payload(self, text="AL"):
         return {"update_id": 1, "message": {"text": text, "chat": {"id": 123, "type": "private"}}}
 
-    def test_al_routes_to_long_when_only_long_is_pending(self):
+    def _frozen_clock(self):
+        return patch("crypto_v1.render_web.time.time", return_value=self.NOW_S)
+
+    def test_al_processes_every_pending_long_candidate_individually(self):
         app = self._app()
-        with patch("crypto_v1.render_web.pending_candidates", return_value=[{"symbol": "SOLUSDT"}]), \
-             patch("crypto_v1.render_web.pending_short_candidates", return_value=[]), \
-             patch("crypto_v1.render_web.fetch_runtime_state", return_value={}), \
-             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={}), \
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
              patch.object(LiveApp, "_approve_long", return_value={"status": "ok"}) as long_mock, \
              patch.object(LiveApp, "_approve_short") as short_mock:
             result = app.telegram(self._payload())
-        long_mock.assert_called_once()
+        self.assertEqual(long_mock.call_count, 2)
         short_mock.assert_not_called()
-        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(result["status"], "batch")
+        self.assertEqual({r["symbol"] for r in result["results"]}, {"SOLUSDT", "ETHUSDT"})
+        # Each call must see only its OWN candidate isolated, never both at once.
+        seen = set()
+        for call in long_mock.call_args_list:
+            saved = call.args[1]
+            events = saved["state"]["events"]
+            self.assertEqual(len(events), 1)
+            seen.add(events[0]["symbol"])
+        self.assertEqual(seen, {"SOLUSDT", "ETHUSDT"})
 
-    def test_al_routes_to_short_when_only_short_is_pending(self):
+    def test_al_processes_long_and_short_candidates_together(self):
         app = self._app()
-        with patch("crypto_v1.render_web.pending_candidates", return_value=[]), \
-             patch("crypto_v1.render_web.pending_short_candidates", return_value=[{"symbol": "SOLUSDT"}]), \
-             patch("crypto_v1.render_web.fetch_runtime_state", return_value={}), \
-             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={}), \
-             patch.object(LiveApp, "_approve_long") as long_mock, \
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.SHORT_SAVED), \
+             patch.object(LiveApp, "_approve_long", return_value={"status": "ok"}) as long_mock, \
              patch.object(LiveApp, "_approve_short", return_value={"status": "ok"}) as short_mock:
             result = app.telegram(self._payload())
-        short_mock.assert_called_once()
-        long_mock.assert_not_called()
-        self.assertEqual(result, {"status": "ok"})
-
-    def test_al_rejects_as_ambiguous_when_both_sides_have_a_pending_signal(self):
-        app = self._app()
-        with patch("crypto_v1.render_web.pending_candidates", return_value=[{"symbol": "A"}]), \
-             patch("crypto_v1.render_web.pending_short_candidates", return_value=[{"symbol": "B"}]), \
-             patch("crypto_v1.render_web.fetch_runtime_state", return_value={}), \
-             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={}), \
-             patch("crypto_v1.render_web.send_message"), \
-             patch.object(LiveApp, "_approve_long") as long_mock, \
-             patch.object(LiveApp, "_approve_short") as short_mock:
-            result = app.telegram(self._payload())
-        self.assertEqual(result, {"status": "rejected", "reason": "ambiguous_pending_signals"})
-        long_mock.assert_not_called()
-        short_mock.assert_not_called()
+        self.assertEqual(long_mock.call_count, 2)
+        self.assertEqual(short_mock.call_count, 1)
+        self.assertEqual(len(result["results"]), 3)
 
     def test_al_rejects_when_nothing_is_pending(self):
         app = self._app()
-        with patch("crypto_v1.render_web.pending_candidates", return_value=[]), \
-             patch("crypto_v1.render_web.pending_short_candidates", return_value=[]), \
-             patch("crypto_v1.render_web.fetch_runtime_state", return_value={}), \
-             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={}), \
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.EMPTY_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
              patch("crypto_v1.render_web.send_message"):
             result = app.telegram(self._payload())
         self.assertEqual(result, {"status": "rejected", "reason": "no_pending_signal"})
 
-    def test_non_al_command_is_rejected_without_checking_any_signal(self):
+    def test_non_al_command_is_rejected_without_fetching_any_signal_state(self):
         app = self._app()
         with patch("crypto_v1.render_web.send_message") as send, \
-             patch("crypto_v1.render_web.pending_candidates") as pc:
+             patch("crypto_v1.render_web.fetch_runtime_state") as fetch:
             result = app.telegram(self._payload("SHORT"))
         self.assertEqual(result, {"status": "rejected", "reason": "invalid_command"})
-        pc.assert_not_called()
+        fetch.assert_not_called()
         send.assert_called_once()

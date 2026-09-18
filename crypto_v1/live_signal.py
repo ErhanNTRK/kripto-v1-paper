@@ -44,6 +44,30 @@ def pending_candidates(saved, now_ms, config):
     return [latest[s] for s in sorted(latest)]
 
 
+def isolate_candidate(saved, symbol):
+    """Build a saved-state view containing only ONE symbol's AL_ADAYI event
+    and pending_buys entry. Lets a caller that found several real,
+    simultaneously pending candidates process them one at a time through
+    the unmodified, already-tested approve_buy -- which requires seeing
+    exactly one candidate -- instead of approve_buy ever having to see
+    (and reject as ambiguous) more than one at once. Per the user's 18 Sep
+    2026 request: take every candidate we have capacity for, not just
+    whichever one happens to be alone."""
+    state = saved.get("state", {})
+    events = [e for e in state.get("events", []) if e.get("type") == "AL_ADAYI" and e.get("symbol") == symbol]
+    pending_buys = state.get("pending_buys", {})
+    isolated_pending = {symbol: pending_buys[symbol]} if symbol in pending_buys else {}
+    return {"state": {**state, "events": events, "pending_buys": isolated_pending}}
+
+
+def isolate_short_candidate(saved, symbol):
+    state = saved.get("state", {})
+    events = [e for e in state.get("events", []) if e.get("type") == "SHORT_ADAYI" and e.get("symbol") == symbol]
+    pending_shorts = state.get("pending_shorts", {})
+    isolated_pending = {symbol: pending_shorts[symbol]} if symbol in pending_shorts else {}
+    return {"state": {**state, "events": events, "pending_shorts": isolated_pending}}
+
+
 def pending_short_candidates(saved, now_ms, config):
     state = saved.get("state", {})
     expiry = config["signal_confirmation_expiry_minutes"] * 60_000

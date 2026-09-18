@@ -1,5 +1,6 @@
 import unittest
-from crypto_v1.live_signal import pending_candidates, pending_short_candidates
+from crypto_v1.live_signal import (isolate_candidate, isolate_short_candidate,
+                                    pending_candidates, pending_short_candidates)
 
 
 class LiveSignalTests(unittest.TestCase):
@@ -53,3 +54,35 @@ class PendingShortCandidatesTests(unittest.TestCase):
                                        "symbol": "SOLUSDT", "close": 100}]}}
         self.assertEqual(pending_short_candidates(saved, 1500,
                                                    {"signal_confirmation_expiry_minutes": 10}), [])
+
+
+class IsolateCandidateTests(unittest.TestCase):
+    """Multiple simultaneously pending candidates must be processable one
+    at a time -- each isolated view should look, to pending_candidates,
+    exactly like a state with only that one candidate pending."""
+
+    def test_isolate_candidate_keeps_only_the_named_symbol(self):
+        saved = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95}, "ETHUSDT": {"stop": 2400}},
+                           "events": [{"type": "AL_ADAYI", "time": 1000, "symbol": "SOLUSDT", "close": 100},
+                                      {"type": "AL_ADAYI", "time": 1000, "symbol": "ETHUSDT", "close": 2500}]}}
+        isolated = isolate_candidate(saved, "SOLUSDT")
+        result = pending_candidates(isolated, 1500, {"signal_confirmation_expiry_minutes": 10})
+        self.assertEqual(result, [{"symbol": "SOLUSDT", "created_at": 1000, "close": 100.0, "stop": 95.0}])
+
+    def test_isolate_candidate_for_a_symbol_not_present_yields_nothing(self):
+        saved = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95}},
+                           "events": [{"type": "AL_ADAYI", "time": 1000, "symbol": "SOLUSDT", "close": 100}]}}
+        isolated = isolate_candidate(saved, "ETHUSDT")
+        self.assertEqual(pending_candidates(isolated, 1500, {"signal_confirmation_expiry_minutes": 10}), [])
+
+
+class IsolateShortCandidateTests(unittest.TestCase):
+    def test_isolate_short_candidate_keeps_only_the_named_symbol(self):
+        saved = {"state": {"pending_shorts": {"SOLUSDT": {"stop": 105, "leverage": 3},
+                                              "ETHUSDT": {"stop": 2600, "leverage": 5}},
+                           "events": [{"type": "SHORT_ADAYI", "time": 1000, "symbol": "SOLUSDT", "close": 100},
+                                      {"type": "SHORT_ADAYI", "time": 1000, "symbol": "ETHUSDT", "close": 2500}]}}
+        isolated = isolate_short_candidate(saved, "ETHUSDT")
+        result = pending_short_candidates(isolated, 1500, {"signal_confirmation_expiry_minutes": 10})
+        self.assertEqual(result, [{"symbol": "ETHUSDT", "created_at": 1000,
+                                   "close": 2500.0, "stop": 2600.0, "leverage": 5}])
