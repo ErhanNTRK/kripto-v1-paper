@@ -1,3 +1,4 @@
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 import crypto_v1.render_web as render_web
@@ -232,11 +233,17 @@ class RateLimitCircuitBreakerTests(unittest.TestCase):
     CONFIG = {"signal_confirmation_expiry_minutes": 10, "trailing_atr": 2.0}
 
     def setUp(self):
-        self._saved = render_web._rate_limited_until
+        self._saved = (render_web._rate_limited_until,
+                       render_web._consecutive_rate_limit_hits,
+                       render_web._last_rate_limit_hit_at)
         render_web._rate_limited_until = 0.0
+        render_web._consecutive_rate_limit_hits = 0
+        render_web._last_rate_limit_hit_at = 0.0
 
     def tearDown(self):
-        render_web._rate_limited_until = self._saved
+        (render_web._rate_limited_until,
+        render_web._consecutive_rate_limit_hits,
+        render_web._last_rate_limit_hit_at) = self._saved
 
     def _app(self):
         return LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
@@ -271,6 +278,28 @@ class RateLimitCircuitBreakerTests(unittest.TestCase):
         with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
             app.tick()
         self.assertFalse(render_web._rate_limited())
+
+    def test_cooldown_doubles_on_each_consecutive_hit_within_the_same_incident(self):
+        # Live-observed 18 Sep 2026: a fixed 5-minute cooldown kept getting
+        # re-hit by -1003 every 5 minutes for 25+ minutes straight against a
+        # longer real ban. Consecutive hits (close enough together to be the
+        # same incident) must back off further each time instead of probing
+        # at the same fixed interval forever.
+        render_web._note_if_rate_limited(OrderRejected(-1003))
+        first_cooldown = render_web._rate_limited_until - time.time()
+        self.assertAlmostEqual(first_cooldown, render_web._RATE_LIMIT_BASE_COOLDOWN_S, delta=2)
+        render_web._note_if_rate_limited(OrderRejected(-1003))
+        second_cooldown = render_web._rate_limited_until - time.time()
+        self.assertAlmostEqual(second_cooldown, render_web._RATE_LIMIT_BASE_COOLDOWN_S * 2, delta=2)
+        render_web._note_if_rate_limited(OrderRejected(-1003))
+        third_cooldown = render_web._rate_limited_until - time.time()
+        self.assertAlmostEqual(third_cooldown, render_web._RATE_LIMIT_BASE_COOLDOWN_S * 4, delta=2)
+
+    def test_cooldown_is_capped_at_the_configured_maximum(self):
+        for _ in range(10):
+            render_web._note_if_rate_limited(OrderRejected(-1003))
+        cooldown = render_web._rate_limited_until - time.time()
+        self.assertAlmostEqual(cooldown, render_web._RATE_LIMIT_MAX_COOLDOWN_S, delta=2)
 
 
 class FillPnlTests(unittest.TestCase):

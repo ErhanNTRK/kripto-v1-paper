@@ -28,13 +28,21 @@ APPS = []
 
 # Process-wide circuit breaker: -1003 is Binance's IP-level "too many
 # requests" rejection. Live-tripped 18 Sep 2026 by a burst of pilot_status()
-# calls (see LiveApp.ENTRIES_PER_TICK's docstring) and observed to persist
-# across many following ticks -- repeatedly retrying every 5 minutes while
-# still banned achieves nothing (every call fails anyway) and risks the ban
-# treating each further request as another violation. Shared across BOTH
-# apps (4H and 2H) since the ban is per source IP/account, not per app.
-_RATE_LIMIT_COOLDOWN_S = 300
+# calls (see LiveApp.ENTRIES_PER_TICK's docstring); the resulting ban was
+# observed to outlast a single fixed 5-minute cooldown -- probing again
+# right as each cooldown expired kept re-hitting -1003 for 25+ minutes
+# straight. Cooldown now doubles on each consecutive hit (5, 10, 20, 40...
+# minutes, capped at 1h) so a longer real ban is probed less and less
+# often instead of being hammered every 5 minutes regardless of its
+# actual length. A hit far enough past the previous one (more than 2x the
+# base cooldown) is treated as a fresh, unrelated incident and the
+# escalation resets. Shared across BOTH apps (4H and 2H) since the ban is
+# per source IP/account, not per app.
+_RATE_LIMIT_BASE_COOLDOWN_S = 300
+_RATE_LIMIT_MAX_COOLDOWN_S = 3600
 _rate_limited_until = 0.0
+_consecutive_rate_limit_hits = 0
+_last_rate_limit_hit_at = 0.0
 
 
 def _rate_limited():
@@ -42,10 +50,18 @@ def _rate_limited():
 
 
 def _note_if_rate_limited(exc):
-    global _rate_limited_until
+    global _rate_limited_until, _consecutive_rate_limit_hits, _last_rate_limit_hit_at
     if isinstance(exc, OrderRejected) and exc.code == -1003:
-        _rate_limited_until = time.time() + _RATE_LIMIT_COOLDOWN_S
-        print(f"Binance rate limit hit; pausing all Binance calls for {_RATE_LIMIT_COOLDOWN_S}s", flush=True)
+        now = time.time()
+        if now - _last_rate_limit_hit_at > _RATE_LIMIT_BASE_COOLDOWN_S * 2:
+            _consecutive_rate_limit_hits = 0
+        _consecutive_rate_limit_hits += 1
+        _last_rate_limit_hit_at = now
+        cooldown = min(_RATE_LIMIT_MAX_COOLDOWN_S,
+                       _RATE_LIMIT_BASE_COOLDOWN_S * (2 ** (_consecutive_rate_limit_hits - 1)))
+        _rate_limited_until = now + cooldown
+        print(f"Binance rate limit hit ({_consecutive_rate_limit_hits}x in a row); "
+             f"pausing all Binance calls for {cooldown}s", flush=True)
 
 
 def _fill_pnl(entry, order, side):
