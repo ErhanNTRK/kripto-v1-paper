@@ -53,9 +53,15 @@ def prepare_data(config, runtime, now):
         manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data"}
         write_json(manifest_path, manifest)
     symbols = manifest["symbols"]
-    # >40 four-hour bars (v5's longest lookback) with a comfortable margin,
-    # since this cache is rebuilt from scratch on every 15-minute cron run.
-    start = now - 30 * 24 * 60 * 60 * 1000
+    # The real floor here is the BTC EMA200 filter inside btc_up_ok/
+    # btc_down_ok (indicators.features needs >=200 closes before ema200 is
+    # non-None at all) -- NOT v5's own 40-bar Donchian lookback, which is
+    # much shorter. 200 bars = ~33.3 days; 45 days gives a real margin.
+    # A previous 30-day window (180 bars) silently meant ema200 never
+    # populated, so btc_up_ok/btc_down_ok were always False and no entry
+    # signal could ever fire -- caught by zero trades/events in the live
+    # paper state despite real market moves (18 Sep 2026).
+    start = now - 45 * 24 * 60 * 60 * 1000
     data_dir.mkdir(parents=True, exist_ok=True)
     for symbol in sorted(set(symbols + ["BTCUSDT"])):
         rows = validate(candles(symbol, start, now, FOUR_HOUR), FOUR_HOUR)
