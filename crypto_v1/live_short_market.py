@@ -3,6 +3,7 @@ fail safely -- mirrors live_market.py's BinanceMarket/summarize_pilot,
 adapted for a Futures account (single USDT-margined wallet, not a
 per-asset balance list) and short-specific order pairing (open=SELL,
 close=BUY reduceOnly)."""
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
@@ -79,10 +80,21 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
 
 
 class BinanceFuturesMarket:
-    def __init__(self, config, strategy_config, environment, executor, tag=""):
+    # See live_market.BinanceMarket's matching cache for why: this fans
+    # out an all_orders() call to every symbol in the scanning universe
+    # (~50, ~20 weight each) once per pending short candidate, and a
+    # single tick can trigger this from two tagged systems (4H/2H) within
+    # seconds of each other -- live-observed 18 Sep 2026 as a real
+    # contributor to repeated -1003 bans alongside the spot side.
+    _PILOT_STATUS_CACHE_SECONDS = 90
+
+    def __init__(self, config, strategy_config, environment, executor, tag="", now=time.time):
         self.config, self.strategy_config = config, strategy_config
         self.environment, self.executor = environment, executor
         self.tag = tag
+        self._now = now
+        self._pilot_status_cache = None
+        self._pilot_status_cache_at = None
 
     def price(self, symbol):
         risk = self.executor.position_risk(symbol)
@@ -96,6 +108,10 @@ class BinanceFuturesMarket:
         return futures_symbol_rules(info["symbols"][0])
 
     def pilot_status(self):
+        now = self._now()
+        if (self._pilot_status_cache is not None
+                and now - self._pilot_status_cache_at < self._PILOT_STATUS_CACHE_SECONDS):
+            return self._pilot_status_cache
         account = self.executor.account()
         open_orders = self.executor.open_orders()
         symbols = set(universe(self.strategy_config))
@@ -105,7 +121,9 @@ class BinanceFuturesMarket:
         with ThreadPoolExecutor(max_workers=5) as pool:
             batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
         orders = [order for batch in batches for order in batch]
-        return summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag)
+        status = summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag)
+        self._pilot_status_cache, self._pilot_status_cache_at = status, now
+        return status
 
     def live_positions(self):
         positions = []

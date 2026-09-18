@@ -1,7 +1,8 @@
 import unittest
 from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
-from crypto_v1.live_short_market import summarize_short_pilot
+from crypto_v1.live_short_market import BinanceFuturesMarket, summarize_short_pilot
 
 
 C = {"pilot_capital_usdt": 34, "live_fee_buffer_fraction": 0.001}
@@ -129,6 +130,40 @@ class TaggedSubSystemTests(unittest.TestCase):
         result = summarize_short_pilot(account, [], [], self.CONFIG, 0)
         self.assertEqual(result["equity"], Decimal("33.2"))
         self.assertEqual(result["free_usdt"], Decimal("30.5"))
+
+
+class FuturesPilotStatusCacheTests(unittest.TestCase):
+    """Mirrors live_market's PilotStatusCacheTests: pilot_status() fans an
+    all_orders() call out to every symbol in the scanning universe, so a
+    short TTL cache should collapse near-simultaneous calls into one
+    real fetch (see BinanceFuturesMarket's cache docstring)."""
+
+    def _market(self, now_fn):
+        executor = MagicMock()
+        executor.open_orders.return_value = []
+        executor.all_orders.return_value = []
+        executor.account.return_value = {"availableBalance": "0", "totalMarginBalance": "0"}
+        market = BinanceFuturesMarket(C, {"top_n": 1, "excluded_bases": []}, {}, executor, now=now_fn)
+        return market, executor
+
+    @patch("crypto_v1.live_short_market.universe", return_value=["BTCUSDT"])
+    def test_second_call_within_ttl_reuses_cached_result(self, _mock_universe):
+        clock = [1_000.0]
+        market, executor = self._market(lambda: clock[0])
+        first = market.pilot_status()
+        clock[0] += 10
+        second = market.pilot_status()
+        self.assertEqual(executor.all_orders.call_count, 1)
+        self.assertIs(first, second)
+
+    @patch("crypto_v1.live_short_market.universe", return_value=["BTCUSDT"])
+    def test_call_after_ttl_expires_refetches(self, _mock_universe):
+        clock = [1_000.0]
+        market, executor = self._market(lambda: clock[0])
+        market.pilot_status()
+        clock[0] += 91
+        market.pilot_status()
+        self.assertEqual(executor.all_orders.call_count, 2)
 
 
 if __name__ == '__main__':

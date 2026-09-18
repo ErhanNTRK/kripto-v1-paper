@@ -1,4 +1,5 @@
 """Reconstruct pilot limits from Binance so Render restarts fail safely."""
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
@@ -95,10 +96,28 @@ def summarize_pilot(account, open_orders, orders, prices, config, day_start_ms=0
 
 
 class BinanceMarket:
-    def __init__(self, config, strategy_config, environment, executor, tag=""):
+    # pilot_status() fans out an all_orders() call to every symbol in the
+    # scanning universe (~50) to reconstruct all-time realized P&L -- ~20
+    # weight each, so roughly 1000 weight in one burst. It runs once per
+    # pending candidate approve_buy() evaluates, and with two tagged
+    # systems (4H/2H) each doing spot AND futures, a single tick can fire
+    # this several times within seconds. Live-observed 18 Sep 2026: this
+    # burst was the actual trigger behind repeated -1003 bans, not just
+    # candidate volume. A short TTL cache collapses near-simultaneous
+    # calls (the same tick's multiple candidates, or two tick sources
+    # landing close together) into one real fetch; kept short enough that
+    # a stale free_usdt/held_symbols reading is never trusted for more
+    # than one automatic-entry cycle -- correctness comes from the
+    # exchange-native protective stop either way, not from this cache.
+    _PILOT_STATUS_CACHE_SECONDS = 90
+
+    def __init__(self, config, strategy_config, environment, executor, tag="", now=time.time):
         self.config, self.strategy_config = config, strategy_config
         self.environment, self.executor = environment, executor
         self.tag = tag
+        self._now = now
+        self._pilot_status_cache = None
+        self._pilot_status_cache_at = None
 
     def _account(self):
         return signed_get("/api/v3/account", self.environment["BINANCE_API_KEY"],
@@ -116,6 +135,10 @@ class BinanceMarket:
         return symbol_rules(info["symbols"][0])
 
     def pilot_status(self):
+        now = self._now()
+        if (self._pilot_status_cache is not None
+                and now - self._pilot_status_cache_at < self._PILOT_STATUS_CACHE_SECONDS):
+            return self._pilot_status_cache
         tickers = self._tickers()
         account = self._account()
         open_orders = self.executor.open_orders()
@@ -130,7 +153,9 @@ class BinanceMarket:
         with ThreadPoolExecutor(max_workers=5) as pool:
             batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
         orders = [order for batch in batches for order in batch]
-        return summarize_pilot(account, open_orders, orders, tickers, self.config, int(start), self.tag)
+        status = summarize_pilot(account, open_orders, orders, tickers, self.config, int(start), self.tag)
+        self._pilot_status_cache, self._pilot_status_cache_at = status, now
+        return status
 
     def live_positions(self):
         positions = []
