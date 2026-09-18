@@ -188,6 +188,18 @@ class RunSymmetricTests(unittest.TestCase):
         state = run_symmetric(data, ['BTCUSDT'], C, start=0, end=n * INTERVAL)
         self.assertEqual(state['trades'], [])
 
+    def test_interval_is_configurable_and_defaults_to_four_hour(self):
+        # 18 Sep 2026: interval was hardcoded to FOUR_HOUR for the curve's
+        # timestamp bookkeeping, blocking a real 2h-bar comparison test.
+        from crypto_v1.research_v2 import FOUR_HOUR, TWO_HOUR
+        n = 5
+        rows = [dict(t=i * TWO_HOUR, o=100.0, h=100.5, l=99.5, c=100.0, v=100.0) for i in range(n)]
+        data = {'BTCUSDT': rows}
+        default = run_symmetric(data, ['BTCUSDT'], C, start=0, end=n * TWO_HOUR)
+        two_hour = run_symmetric(data, ['BTCUSDT'], C, start=0, end=n * TWO_HOUR, interval=TWO_HOUR)
+        self.assertEqual(default['curve'][-1]['time'] - (n - 1) * TWO_HOUR, FOUR_HOUR)
+        self.assertEqual(two_hour['curve'][-1]['time'] - (n - 1) * TWO_HOUR, TWO_HOUR)
+
     def test_flat_data_with_funding_matches_no_funding_when_nothing_is_held(self):
         # No positions ever open on flat data, so funding events (which
         # only accrue against open positions) must be a pure no-op.

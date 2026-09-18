@@ -182,7 +182,7 @@ def short_exit(row, btc, mode="strict"):
     return not btc_down_ok(btc, mode) or row.get("short_exit") is None or row["c"] > row["short_exit"]
 
 
-def run_symmetric(data, symbols, c, start, end, funding=None):
+def run_symmetric(data, symbols, c, start, end, funding=None, interval=FOUR_HOUR):
     prepared = {s: {r["t"]: r for r in symmetric_features(rows, c)} for s, rows in data.items()}
     times = sorted(t for t in prepared.get("BTCUSDT", {}) if start <= t < end)
     cash = c["initial_cash"]
@@ -297,20 +297,20 @@ def run_symmetric(data, symbols, c, start, end, funding=None):
                 pending[symbol] = "long"
             elif short_entry(f, bars.get("BTCUSDT"), c) is not None:
                 pending[symbol] = "short"
-        curve.append(dict(time=t + FOUR_HOUR, equity=equity_now(), positions=len(positions)))
+        curve.append(dict(time=t + interval, equity=equity_now(), positions=len(positions)))
     return dict(trades=trades, curve=curve, positions={})
 
 
-def evaluate(data, symbols, c, manifest, count=5, min_trades=8, warm=100, funding=None):
+def evaluate(data, symbols, c, manifest, count=5, min_trades=8, warm=100, funding=None, interval=FOUR_HOUR):
     """data: native 15m rows (as loaded by crypto_v1.data.load) -- aggregated
-    to 4h internally, so the same cached 15m dataset used by every other
-    variant here can be reused without a new fetch.
+    to `interval` internally (default 4h), so the same cached 15m dataset
+    used by every other variant here can be reused without a new fetch.
 
     funding: optional real BTCUSDT-proxy funding events (see run_symmetric)
     applied to every window's normal and stress runs alike, so a real
     leveraged-perpetual cost/benefit is reflected in the GO/NO_GO verdict
     rather than only unleveraged spot-style fee/slippage."""
-    agg_data = {symbol: aggregate(rows, FOUR_HOUR) for symbol, rows in data.items()}
+    agg_data = {symbol: aggregate(rows, interval) for symbol, rows in data.items()}
     symbols = [s for s in symbols if len(agg_data.get(s, [])) >= 200]
     times = [r["t"] for r in agg_data["BTCUSDT"] if manifest["start"] <= r["t"] < manifest["end"]]
     min_bars = warm + count * min_trades * 4
@@ -320,9 +320,9 @@ def evaluate(data, symbols, c, manifest, count=5, min_trades=8, warm=100, fundin
     windows = []
     for i in range(count):
         start, end = starts[i], starts[i + 1]
-        normal = metrics(run_symmetric(agg_data, symbols, c, start, end, funding), c)
+        normal = metrics(run_symmetric(agg_data, symbols, c, start, end, funding, interval), c)
         cs = wf.stress_config(c)
-        stress = metrics(run_symmetric(agg_data, symbols, cs, start, end, funding), cs)
+        stress = metrics(run_symmetric(agg_data, symbols, cs, start, end, funding, interval), cs)
         ok = (normal["trade_count"] or 0) >= min_trades
         passed = ok and normal["net_return"] > 0 and (normal["profit_factor"] or 0) >= 1.0 \
             and stress["net_return"] > 0 and (stress["profit_factor"] or 0) >= 1.0

@@ -22,7 +22,7 @@ class DataIntervalTests(unittest.TestCase):
             validate([bar(0), bar(INTERVAL)], four_hour)
 
     def test_binance_code_covers_intervals_used_in_this_project(self):
-        for ms in (900_000, 3_600_000, 14_400_000, 21_600_000, 86_400_000):
+        for ms in (900_000, 3_600_000, 7_200_000, 14_400_000, 21_600_000, 86_400_000):
             self.assertIn(ms, BINANCE_CODE)
 
 

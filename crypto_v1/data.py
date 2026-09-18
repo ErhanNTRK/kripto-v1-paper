@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 INTERVAL = 900000
 BASE = 'https://data-api.binance.vision'
-BINANCE_CODE = {900_000: '15m', 3_600_000: '1h', 14_400_000: '4h', 21_600_000: '6h', 86_400_000: '1d'}
+BINANCE_CODE = {900_000: '15m', 3_600_000: '1h', 7_200_000: '2h', 14_400_000: '4h', 21_600_000: '6h', 86_400_000: '1d'}
 
 
 def get(path, params=None):

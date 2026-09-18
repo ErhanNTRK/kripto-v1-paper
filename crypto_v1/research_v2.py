@@ -8,6 +8,7 @@ from .strategy import btc_ok, initial_stop
 from . import walkforward as wf
 
 HOUR = 3_600_000
+TWO_HOUR = 7_200_000
 FOUR_HOUR = 14_400_000
 DAY = 86_400_000
 
