@@ -131,6 +131,16 @@ class ShortWindowLongModelTests(unittest.TestCase):
         self.assertEqual(ShortWindowLongModel.sell(row(c=100, long_exit=95), up_btc()),
                           long_exit(row(c=100, long_exit=95), up_btc()))
 
+    def test_sell_honors_the_configured_btc_filter_mode(self):
+        # Regression (18 Sep 2026): .sell must use the SAME btc_filter mode
+        # as entry, via the config it's now given -- not silently default
+        # to "strict" and force-exit a position opened under a looser mode.
+        choppy_up = dict(c=100, ema20=101, ema50=99, ema200=90)  # loose-ok, strict-fails
+        held = row(c=100, long_exit=95)
+        self.assertTrue(ShortWindowLongModel.sell(held, choppy_up))  # no config -> strict -> exits
+        self.assertTrue(ShortWindowLongModel.sell(held, choppy_up, C))  # C has no btc_filter -> strict
+        self.assertFalse(ShortWindowLongModel.sell(held, choppy_up, dict(C, btc_filter="loose")))
+
     def test_features_delegates_to_symmetric_features(self):
         n = 60
         rows = [dict(t=i * INTERVAL, o=100.0, h=100.5, l=99.5, c=100.0, v=100.0) for i in range(n)]

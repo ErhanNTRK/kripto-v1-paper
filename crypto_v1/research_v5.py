@@ -120,19 +120,15 @@ class ShortWindowLongModel:
     The short side (Part 2 of the roadmap) is NOT in this model -- it
     needs Binance Margin/Futures infrastructure that does not exist yet.
 
-    KNOWN LIMITATION: .sell's signature (backtest.Engine's fixed sell_fn
-    interface: sell(row, btc), no config) can't see config["btc_filter"],
-    so it always checks the strict BTC condition on exit regardless of
-    what entry mode opened the position. This is currently safe ONLY
-    because config_v5_long.json leaves btc_filter unset (defaults to
-    "strict" on both sides, consistent). If btc_filter is ever loosened
-    for this live model, entry and exit would use DIFFERENT modes and
-    reproduce the exact bug caught in run_symmetric on 18 Sep 2026 (a
-    position opened under a loose filter gets force-exited on the very
-    next bar by the mismatched strict exit check, producing a fake,
-    suspiciously high win rate instead of a real result). Do not loosen
-    btc_filter for this model without first plumbing the mode through
-    Engine's sell_fn interface.
+    (Fixed 18 Sep 2026: .sell now receives config as a 3rd argument --
+    backtest.Engine.step passes it -- specifically so entry and exit use
+    the SAME config["btc_filter"] mode. Before this fix, .sell always
+    checked the strict BTC condition regardless of what mode opened the
+    position; a position opened under a loosened entry filter would get
+    force-exited one bar later by the mismatched strict exit check,
+    producing a fake, suspiciously high win rate instead of a real
+    result -- caught in run_symmetric before this model was also
+    affected.)
     """
     @staticmethod
     def features(rows, config):
@@ -143,8 +139,14 @@ class ShortWindowLongModel:
         return long_entry(row, btc, config) is not None
 
     @staticmethod
-    def sell(row, btc):
-        return long_exit(row, btc)
+    def sell(row, btc, config=None):
+        # config is now threaded through (backtest.Engine.step passes it as
+        # of 18 Sep 2026, fixing the exact entry/exit btc_filter mismatch
+        # documented above and caught in run_symmetric the same day) so a
+        # loosened entry mode is honored on exit too, instead of silently
+        # falling back to "strict" and force-exiting a real position one
+        # bar after it opens.
+        return long_exit(row, btc, (config or {}).get("btc_filter", "strict"))
 
     stop = staticmethod(long_stop)
 

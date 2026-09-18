@@ -45,7 +45,7 @@ class CostAwareTrend:
         return bool(btc_up and trend and stop > 0 and 2 * (row["c"] - stop) / row["c"] >= 0.01)
 
     @staticmethod
-    def sell(row, btc):
+    def sell(row, btc, config=None):
         return (row.get("exit20") is None or row["c"] < row["ema20"]
                 or row["c"] < row["exit20"])
 

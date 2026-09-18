@@ -60,7 +60,7 @@ class DonchianModel:
         return stop > 0 and 2 * (row["c"] - stop) / row["c"] >= 0.006
 
     @staticmethod
-    def sell(row, btc):
+    def sell(row, btc, config=None):
         return (not btc_ok(btc) or row.get("donchian_exit") is None
                 or row["c"] < row["donchian_exit"])
 

@@ -47,7 +47,7 @@ class EarlyReversalModel:
         return stop > 0 and 2 * (row["c"] - stop) / row["c"] >= 0.006
 
     @staticmethod
-    def sell(row, btc):
+    def sell(row, btc, config=None):
         return row.get("ema20") is not None and row["c"] < row["ema20"]
 
     stop = staticmethod(initial_stop)

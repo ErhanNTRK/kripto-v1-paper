@@ -91,7 +91,7 @@ class Engine:
         btc = bars['BTCUSDT']
         for symbol, p in s['positions'].items():
             f = bars[symbol]
-            sold = self.model.sell(f, btc) if self.model else sell_signal(f, btc, c)
+            sold = self.model.sell(f, btc, c) if self.model else sell_signal(f, btc, c)
             if sold:
                 s['pending_sells'].setdefault(symbol, 'trend_exit')
             p['high'] = max(p['high'], f['h'])

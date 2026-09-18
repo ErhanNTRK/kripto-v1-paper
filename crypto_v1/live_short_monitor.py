@@ -10,13 +10,19 @@ from .research_v5 import short_exit as short_trend_exit
 
 
 def short_exit_decision(position, feature, btc, low, config, sell_fn=None):
+    """config["btc_filter"] (default "strict") MUST match whatever mode
+    short_entry used to open this position -- mirrors the same fix applied
+    to research_v5.run_symmetric and ShortWindowLongModel.sell on 18 Sep
+    2026. A position opened under a loosened filter that gets checked
+    against the strict default on exit is force-closed almost immediately,
+    producing a fake result instead of a real one."""
     entry = Decimal(str(position["entry"]))
     stop = Decimal(str(position["stop_price"]))
     current = Decimal(str(feature["c"]))
     risk = stop - entry
     if risk <= 0:
         return "emergency_risk"
-    sell_fn = sell_fn or (lambda f, b: short_trend_exit(f, b))
+    sell_fn = sell_fn or (lambda f, b: short_trend_exit(f, b, config.get("btc_filter", "strict")))
     if sell_fn(feature, btc):
         return "profit_signal" if current < entry else "emergency_risk"
     if Decimal(str(low)) <= entry - risk:
