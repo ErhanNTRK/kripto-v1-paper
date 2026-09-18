@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Fetch 300 days of data (current live config: top_n=50)
+      - name: Fetch 300 days of data (current live config, top_n=50)
         run: python -m crypto_v1 fetch --days 300 --data data-wf
       - name: Compare donchian_windows 10/20/40 (current live) vs 5/10/20 (shorter) on last-week trades and walk-forward GO/NO_GO
         run: |
