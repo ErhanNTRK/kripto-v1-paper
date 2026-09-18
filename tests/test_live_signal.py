@@ -1,6 +1,61 @@
 import unittest
-from crypto_v1.live_signal import (isolate_candidate, isolate_short_candidate,
-                                    pending_candidates, pending_short_candidates)
+from crypto_v1.live_signal import (RUNTIME_STATE, RUNTIME_STATE_2H, RUNTIME_STATE_SHORT,
+                                    RUNTIME_STATE_SHORT_2H, fetch_runtime_state,
+                                    fetch_runtime_state_short, isolate_candidate,
+                                    isolate_short_candidate, pending_candidates,
+                                    pending_short_candidates)
+
+
+class FetchUrlOverrideTests(unittest.TestCase):
+    """The 2H system (18 Sep 2026) reads its own candidate files via a url
+    override -- these must default to the original 4H URLs (backward
+    compatible) but fetch whatever url is actually passed."""
+
+    def test_default_url_is_the_4h_state_file(self):
+        seen = {}
+        def opener(request, timeout):
+            seen['url'] = request.full_url
+            class Resp:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def read(self): return b'{}'
+            return Resp()
+        from unittest.mock import patch
+        with patch('json.load', return_value={'state': {}}):
+            fetch_runtime_state(opener=opener)
+        self.assertEqual(seen['url'], RUNTIME_STATE)
+
+    def test_url_override_is_used_when_given(self):
+        seen = {}
+        def opener(request, timeout):
+            seen['url'] = request.full_url
+            class Resp:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def read(self): return b'{}'
+            return Resp()
+        from unittest.mock import patch
+        with patch('json.load', return_value={'state': {}}):
+            fetch_runtime_state(opener=opener, url=RUNTIME_STATE_2H)
+        self.assertEqual(seen['url'], RUNTIME_STATE_2H)
+
+    def test_short_fetch_also_honors_a_url_override(self):
+        seen = {}
+        def opener(request, timeout):
+            seen['url'] = request.full_url
+            class Resp:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def read(self): return b'{}'
+            return Resp()
+        from unittest.mock import patch
+        with patch('json.load', return_value={'state': {}}):
+            fetch_runtime_state_short(opener=opener, url=RUNTIME_STATE_SHORT_2H)
+        self.assertEqual(seen['url'], RUNTIME_STATE_SHORT_2H)
+
+    def test_2h_urls_are_distinct_from_4h_urls(self):
+        self.assertNotEqual(RUNTIME_STATE, RUNTIME_STATE_2H)
+        self.assertNotEqual(RUNTIME_STATE_SHORT, RUNTIME_STATE_SHORT_2H)
 
 
 class LiveSignalTests(unittest.TestCase):

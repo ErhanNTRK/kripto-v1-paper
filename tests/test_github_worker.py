@@ -5,8 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from crypto_v1.github_worker import prepare_data, private_chat_id, write_short_state
-from crypto_v1.research_v2 import FOUR_HOUR
+from crypto_v1.github_worker import (prepare_data, private_chat_id,
+                                     write_2h_signal_state, write_short_state)
+from crypto_v1.research_v2 import FOUR_HOUR, TWO_HOUR
 
 
 class Response:
@@ -142,3 +143,72 @@ class WriteShortStateTests(unittest.TestCase):
             saved = json.loads((runtime / "short_state.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["state"]["events"], [])
         self.assertEqual(saved["state"]["pending_shorts"], {})
+
+
+class WriteTwoHourSignalStateTests(unittest.TestCase):
+    """write_2h_signal_state (18 Sep 2026) is the 2H system's own
+    independent fetch+detect+publish pass, deliberately separate from
+    prepare_data/write_short_state's 4H path -- these tests exercise it
+    end to end (fetch mocked, detection/publishing real) since it had no
+    coverage at all when first written."""
+
+    C = dict(atr_multiplier=2.0, risk_fraction=0.005, max_positions=3,
+             fee=0.001, slippage=0.0005, initial_cash=10000.0,
+             breakout_bars=20, support_bars=10)
+
+    def _rows(self, n, step, offset=0.5):
+        out, price = [], 1000.0
+        for i in range(n):
+            price += step
+            out.append(dict(t=i * TWO_HOUR, o=price, h=price + offset, l=price - offset,
+                            c=price, v=100.0))
+        return out
+
+    def _run(self, rows, now_2h):
+        with patch('crypto_v1.github_worker.universe', return_value=['ALTUSDT']), \
+             patch('crypto_v1.github_worker.candles', side_effect=lambda symbol, start, end, interval: rows), \
+             patch('crypto_v1.github_worker.validate', side_effect=lambda rows, interval: rows):
+            with tempfile.TemporaryDirectory() as tmp:
+                runtime = Path(tmp)
+                write_2h_signal_state(self.C, runtime, now_2h=now_2h)
+                long_saved = json.loads((runtime / "state_2h.json").read_text(encoding="utf-8"))
+                short_saved = json.loads((runtime / "short_state_2h.json").read_text(encoding="utf-8"))
+        return long_saved, short_saved
+
+    def test_uptrend_publishes_an_al_adayi_event_and_pending_buy(self):
+        n = 260
+        long_saved, short_saved = self._run(self._rows(n, 2.0), now_2h=n * TWO_HOUR)
+        events = long_saved["state"]["events"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "AL_ADAYI")
+        self.assertEqual(events[0]["symbol"], "ALTUSDT")
+        self.assertIn("ALTUSDT", long_saved["state"]["pending_buys"])
+        self.assertEqual(short_saved["state"]["events"], [])
+
+    def test_downtrend_publishes_a_short_adayi_event_not_a_long_one(self):
+        n = 260
+        long_saved, short_saved = self._run(self._rows(n, -2.0), now_2h=n * TWO_HOUR)
+        self.assertEqual(long_saved["state"]["events"], [])
+        events = short_saved["state"]["events"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "SHORT_ADAYI")
+        self.assertEqual(events[0]["symbol"], "ALTUSDT")
+        self.assertIn("ALTUSDT", short_saved["state"]["pending_shorts"])
+        self.assertIn("leverage", short_saved["state"]["pending_shorts"]["ALTUSDT"])
+
+    def test_flat_data_publishes_nothing_on_either_file(self):
+        n = 260
+        rows = [dict(t=i * TWO_HOUR, o=100.0, h=100.5, l=99.5, c=100.0, v=100.0) for i in range(n)]
+        long_saved, short_saved = self._run(rows, now_2h=n * TWO_HOUR)
+        self.assertEqual(long_saved["state"]["events"], [])
+        self.assertEqual(short_saved["state"]["events"], [])
+
+    def test_fetch_window_is_at_least_200_bars_for_ema200_to_populate(self):
+        now = 1_800_000_000_000
+        with patch('crypto_v1.github_worker.universe', return_value=['ALTUSDT']), \
+             patch('crypto_v1.github_worker.candles', return_value=[]) as mock_candles, \
+             patch('crypto_v1.github_worker.validate', return_value=[]):
+            with tempfile.TemporaryDirectory() as tmp:
+                write_2h_signal_state(self.C, Path(tmp), now_2h=now)
+        start = mock_candles.call_args_list[0].args[1]
+        self.assertGreaterEqual((now - start) / TWO_HOUR, 200)

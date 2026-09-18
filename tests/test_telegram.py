@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from crypto_v1.telegram import (deliver_once, deliver_short_events, format_daily_status,
-                                format_event, send_message)
+from crypto_v1.telegram import (deliver_fresh_events, deliver_once, deliver_short_events,
+                                format_daily_status, format_event, send_message)
 
 
 class TelegramTests(unittest.TestCase):
@@ -92,3 +92,40 @@ class TelegramTests(unittest.TestCase):
             db = Path(folder) / 'delivery.sqlite'
             self.assertEqual(deliver_short_events(path, db), 0)
             send.assert_not_called()
+
+    def test_deliver_fresh_events_sends_only_the_requested_event_type(self):
+        # deliver_fresh_events (18 Sep 2026) generalizes deliver_short_events
+        # for the 2H system's state_2h.json/short_state_2h.json, which are
+        # published exactly like short_state.json -- fresh-overwritten each
+        # tick, no session/started_at to filter by.
+        saved = {'state': {'events': [
+            {'type': 'AL_ADAYI', 'time': 1000, 'symbol': 'SOLUSDT', 'close': 100},
+            {'type': 'SAT', 'time': 1000, 'symbol': 'SOLUSDT', 'reason': 'trend'},
+        ]}}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('crypto_v1.telegram.send_message', return_value=1) as send, \
+             patch('crypto_v1.telegram.time.sleep'):
+            path = Path(folder) / 'state_2h.json'
+            path.write_text(json.dumps(saved), encoding='utf-8')
+            db = Path(folder) / 'delivery.sqlite'
+            sent = deliver_fresh_events(path, db, 'AL_ADAYI', '2h_long')
+            self.assertEqual(sent, 1)
+            send.assert_called_once()
+
+    def test_deliver_fresh_events_keys_are_namespaced_by_tag(self):
+        # An identical event delivered under two different tags (e.g. the
+        # 4H and 2H systems coincidentally signaling the same symbol/time)
+        # must be sent for BOTH tags, not deduplicated as if it were one
+        # delivery -- each tag's idempotency key includes the tag itself.
+        saved = {'state': {'events': [
+            {'type': 'SHORT_ADAYI', 'time': 1000, 'symbol': 'SOLUSDT', 'close': 100},
+        ]}}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('crypto_v1.telegram.send_message', return_value=1) as send, \
+             patch('crypto_v1.telegram.time.sleep'):
+            path = Path(folder) / 'short_state_2h.json'
+            path.write_text(json.dumps(saved), encoding='utf-8')
+            db = Path(folder) / 'delivery.sqlite'
+            self.assertEqual(deliver_fresh_events(path, db, 'SHORT_ADAYI', 'short'), 1)
+            self.assertEqual(deliver_fresh_events(path, db, 'SHORT_ADAYI', '2h_short'), 1)
+            self.assertEqual(send.call_count, 2)
