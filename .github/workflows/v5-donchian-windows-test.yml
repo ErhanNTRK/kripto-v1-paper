@@ -1,0 +1,66 @@
+name: V5 Kirilim Penceresi Kisaltma (10/20/40 vs 5/10/20) - Son Hafta ve Walk-forward
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 300 days of data (current live config: top_n=50)
+        run: python -m crypto_v1 fetch --days 300 --data data-wf
+      - name: Compare donchian_windows 10/20/40 (current live) vs 5/10/20 (shorter) on last-week trades and walk-forward GO/NO_GO
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import load
+          from crypto_v1.research_v2 import aggregate, FOUR_HOUR
+          from crypto_v1.research_v5 import run_symmetric, evaluate
+          from crypto_v1.funding import funding_rates
+          from crypto_v1.backtest import metrics
+          from crypto_v1.risk import validate_config
+
+          base_config = validate_config(json.loads(open('config_v5_long.json', encoding='utf-8').read()))
+          manifest, data = load('data-wf')
+          agg_data = {s: aggregate(rows, FOUR_HOUR) for s, rows in data.items()}
+          symbols = manifest['symbols']
+
+          end = manifest['end']
+          week_start = end - 7 * 86400000
+          real_funding = funding_rates('BTCUSDT', manifest['start'], manifest['end'])
+          print(f'Cekilen funding olay sayisi: {len(real_funding)}')
+          print(f'Sembol sayisi: {len(symbols)}')
+
+          for windows, label in (((10, 20, 40), 'MEVCUT CANLI (10/20/40)'), ((5, 10, 20), 'KISALTILMIS (5/10/20)')):
+              print()
+              print(f'==================== donchian_windows = {windows} -- {label} ====================')
+              config = dict(base_config, donchian_windows=windows)
+
+              week_state = run_symmetric(agg_data, symbols, config, week_start, end, funding=real_funding)
+              m = metrics(week_state, config)
+              trades = week_state['trades']
+              wins = [t for t in trades if t['pnl'] > 0]
+              print(f'--- Son 7 gun gercek simulasyon ---')
+              print(f'Islem sayisi: {len(trades)} | Kazanan: {len(wins)} | Kaybeden: {len(trades)-len(wins)}')
+              print(f'Net getiri: {m[\"net_return\"]*100:.2f}% | Kar faktoru: {m[\"profit_factor\"]}')
+              for t in trades:
+                  print(f\"    {t['symbol']:10s} | {t['side']:5s} | pnl={t['pnl']:+.4f} | r={t['r_multiple']:+.3f} | {t['reason']}\")
+
+              print(f'--- Walk-forward (5 pencere, gercek funding maliyetiyle) ---')
+              result = evaluate(data, symbols, config, manifest, count=5, funding=real_funding)
+              print('Verdict:', result['verdict'])
+              for w in result['windows']:
+                  print(f\"  pencere {w['window']}: normal={w['normal']['net_return']:.4f} \"
+                        f\"PF={w['normal']['profit_factor']}, trades={w['normal']['trade_count']}, \"
+                        f\"stress={w['stress']['net_return']:.4f} PF={w['stress']['profit_factor']}, \"
+                        f\"gecti={w['passed']}\")
+          "

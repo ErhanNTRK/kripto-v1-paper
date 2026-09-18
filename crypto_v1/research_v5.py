@@ -63,10 +63,17 @@ def btc_down_ok(btc, mode="strict"):
 
 
 def symmetric_features(rows, config):
+    # donchian_windows (default WINDOWS=(10,20,40)) is user-tunable, per
+    # the user's 18 Sep 2026 request for even more signal frequency after
+    # min_breaks/btc_filter were already loosened as far as they safely
+    # could go (btc_filter="off" was tested and confirmed to break the
+    # walk-forward edge). Shortening the lookback makes a "breakout"
+    # register more often without touching the BTC direction filter.
+    windows = tuple(config.get("donchian_windows", WINDOWS))
     out = features(rows, config)
     for i, row in enumerate(out):
         up = down = 0
-        for period in WINDOWS:
+        for period in windows:
             if i >= period:
                 window = rows[i - period:i]
                 if row["c"] > max(x["h"] for x in window):
@@ -74,7 +81,7 @@ def symmetric_features(rows, config):
                 if row["c"] < min(x["l"] for x in window):
                     down += 1
         row["breaks_up"], row["breaks_down"] = up, down
-        mid = WINDOWS[1]
+        mid = windows[1]
         row["long_exit"] = min(x["l"] for x in rows[i - mid:i]) if i >= mid else None
         row["short_exit"] = max(x["h"] for x in rows[i - mid:i]) if i >= mid else None
     return out

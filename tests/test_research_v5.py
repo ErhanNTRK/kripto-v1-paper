@@ -1,7 +1,7 @@
 import unittest
 from crypto_v1.research_v5 import (
     btc_up_ok, btc_down_ok, long_entry, short_entry, long_exit, short_exit,
-    long_stop, ShortWindowLongModel, run_symmetric, evaluate,
+    long_stop, ShortWindowLongModel, run_symmetric, evaluate, symmetric_features,
 )
 from crypto_v1.data import INTERVAL
 
@@ -58,6 +58,28 @@ class DirectionFiltersTests(unittest.TestCase):
         self.assertTrue(btc_up_ok(None, "off"))
         self.assertTrue(btc_up_ok({}, "off"))
         self.assertTrue(btc_down_ok({}, "off"))
+
+
+class SymmetricFeaturesWindowsTests(unittest.TestCase):
+    def _rows(self, n, step, offset=0.5):
+        out, price = [], 1000.0
+        for i in range(n):
+            price += step
+            out.append(dict(t=i * INTERVAL, o=price, h=price + offset, l=price - offset,
+                            c=price, v=100.0))
+        return out
+
+    def test_donchian_windows_is_configurable_and_defaults_to_10_20_40(self):
+        rows = self._rows(50, 2.0)
+        default = symmetric_features(rows, C)
+        # bar 40 is the first index where the 40-bar window's condition can
+        # be evaluated at all (i>=40); breaks_up should be 3 there (all
+        # three default windows satisfied by a steady uptrend).
+        self.assertEqual(default[40]["breaks_up"], 3)
+        # A much shorter window set should reach its max breaks_up earlier.
+        short_windows = symmetric_features(rows, dict(C, donchian_windows=(2, 5, 10)))
+        self.assertEqual(short_windows[10]["breaks_up"], 3)
+        self.assertEqual(short_windows[10]["long_exit"], min(r["l"] for r in rows[5:10]))
 
 
 class EntryExitTests(unittest.TestCase):
