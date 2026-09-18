@@ -38,6 +38,20 @@ class LiveControllerTests(unittest.TestCase):
         self.assertEqual(approve_buy(7, "SAT", 501000, SAVED, C, {}, Market(), Mock())["status"],
                          "rejected")
 
+    def test_rejects_reopening_a_symbol_already_held(self):
+        # Regression (18 Sep 2026): a strong sustained breakout can keep
+        # re-firing a candidate for the same symbol across consecutive
+        # bars now that entries are automatic -- must not double up.
+        class AlreadyHeldMarket(Market):
+            def pilot_status(self):
+                status = super().pilot_status()
+                return dict(status, open_positions=1, held_symbols={"SOLUSDT"})
+        executor = Mock()
+        result = approve_buy(7, "AL", 501000, SAVED, dict(C, live_trading_enabled=True),
+                             {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, AlreadyHeldMarket(), executor)
+        self.assertEqual(result, {"status": "rejected", "reason": "already_holding_symbol"})
+        executor.market_buy.assert_not_called()
+
     def test_enabled_mode_buys_once_and_places_stop(self):
         executor = Mock()
         executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013)]

@@ -3,9 +3,20 @@ from decimal import Decimal
 from datetime import datetime, timezone
 
 
-def may_open(config, open_positions, buys_today, realized_loss_today, pilot_drawdown):
+def may_open(config, open_positions, buys_today, realized_loss_today, pilot_drawdown,
+            symbol=None, held_symbols=()):
+    """symbol/held_symbols (default: no check, for backward compatibility
+    with any caller that hasn't been updated) guard against opening a
+    SECOND position in a symbol we already hold. Needed once entries are
+    automatic (18 Sep 2026): a strong, sustained breakout can keep
+    satisfying long_entry/short_entry for several consecutive bars, and
+    without this a human was the only thing preventing a re-fired
+    candidate from doubling up on the same symbol -- open_positions alone
+    only caps the TOTAL count, not per-symbol."""
     if not config.get("live_trading_enabled", False):
         return False, "live_disabled"
+    if symbol is not None and symbol in held_symbols:
+        return False, "already_holding_symbol"
     if open_positions >= config["max_open_positions"]:
         return False, "position_limit"
     if buys_today >= config["max_buys_per_day"]:

@@ -33,7 +33,8 @@ def approve_buy(update_id, command, now_ms, saved, config, environment, market, 
     status = market.pilot_status()
     allowed, reason = may_open(dict(config, live_trading_enabled=True),
                                status["open_positions"], status["buys_today"],
-                               status["realized_loss_today"], status["pilot_drawdown"])
+                               status["realized_loss_today"], status["pilot_drawdown"],
+                               symbol=signal["symbol"], held_symbols=status.get("held_symbols", ()))
     if not allowed:
         return {"status": "rejected", "reason": reason}
     price = Decimal(str(market.price(signal["symbol"])))

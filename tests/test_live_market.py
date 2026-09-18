@@ -15,6 +15,7 @@ class LiveMarketTests(unittest.TestCase):
         result = summarize_pilot(account, open_orders, orders, {"SOLUSDT": Decimal("100")},
                                  {"pilot_capital_usdt": 68.13}, 0)
         self.assertEqual(result["open_positions"], 1)
+        self.assertEqual(result["held_symbols"], {"SOLUSDT"})
         self.assertEqual(result["buys_today"], 1)
         self.assertEqual(result["realized_loss_today"], Decimal("0"))
         self.assertEqual(result["equity"], Decimal("65"))

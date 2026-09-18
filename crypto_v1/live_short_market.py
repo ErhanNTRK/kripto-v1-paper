@@ -42,8 +42,9 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0):
             paid = _decimal(close.get("cumQuote"))
             realized_loss += max(Decimal("0"), paid * (Decimal("1") + fee) - received * (Decimal("1") - fee))
     protective = [o for o in open_orders if str(o.get("clientOrderId", "")).startswith("kv1fp")]
+    held_symbols = {o["symbol"] for o in protective}
     pilot_drawdown = max(Decimal("0"), Decimal(str(config["pilot_capital_usdt"])) - equity)
-    return {"open_positions": len({o["symbol"] for o in protective}),
+    return {"open_positions": len(held_symbols), "held_symbols": held_symbols,
             "opens_today": len({o["clientOrderId"] for o in opens
                                 if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}),
             "realized_loss_today": realized_loss, "pilot_drawdown": pilot_drawdown,

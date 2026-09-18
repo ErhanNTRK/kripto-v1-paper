@@ -29,6 +29,7 @@ class SummarizeShortPilotTests(unittest.TestCase):
         ]
         result = summarize_short_pilot({}, open_orders, [], C)
         self.assertEqual(result["open_positions"], 2)
+        self.assertEqual(result["held_symbols"], {"SOLUSDT", "ETHUSDT"})
 
     def test_realized_loss_pairs_open_and_close_by_client_id_suffix(self):
         orders = [

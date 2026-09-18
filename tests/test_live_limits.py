@@ -19,6 +19,23 @@ class LiveLimitTests(unittest.TestCase):
         self.assertEqual(may_open(C, 0, 0, 1.36, 0)[1], "daily_loss_limit")
         self.assertEqual(may_open(C, 0, 0, 0, 6.81)[1], "pilot_loss_limit")
 
+    def test_rejects_a_symbol_already_held_even_with_room_under_other_limits(self):
+        # Regression (18 Sep 2026): with entries now automatic, a strong
+        # sustained breakout can keep re-firing a candidate for a symbol
+        # already held across several consecutive bars -- open_positions
+        # alone only caps the TOTAL count, never per-symbol.
+        allowed, reason = may_open(C, 0, 0, 0, 0, symbol="SOLUSDT", held_symbols={"SOLUSDT"})
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "already_holding_symbol")
+
+    def test_allows_a_symbol_not_already_held(self):
+        allowed, reason = may_open(C, 0, 0, 0, 0, symbol="ETHUSDT", held_symbols={"SOLUSDT"})
+        self.assertTrue(allowed)
+
+    def test_symbol_check_is_opt_in_for_backward_compatibility(self):
+        # No symbol/held_symbols given -> behaves exactly as before.
+        self.assertTrue(may_open(C, 0, 0, 0, 0)[0])
+
     def test_al_only_confirms_one_recent_signal(self):
         signal = {"symbol": "BTCUSDT", "created_at": 1000}
         self.assertEqual(confirmed_signal("al", [signal], 2000, C)[1], "confirmed")
