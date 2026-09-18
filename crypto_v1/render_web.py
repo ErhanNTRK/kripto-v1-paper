@@ -34,15 +34,23 @@ APPS = []
 # straight. Cooldown now doubles on each consecutive hit (5, 10, 20, 40...
 # minutes, capped at 1h) so a longer real ban is probed less and less
 # often instead of being hammered every 5 minutes regardless of its
-# actual length. A hit far enough past the previous one (more than 2x the
-# base cooldown) is treated as a fresh, unrelated incident and the
-# escalation resets. Shared across BOTH apps (4H and 2H) since the ban is
-# per source IP/account, not per app.
+# actual length.
+#
+# The escalation must NOT reset itself by elapsed time: by construction, a
+# tick only ever runs again right as the PREVIOUS cooldown expires, so the
+# gap between consecutive hits during a real, ongoing ban is always
+# approximately equal to that previous cooldown -- a time-based "gap this
+# big means it's a new incident" check was tried first and immediately
+# defeated its own purpose (live-observed 18 Sep 2026: the escalation got
+# stuck oscillating at 2x because the 10-minute cooldown was itself just
+# over the reset threshold). The escalation resets only on a genuine
+# success signal instead: _note_rate_limit_cleared(), called once per tick
+# that completes without a fresh hit. Shared across BOTH apps (4H and 2H)
+# since the ban is per source IP/account, not per app.
 _RATE_LIMIT_BASE_COOLDOWN_S = 300
 _RATE_LIMIT_MAX_COOLDOWN_S = 3600
 _rate_limited_until = 0.0
 _consecutive_rate_limit_hits = 0
-_last_rate_limit_hit_at = 0.0
 
 
 def _rate_limited():
@@ -50,18 +58,19 @@ def _rate_limited():
 
 
 def _note_if_rate_limited(exc):
-    global _rate_limited_until, _consecutive_rate_limit_hits, _last_rate_limit_hit_at
+    global _rate_limited_until, _consecutive_rate_limit_hits
     if isinstance(exc, OrderRejected) and exc.code == -1003:
-        now = time.time()
-        if now - _last_rate_limit_hit_at > _RATE_LIMIT_BASE_COOLDOWN_S * 2:
-            _consecutive_rate_limit_hits = 0
         _consecutive_rate_limit_hits += 1
-        _last_rate_limit_hit_at = now
         cooldown = min(_RATE_LIMIT_MAX_COOLDOWN_S,
                        _RATE_LIMIT_BASE_COOLDOWN_S * (2 ** (_consecutive_rate_limit_hits - 1)))
-        _rate_limited_until = now + cooldown
+        _rate_limited_until = time.time() + cooldown
         print(f"Binance rate limit hit ({_consecutive_rate_limit_hits}x in a row); "
              f"pausing all Binance calls for {cooldown}s", flush=True)
+
+
+def _note_rate_limit_cleared():
+    global _consecutive_rate_limit_hits
+    _consecutive_rate_limit_hits = 0
 
 
 def _fill_pnl(entry, order, side):
@@ -301,13 +310,22 @@ class LiveApp:
         resting order on Binance regardless of whether we can poll it."""
         if _rate_limited():
             return {"status": "cooling_down", "entries": {"status": "skipped"}, "exits": {"status": "skipped"}}
+        hits_before = _consecutive_rate_limit_hits
         entry_result = {"status": "auto_entry", "results": []}
         try:
             entry_result = self.auto_enter()
         except Exception as exc:
             print(f"Auto-entry failed: {exc}", flush=True)
             _note_if_rate_limited(exc)
-        return {"entries": entry_result, "exits": self.scan()}
+        exits = self.scan()
+        # A tick that ran to completion without a FRESH -1003 (the counter
+        # is unchanged from before this tick) means Binance is responding
+        # normally again -- reset the escalation so the next real ban
+        # starts probing at the short 5-minute cooldown again, not wherever
+        # a previous, unrelated ban left off.
+        if _consecutive_rate_limit_hits == hits_before:
+            _note_rate_limit_cleared()
+        return {"entries": entry_result, "exits": exits}
 
 def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs

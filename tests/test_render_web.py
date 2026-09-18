@@ -234,16 +234,13 @@ class RateLimitCircuitBreakerTests(unittest.TestCase):
 
     def setUp(self):
         self._saved = (render_web._rate_limited_until,
-                       render_web._consecutive_rate_limit_hits,
-                       render_web._last_rate_limit_hit_at)
+                       render_web._consecutive_rate_limit_hits)
         render_web._rate_limited_until = 0.0
         render_web._consecutive_rate_limit_hits = 0
-        render_web._last_rate_limit_hit_at = 0.0
 
     def tearDown(self):
         (render_web._rate_limited_until,
-        render_web._consecutive_rate_limit_hits,
-        render_web._last_rate_limit_hit_at) = self._saved
+        render_web._consecutive_rate_limit_hits) = self._saved
 
     def _app(self):
         return LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
@@ -300,6 +297,46 @@ class RateLimitCircuitBreakerTests(unittest.TestCase):
             render_web._note_if_rate_limited(OrderRejected(-1003))
         cooldown = render_web._rate_limited_until - time.time()
         self.assertAlmostEqual(cooldown, render_web._RATE_LIMIT_MAX_COOLDOWN_S, delta=2)
+
+    def test_escalation_keeps_climbing_across_ticks_spaced_by_the_cooldown_itself(self):
+        # Regression (18 Sep 2026): an earlier version reset the escalation
+        # whenever the gap since the last hit exceeded 2x the BASE cooldown.
+        # But a tick only ever runs again right as the previous cooldown
+        # expires, so during a real ongoing ban the gap between hits is
+        # always approximately equal to that previous cooldown -- once the
+        # cooldown itself grew past the reset threshold (at the 2x/10-minute
+        # step), every subsequent hit was wrongly treated as a "fresh"
+        # incident and the escalation got stuck oscillating at 2x forever,
+        # never reaching a longer, more appropriate backoff for a long ban.
+        app = self._app()
+        app.futures_market.live_positions = MagicMock(return_value=[])
+
+        def hit_tick():
+            app.market.live_positions = MagicMock(side_effect=OrderRejected(-1003))
+            with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
+                app.tick()
+            return render_web._consecutive_rate_limit_hits
+
+        self.assertEqual(hit_tick(), 1)
+        render_web._rate_limited_until = 0.0  # simulate the cooldown having elapsed
+        self.assertEqual(hit_tick(), 2)
+        render_web._rate_limited_until = 0.0
+        self.assertEqual(hit_tick(), 3)
+        render_web._rate_limited_until = 0.0
+        self.assertEqual(hit_tick(), 4)
+
+    def test_a_tick_that_completes_cleanly_resets_the_escalation(self):
+        app = self._app()
+        app.futures_market.live_positions = MagicMock(return_value=[])
+        app.market.live_positions = MagicMock(side_effect=OrderRejected(-1003))
+        with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
+            app.tick()
+        self.assertEqual(render_web._consecutive_rate_limit_hits, 1)
+        render_web._rate_limited_until = 0.0
+        app.market.live_positions = MagicMock(return_value=[])  # Binance answering normally again
+        with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
+            app.tick()
+        self.assertEqual(render_web._consecutive_rate_limit_hits, 0)
 
 
 class FillPnlTests(unittest.TestCase):
