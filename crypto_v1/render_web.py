@@ -3,14 +3,18 @@ import hmac, json, os, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .binance_account import verify_from_environment
+from .binance_futures import FuturesExecutor
 from .binance_trade import SpotExecutor
 from .live_controller import approve_buy
 from .live_execution import execution_enabled
 from .live_market import BinanceMarket
 from .live_monitor import execute_exit, exit_decision
-from .live_signal import fetch_runtime_state
+from .live_short_controller import approve_short
+from .live_short_market import BinanceFuturesMarket
+from .live_short_monitor import execute_short_exit, short_exit_decision
+from .live_signal import fetch_runtime_state, fetch_runtime_state_short
 from .research_v2 import FOUR_HOUR
-from .research_v5 import ShortWindowLongModel
+from .research_v5 import ShortWindowLongModel, symmetric_features
 from .telegram import send_message
 
 STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False}
@@ -25,17 +29,17 @@ def telegram_command(payload, expected_chat):
     return {"update_id": int(payload["update_id"]), "command": text}
 
 class LiveApp:
-    def __init__(self, config, strategy_config, environment):
+    def __init__(self, config, strategy_config, environment, short_config=None, short_strategy_config=None):
         self.config, self.environment = config, environment
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor)
+        self.short_config = short_config
+        self.futures_executor = FuturesExecutor(short_config, environment) if short_config else None
+        self.futures_market = (BinanceFuturesMarket(short_config, short_strategy_config, environment,
+                                                     self.futures_executor)
+                               if short_config else None)
 
-    def telegram(self, payload):
-        parsed = telegram_command(payload, self.environment["TELEGRAM_CHAT_ID"])
-        if not parsed: return {"status": "ignored"}
-        if parsed["command"].strip().upper() != "AL":
-            send_message("Komut reddedildi. Yalniz guncel tek AL sinyali icin AL yazin.")
-            return {"status": "rejected", "reason": "invalid_command"}
+    def _approve_long(self, parsed):
         result = approve_buy(parsed["update_id"], parsed["command"], int(time.time() * 1000),
                              fetch_runtime_state(), self.config, self.environment,
                              self.market, self.executor)
@@ -48,6 +52,35 @@ class LiveApp:
             send_message(f"ACIL GUVENLIK SATISI: {result['plan']['symbol']} koruyucu stop kurulamadi ve alim geri satildi.")
         else: send_message("AL yapilmadi: " + result.get("reason", "guvenlik kontrolu"))
         return result
+
+    def _approve_short(self, parsed):
+        result = approve_short(parsed["update_id"], parsed["command"], int(time.time() * 1000),
+                               fetch_runtime_state_short(), self.short_config, self.environment,
+                               self.futures_market, self.futures_executor)
+        if result["status"] == "preview":
+            plan = result["plan"]
+            send_message(f"SHORT onayi dogrulandi: {plan['symbol']} | {plan['leverage']}x kaldirac | "
+                         f"Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
+        elif result["status"] == "opened_and_protected":
+            plan = result["plan"]
+            send_message(f"SHORT ACILDI VE KORUYUCU STOP AKTIF: {plan['symbol']} | {plan['leverage']}x kaldirac")
+        elif result["status"] == "opened_then_emergency_closed":
+            send_message(f"ACIL GUVENLIK KAPATMASI: {result['plan']['symbol']} "
+                         f"({result.get('reason')}) short geri kapatildi.")
+        else: send_message("SHORT yapilmadi: " + result.get("reason", "guvenlik kontrolu"))
+        return result
+
+    def telegram(self, payload):
+        parsed = telegram_command(payload, self.environment["TELEGRAM_CHAT_ID"])
+        if not parsed: return {"status": "ignored"}
+        command = parsed["command"].strip().upper()
+        if command == "AL":
+            return self._approve_long(parsed)
+        short_command = (self.short_config or {}).get("telegram_buy_command", "SHORT")
+        if self.futures_executor and command == short_command:
+            return self._approve_short(parsed)
+        send_message("Komut reddedildi. Yalniz guncel tek AL veya SHORT sinyali icin yazin.")
+        return {"status": "rejected", "reason": "invalid_command"}
 
     def scan(self):
         results = []
@@ -63,6 +96,17 @@ class LiveApp:
             result = execute_exit(position, reason, self.executor)
             send_message(f"OTOMATIK SAT: {position['symbol']} | Neden: {reason}")
             results.append(result)
+        if self.futures_market:
+            for position in self.futures_market.live_positions():
+                feature, btc, low = self.futures_market.analysis(position, symmetric_features, FOUR_HOUR)
+                reason = short_exit_decision(position, feature, btc, low, self.short_config)
+                if not reason: continue
+                if not execution_enabled(self.short_config, self.environment):
+                    results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
+                    continue
+                result = execute_short_exit(position, reason, self.futures_executor)
+                send_message(f"OTOMATIK SHORT KAPAT: {position['symbol']} | Neden: {reason}")
+                results.append(result)
         return {"status": "scanned", "results": results}
 
 def run_periodic_scans(app, interval_seconds=300, sleep=time.sleep, max_iterations=None):
@@ -111,8 +155,15 @@ def main():
     # v5 long side (shorter 10/20/40-bar Donchian, uncapped winners via
     # cap_at_target=false) drives live candidates and exits; see ARASTIRMA.md.
     strategy = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
+    # v5 short side (Part 2, 18 Sep 2026): same signal mirrored, Binance
+    # Futures with leverage tiered 3x/5x by breakout strength. Manual
+    # "SHORT" Telegram confirmation to open (matching AL for the long
+    # side), automatic exits. Deployed directly to live after the signal
+    # passed walk-forward + real funding-cost validation -- see
+    # ARASTIRMA.md and the user's explicit 18 Sep 2026 instruction.
+    short_config = json.loads(Path("short_live_config.json").read_text(encoding="utf-8"))
     global APP
-    APP = LiveApp(config, strategy, os.environ)
+    APP = LiveApp(config, strategy, os.environ, short_config, strategy)
     telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET"))
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ))

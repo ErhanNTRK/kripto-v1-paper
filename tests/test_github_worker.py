@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from crypto_v1.github_worker import prepare_data, private_chat_id
+from crypto_v1.github_worker import prepare_data, private_chat_id, write_short_state
 from crypto_v1.research_v2 import FOUR_HOUR
 
 
@@ -92,3 +92,53 @@ class GithubWorkerTests(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=Response(payload)):
             with self.assertRaises(RuntimeError):
                 private_chat_id("secret")
+
+
+class WriteShortStateTests(unittest.TestCase):
+    C = dict(atr_multiplier=2.0, risk_fraction=0.005, max_positions=3,
+             fee=0.001, slippage=0.0005, initial_cash=10000.0,
+             breakout_bars=20, support_bars=10)
+
+    def _rows(self, n, step, offset=0.5):
+        out, price = [], 1000.0
+        for i in range(n):
+            price += step
+            out.append(dict(t=i * FOUR_HOUR, o=price, h=price + offset, l=price - offset,
+                            c=price, v=100.0))
+        return out
+
+    def _write(self, data_dir, symbols_rows, start, end):
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "manifest.json").write_text(json.dumps({
+            "symbols": list(symbols_rows), "timeframe": "4h", "start": start, "end": end,
+        }), encoding="utf-8")
+        for symbol, rows in symbols_rows.items():
+            (data_dir / f"{symbol}.json").write_text(json.dumps(rows), encoding="utf-8")
+
+    def test_downtrend_publishes_a_short_adayi_event_and_pending_short(self):
+        n = 260
+        rows = self._rows(n, -2.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            data_dir, runtime = tmp / "data", tmp / "runtime"
+            self._write(data_dir, {"BTCUSDT": rows, "ALTUSDT": rows}, 0, n * FOUR_HOUR)
+            write_short_state(self.C, data_dir, runtime, now=n * FOUR_HOUR)
+            saved = json.loads((runtime / "short_state.json").read_text(encoding="utf-8"))
+        events = saved["state"]["events"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "SHORT_ADAYI")
+        self.assertEqual(events[0]["symbol"], "ALTUSDT")
+        self.assertIn("ALTUSDT", saved["state"]["pending_shorts"])
+        self.assertIn("leverage", saved["state"]["pending_shorts"]["ALTUSDT"])
+
+    def test_flat_data_publishes_nothing(self):
+        n = 260
+        rows = [dict(t=i * FOUR_HOUR, o=100.0, h=100.5, l=99.5, c=100.0, v=100.0) for i in range(n)]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            data_dir, runtime = tmp / "data", tmp / "runtime"
+            self._write(data_dir, {"BTCUSDT": rows, "ALTUSDT": rows}, 0, n * FOUR_HOUR)
+            write_short_state(self.C, data_dir, runtime, now=n * FOUR_HOUR)
+            saved = json.loads((runtime / "short_state.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["state"]["events"], [])
+        self.assertEqual(saved["state"]["pending_shorts"], {})

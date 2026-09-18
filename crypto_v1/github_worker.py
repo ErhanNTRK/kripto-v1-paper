@@ -5,11 +5,12 @@ import shutil
 from pathlib import Path
 
 from .backtest import report
-from .data import candles, get, universe, validate
+from .data import candles, get, load, universe, validate
 from .paper_trading import tick
 from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
+from .short_signal import detect_short_candidates
 from .telegram import deliver_paper_events, deliver_once, format_daily_status
 
 
@@ -71,6 +72,25 @@ def prepare_data(config, runtime, now):
     return data_dir
 
 
+def write_short_state(short_config, data_dir, runtime, now):
+    """Detect live short candidates from the same freshly-fetched 4h
+    universe the long paper tick just used, and publish them the same way
+    AL_ADAYI candidates are published for the long side (see
+    live_signal.pending_candidates). This is a separate, lightweight pass
+    -- not routed through paper_trading's Engine, which is long-only --
+    since the short side goes live directly with no paper-tracking phase,
+    per the user's 18 Sep 2026 instruction."""
+    manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    _, data = load(data_dir, FOUR_HOUR)
+    symbols = [s for s in manifest["symbols"] if s != "BTCUSDT"]
+    candidates = detect_short_candidates(data, symbols, short_config)
+    events = [dict(type="SHORT_ADAYI", time=now, symbol=c["symbol"], close=c["close"])
+              for c in candidates]
+    pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
+                      for c in candidates}
+    write_json(runtime / "short_state.json", dict(state=dict(events=events, pending_shorts=pending_shorts)))
+
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
@@ -109,6 +129,7 @@ def main():
             raise
         state_path.unlink(missing_ok=True)
         tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+    write_short_state(config, data_dir, runtime, now)
     database = runtime / "telegram.sqlite"
     deliver_once(
         "connection:" + chat_id,

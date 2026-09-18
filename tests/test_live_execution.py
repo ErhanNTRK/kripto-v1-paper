@@ -2,7 +2,9 @@ import unittest
 from decimal import Decimal
 
 from crypto_v1.live_execution import (LIVE_PHRASE, execution_enabled,
-                                       protective_order_plan, symbol_rules)
+                                       futures_symbol_rules, leveraged_order_plan,
+                                       liquidation_is_safe, protective_order_plan,
+                                       symbol_rules)
 
 
 class LiveExecutionTests(unittest.TestCase):
@@ -36,3 +38,99 @@ class LiveExecutionTests(unittest.TestCase):
                  "min_qty": Decimal("0.001"), "min_notional": Decimal("5")}
         with self.assertRaises(ValueError):
             protective_order_plan("10", "10", "68.13", "0.34", rules)
+
+
+class FuturesSymbolRulesTests(unittest.TestCase):
+    def test_prefers_market_lot_size_over_lot_size(self):
+        rules = futures_symbol_rules({"filters": [
+            {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+            {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+            {"filterType": "MARKET_LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5"},
+        ]})
+        self.assertEqual(rules["step_size"], Decimal("0.001"))
+        self.assertEqual(rules["min_qty"], Decimal("0.001"))
+
+    def test_falls_back_to_lot_size_when_no_market_lot_size(self):
+        rules = futures_symbol_rules({"filters": [
+            {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+            {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5"},
+        ]})
+        self.assertEqual(rules["step_size"], Decimal("0.01"))
+
+    def test_min_notional_uses_the_futures_field_name(self):
+        rules = futures_symbol_rules({"filters": [
+            {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+            {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5"},
+        ]})
+        self.assertEqual(rules["min_notional"], Decimal("5"))
+
+    def test_missing_notional_filter_fails_closed(self):
+        with self.assertRaises(ValueError):
+            futures_symbol_rules({"filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+            ]})
+
+
+class LeveragedOrderPlanTests(unittest.TestCase):
+    RULES = {"tick_size": Decimal("0.01"), "step_size": Decimal("0.001"),
+             "min_qty": Decimal("0.001"), "min_notional": Decimal("1")}
+
+    def test_long_plan_sizes_by_fixed_risk_like_spot(self):
+        plan = leveraged_order_plan("long", "20", "19", "68.13", "0.34", 3, self.RULES)
+        self.assertEqual(plan["quantity"], "0.34")
+        self.assertEqual(plan["stop_price"], "19")
+        self.assertEqual(plan["leverage"], 3)
+        self.assertEqual(plan["side"], "long")
+        self.assertLessEqual(Decimal(plan["planned_loss_usdt"]), Decimal("0.34") * Decimal("1.05"))
+        self.assertLessEqual(Decimal(plan["margin_usdt"]), Decimal("68.13"))
+
+    def test_short_plan_mirrors_long_with_stop_above_entry(self):
+        plan = leveraged_order_plan("short", "19", "20", "68.13", "0.34", 3, self.RULES)
+        self.assertEqual(plan["quantity"], "0.34")
+        self.assertEqual(plan["stop_price"], "20")
+        self.assertEqual(plan["side"], "short")
+
+    def test_long_requires_stop_below_entry(self):
+        with self.assertRaises(ValueError):
+            leveraged_order_plan("long", "19", "20", "68.13", "0.34", 3, self.RULES)
+
+    def test_short_requires_stop_above_entry(self):
+        with self.assertRaises(ValueError):
+            leveraged_order_plan("short", "20", "19", "68.13", "0.34", 3, self.RULES)
+
+    def test_margin_cap_shrinks_quantity_when_free_capital_is_scarce(self):
+        # risk_usdt alone would ask for qty=1.0 (100/1), but only 1 USDT of
+        # free capital at 3x leverage can support far less notional.
+        plan = leveraged_order_plan("long", "100", "99", "1", "100", 3, self.RULES)
+        self.assertLess(Decimal(plan["quantity"]), Decimal("1.0"))
+        self.assertLessEqual(Decimal(plan["margin_usdt"]), Decimal("1"))
+
+    def test_scarce_margin_at_low_leverage_fails_closed_below_minimums(self):
+        # The margin cap (free_usdt*0.9*leverage/entry) always keeps
+        # margin_usdt <= free_usdt*0.9 by construction, so with 1 cent of
+        # free capital at 1x leverage the capped quantity rounds down to
+        # zero and is rejected as below Binance's minimums -- never
+        # silently opens a position bigger than the allocated capital.
+        with self.assertRaises(ValueError):
+            leveraged_order_plan("long", "20000", "19999", "0.01", "1000", 1, self.RULES)
+
+
+class LiquidationIsSafeTests(unittest.TestCase):
+    def test_long_is_safe_when_stop_is_well_above_liquidation(self):
+        self.assertTrue(liquidation_is_safe("long", stop_price="19", liquidation_price="15"))
+
+    def test_long_is_unsafe_when_stop_is_close_to_liquidation(self):
+        self.assertFalse(liquidation_is_safe("long", stop_price="19", liquidation_price="18"))
+
+    def test_short_is_safe_when_stop_is_well_below_liquidation(self):
+        self.assertTrue(liquidation_is_safe("short", stop_price="21", liquidation_price="30"))
+
+    def test_short_is_unsafe_when_stop_is_close_to_liquidation(self):
+        self.assertFalse(liquidation_is_safe("short", stop_price="21", liquidation_price="25"))
+
+    def test_zero_liquidation_price_is_never_safe(self):
+        self.assertFalse(liquidation_is_safe("long", stop_price="19", liquidation_price="0"))
