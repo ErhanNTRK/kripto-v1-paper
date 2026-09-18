@@ -44,7 +44,19 @@ jobs:
         # on /scan (a since-fixed rate-limit bug), because "Save paper
         # state" below never ran at all that whole time.
         continue-on-error: true
-        run: curl --fail --silent --show-error --retry 2 --max-time 120 https://kripto-v1-frankfurt.onrender.com/scan
+        # /status and /health are printed purely for the log: the tick
+        # result alone cannot say whether "cooling_down" is a fresh ban or
+        # an old build still running, whether real orders are even enabled,
+        # or which commit Render is on. Neither costs any Binance weight.
+        run: |
+          curl --fail --silent --show-error --retry 2 --max-time 120 https://kripto-v1-frankfurt.onrender.com/scan
+          echo
+          echo "--- /status ---"
+          curl --silent --show-error --max-time 30 https://kripto-v1-frankfurt.onrender.com/status || true
+          echo
+          echo "--- /health ---"
+          curl --silent --show-error --max-time 30 https://kripto-v1-frankfurt.onrender.com/health || true
+          echo
       - name: Save paper state
         shell: bash
         run: |
