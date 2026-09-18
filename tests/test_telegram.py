@@ -30,10 +30,23 @@ class TelegramTests(unittest.TestCase):
                 send_message('test')
             request.assert_not_called()
 
-    def test_message_is_explicitly_simulated(self):
+    def test_message_identifies_itself_as_a_signal(self):
         message = format_event(dict(type='AL', symbol='BTCUSDT', time=0, price=100))
-        self.assertIn('SANAL ISLEM', message)
-        self.assertIn('Gercek emir verilmedi', message)
+        self.assertIn('SINYAL', message)
+
+    def test_al_adayi_prompts_for_a_real_al_confirmation(self):
+        # Regression (18 Sep 2026): with live trading on, this must no
+        # longer claim "SANAL ISLEM / Gercek emir verilmedi" (virtual
+        # trade, no real order given) -- AL_ADAYI is a real candidate that
+        # a plain "AL" reply actually executes for real money.
+        message = format_event(dict(type='AL_ADAYI', symbol='BTCUSDT', time=0, close=100))
+        self.assertNotIn('SANAL ISLEM', message)
+        self.assertNotIn('Gercek emir verilmedi', message)
+        self.assertIn('AL yaz', message)
+
+    def test_short_adayi_also_prompts_for_a_real_al_confirmation(self):
+        message = format_event(dict(type='SHORT_ADAYI', symbol='BTCUSDT', time=0, close=100))
+        self.assertIn('AL yaz', message)
 
     def test_daily_status_reports_halt_and_trade_count(self):
         state = {'cash': 68.13, 'positions': {}, 'halted': True,

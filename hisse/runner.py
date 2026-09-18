@@ -42,7 +42,11 @@ def main():
     os.environ['TELEGRAM_CHAT_ID'] = resolve_chat_id(runtime)
 
     now_s = int(time.time())
-    symbols = universe.BIST_WATCHLIST + universe.sp500_dividend_aristocrats()
+    # US dividend aristocrats scanning was turned off per the user's 18 Sep
+    # 2026 request (he wants BIST-only alerts now). universe.
+    # sp500_dividend_aristocrats() is left in place, just unused here, in
+    # case US scanning is wanted again later.
+    symbols = universe.BIST_WATCHLIST
     results, errors = scan.scan_all(symbols, now_s)
     database = runtime / 'telegram.sqlite'
     sent = notify.deliver_scan_results(results, now_s, database)

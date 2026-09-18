@@ -35,14 +35,22 @@ def send_message(message):
 
 
 def format_event(event):
+    # Was labeled "SANAL ISLEM / Gercek emir verilmedi" (virtual trade, no
+    # real order given) from when this project was paper-only. Live
+    # trading has been on since 17-18 Sep 2026 -- AL_ADAYI/SHORT_ADAYI is
+    # now a real trade candidate that a plain "AL" reply actually executes
+    # for real money, so the old wording was actively misleading. Fixed
+    # per the user's 18 Sep 2026 report that it still read as if nothing
+    # real was happening.
     stamp = datetime.fromtimestamp(event['time']/1000, timezone.utc).strftime('%d.%m %H:%M UTC')
-    lines = ['KRIPTO V1 | SANAL ISLEM', f"{event['type']} — {event['symbol']}", stamp]
-    for key, label in [('price','Sanal fiyat'),('close','Sinyal kapanisi'),('stop','Stop'),('target','Hedef'),('risk','Planlanan risk (USDT)')]:
+    lines = ['KRIPTO V1 | SINYAL', f"{event['type']} — {event['symbol']}", stamp]
+    for key, label in [('price','Fiyat'),('close','Sinyal kapanisi'),('stop','Stop'),('target','Hedef'),('risk','Planlanan risk (USDT)')]:
         if key in event:
             lines.append(f'{label}: {event[key]:.8g}')
     if 'reason' in event:
         lines.append('Cikis nedeni: '+event['reason'])
-    lines.append('Mum bazli simulasyon. Gercek emir verilmedi.')
+    if event.get('type') in ('AL_ADAYI', 'SHORT_ADAYI'):
+        lines.append('Onaylamak icin AL yaz. Onaylanirsa gercek emir verilir.')
     return '\n'.join(lines)
 
 
