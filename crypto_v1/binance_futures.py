@@ -57,12 +57,14 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
         with opener(request, timeout=20) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
+        message = ""
         try:
             detail = json.loads(error.read().decode("utf-8"))
             code = int(detail.get("code", error.code))
+            message = str(detail.get("msg", ""))
         except Exception:
             code = error.code
-        raise OrderRejected(code) from None
+        raise OrderRejected(code, message, error.code) from None
     except Exception:
         if method in {"POST", "DELETE"}:
             raise OrderStateUnknown("Binance Futures order result is unknown; query by client order ID") from None

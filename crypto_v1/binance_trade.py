@@ -21,8 +21,18 @@ ALLOWED = {
 
 
 class OrderRejected(RuntimeError):
-    def __init__(self, code):
+    """`message` is Binance's own "msg" text and `http_status` the HTTP code.
+    Both matter for -1003: HTTP 429 is a per-minute weight limit, HTTP 418
+    is an IP ban whose msg says exactly how long ("...banned until
+    <epoch ms>"), and every request sent during that ban extends it."""
+
+    def __init__(self, code, message="", http_status=None):
         self.code = int(code)
+        self.message = message or ""
+        self.http_status = http_status
+        # str() stays code-only on purpose: exception text ends up in logs
+        # and Binance's msg is untrusted (see test_http_rejection_has_code_
+        # but_no_secrets). Callers that want the text read .message.
         super().__init__(f"Binance rejected order request: {self.code}")
 
 
@@ -56,12 +66,14 @@ def signed_order_request(method, path, params, api_key, private_pem, clock=None,
         with opener(request, timeout=20) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
+        message = ""
         try:
             detail = json.loads(error.read().decode("utf-8"))
             code = int(detail.get("code", error.code))
+            message = str(detail.get("msg", ""))
         except Exception:
             code = error.code
-        raise OrderRejected(code) from None
+        raise OrderRejected(code, message, error.code) from None
     except Exception:
         if method in {"POST", "DELETE"}:
             raise OrderStateUnknown("Binance order result is unknown; query by client order ID") from None
