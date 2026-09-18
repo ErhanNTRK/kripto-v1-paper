@@ -1,9 +1,9 @@
 {
   "live_trading_enabled": true,
   "pilot_capital_usdt": 34,
-  "risk_per_trade_usdt": 0.80,
-  "daily_loss_limit_usdt": 4,
-  "pilot_loss_limit_usdt": 6.80,
+  "risk_per_trade_usdt": 5.0,
+  "daily_loss_limit_usdt": 25,
+  "pilot_loss_limit_usdt": 30,
   "max_open_positions": 5,
   "max_buys_per_day": 40,
   "minimum_reward_risk": 2.0,
