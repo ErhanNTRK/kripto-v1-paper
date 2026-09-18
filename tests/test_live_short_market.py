@@ -138,23 +138,37 @@ class FuturesPilotStatusCacheTests(unittest.TestCase):
     short TTL cache should collapse near-simultaneous calls into one
     real fetch (see BinanceFuturesMarket's cache docstring)."""
 
-    def _market(self, now_fn):
-        executor = MagicMock()
+    def setUp(self):
+        BinanceFuturesMarket._raw_pilot_cache = None  # class-level, shared: never leak between tests
+
+    def _market(self, now_fn, tag="", executor=None):
+        executor = executor or MagicMock()
         executor.open_orders.return_value = []
         executor.all_orders.return_value = []
         executor.account.return_value = {"availableBalance": "0", "totalMarginBalance": "0"}
-        market = BinanceFuturesMarket(C, {"top_n": 1, "excluded_bases": []}, {}, executor, now=now_fn)
+        market = BinanceFuturesMarket(C, {"top_n": 1, "excluded_bases": []}, {}, executor,
+                                      tag=tag, now=now_fn)
         return market, executor
 
     @patch("crypto_v1.live_short_market.universe", return_value=["BTCUSDT"])
-    def test_second_call_within_ttl_reuses_cached_result(self, _mock_universe):
+    def test_second_call_within_ttl_reuses_cached_fetch(self, _mock_universe):
         clock = [1_000.0]
         market, executor = self._market(lambda: clock[0])
         first = market.pilot_status()
         clock[0] += 10
         second = market.pilot_status()
         self.assertEqual(executor.all_orders.call_count, 1)
-        self.assertIs(first, second)
+        self.assertEqual(first, second)
+
+    @patch("crypto_v1.live_short_market.universe", return_value=["BTCUSDT"])
+    def test_the_4h_and_2h_apps_share_one_fetch(self, _mock_universe):
+        clock = [1_000.0]
+        executor = MagicMock()
+        four_h, _ = self._market(lambda: clock[0], tag="4", executor=executor)
+        two_h, _ = self._market(lambda: clock[0], tag="2", executor=executor)
+        four_h.pilot_status()
+        two_h.pilot_status()
+        self.assertEqual(executor.all_orders.call_count, 1)
 
     @patch("crypto_v1.live_short_market.universe", return_value=["BTCUSDT"])
     def test_call_after_ttl_expires_refetches(self, _mock_universe):

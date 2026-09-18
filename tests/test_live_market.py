@@ -104,31 +104,59 @@ class PilotStatusCacheTests(unittest.TestCase):
     tagged systems) each trigger a fresh fetch within seconds. A short TTL
     cache should collapse those into one real fetch."""
 
-    def _market(self, now_fn):
-        executor = MagicMock()
+    BALANCES = [{"asset": "USDT", "free": "17", "locked": "0"},
+                {"asset": "SOL", "free": "0.001", "locked": "0"}]   # dust from a past trade
+    TICKERS = {"SOLUSDT": Decimal("100"), "BTCUSDT": Decimal("50000")}
+
+    def setUp(self):
+        BinanceMarket._raw_pilot_cache = None  # class-level, shared: never leak between tests
+
+    def _market(self, now_fn, tag="", executor=None):
+        executor = executor or MagicMock()
         executor.open_orders.return_value = []
         executor.all_orders.return_value = []
-        market = BinanceMarket({"pilot_capital_usdt": 17}, {"top_n": 1, "excluded_bases": []},
-                               {}, executor, now=now_fn)
-        market._account = MagicMock(return_value={"balances": []})
-        market._tickers = MagicMock(return_value={})
+        market = BinanceMarket({"pilot_capital_usdt": 17}, {"top_n": 50, "excluded_bases": []},
+                               {}, executor, tag=tag, now=now_fn)
+        market._account = MagicMock(return_value={"balances": self.BALANCES})
+        market._tickers = MagicMock(return_value=self.TICKERS)
         return market, executor
 
-    @patch("crypto_v1.live_market.universe", return_value=["BTCUSDT"])
-    def test_second_call_within_ttl_reuses_cached_result(self, _mock_universe):
+    def test_second_call_within_ttl_reuses_cached_fetch(self):
         clock = [1_000.0]
         market, executor = self._market(lambda: clock[0])
         first = market.pilot_status()
         clock[0] += 10  # well inside the 90s TTL
         second = market.pilot_status()
         self.assertEqual(executor.all_orders.call_count, 1)  # not refetched
-        self.assertIs(first, second)
+        self.assertEqual(first, second)
 
-    @patch("crypto_v1.live_market.universe", return_value=["BTCUSDT"])
-    def test_call_after_ttl_expires_refetches(self, _mock_universe):
+    def test_call_after_ttl_expires_refetches(self):
         clock = [1_000.0]
         market, executor = self._market(lambda: clock[0])
         market.pilot_status()
         clock[0] += 91  # past the 90s TTL
         market.pilot_status()
         self.assertEqual(executor.all_orders.call_count, 2)
+
+    def test_the_4h_and_2h_apps_share_one_fetch(self):
+        # Two LiveApps (tags "4" and "2") each own a BinanceMarket over the
+        # SAME wallet; the raw fetch is tag-agnostic, so the second app must
+        # reuse the first app's fetch instead of re-running the whole scan.
+        clock = [1_000.0]
+        executor = MagicMock()
+        four_h, _ = self._market(lambda: clock[0], tag="4", executor=executor)
+        two_h, _ = self._market(lambda: clock[0], tag="2", executor=executor)
+        four_h.pilot_status()
+        two_h.pilot_status()
+        self.assertEqual(executor.all_orders.call_count, 1)
+        self.assertEqual(executor.open_orders.call_count, 1)
+
+    def test_only_held_and_open_order_symbols_are_scanned_not_the_whole_universe(self):
+        clock = [1_000.0]
+        market, executor = self._market(lambda: clock[0])
+        executor.open_orders.return_value = [{"symbol": "ETHUSDT", "clientOrderId": "kv1s41"}]
+        market.pilot_status()
+        scanned = {call.args[0] for call in executor.all_orders.call_args_list}
+        # SOL: dust balance; ETH: open protective stop. BTC is in tickers but
+        # neither held nor ordered -- no history to find there, no call made.
+        self.assertEqual(scanned, {"SOLUSDT", "ETHUSDT"})

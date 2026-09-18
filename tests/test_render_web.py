@@ -170,6 +170,25 @@ class LiveAppAutoEntryTests(unittest.TestCase):
         self.assertEqual(long_mock.call_count, LiveApp.ENTRIES_PER_TICK)
         self.assertEqual(len(result["results"]), LiveApp.ENTRIES_PER_TICK)
 
+    def test_a_rejected_candidate_does_not_block_the_next_one_in_the_same_tick(self):
+        # pending_candidates() is sorted by symbol (BNB, ETH, SOL). If BNB is
+        # rejected before any order is placed (price drifted, limit hit),
+        # the tick must move on to ETH instead of spending its whole budget
+        # on the rejection -- otherwise a persistently-rejected symbol
+        # starves every candidate sorted after it, tick after tick.
+        app = self._app()
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.MANY_LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch.object(LiveApp, "_approve_long",
+                          side_effect=[{"status": "rejected", "reason": "entry_price_moved"},
+                                       {"status": "bought_and_protected"},
+                                       {"status": "bought_and_protected"}]) as long_mock:
+            result = app.auto_enter()
+        self.assertEqual(long_mock.call_count, 1 + LiveApp.ENTRIES_PER_TICK)
+        self.assertEqual([r["symbol"] for r in result["results"]], ["BNBUSDT", "ETHUSDT"])
+        self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
+
     def test_auto_enter_is_a_noop_with_nothing_pending(self):
         app = self._app()
         with self._frozen_clock(), \
@@ -351,3 +370,63 @@ class FillPnlTests(unittest.TestCase):
     def test_no_order_or_empty_fill_yields_no_pnl(self):
         self.assertIsNone(_fill_pnl(entry="100", order=None, side="long"))
         self.assertIsNone(_fill_pnl(entry="100", order={"executedQty": "0", "cummulativeQuoteQty": "0"}, side="long"))
+
+
+class TickConcurrencyAndStatusTests(unittest.TestCase):
+    """The periodic thread and an external /scan can tick the same app at
+    the same instant; the late caller must report busy rather than run a
+    second, concurrent tick (a duplicate market buy is possible in that
+    window, since Binance only enforces client-id uniqueness among OPEN
+    orders). Every tick outcome is recorded on the app for /status."""
+
+    CONFIG = {"signal_confirmation_expiry_minutes": 10}
+
+    def _app(self, tag=""):
+        return LiveApp(self.CONFIG, {}, {"TELEGRAM_CHAT_ID": "123"},
+                       short_config=self.CONFIG, short_strategy_config={}, tag=tag)
+
+    def test_a_concurrent_tick_reports_busy_instead_of_running(self):
+        app = self._app()
+        app._tick_lock.acquire()  # simulate the periodic thread mid-tick
+        try:
+            with patch.object(LiveApp, "auto_enter") as enter_mock, \
+                 patch.object(LiveApp, "scan") as scan_mock:
+                result = app.tick()
+        finally:
+            app._tick_lock.release()
+        self.assertEqual(result["status"], "busy")
+        enter_mock.assert_not_called()
+        scan_mock.assert_not_called()
+
+    def test_tick_records_its_result_and_releases_the_lock(self):
+        app = self._app()
+        with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}), \
+             patch.object(LiveApp, "scan", return_value={"status": "scanned", "results": []}):
+            app.tick()
+            second = app.tick()  # lock released: a later tick runs normally
+        self.assertEqual(app.last_tick["result"]["exits"]["status"], "scanned")
+        self.assertEqual(second["exits"]["status"], "scanned")
+
+    def test_status_snapshot_reports_switch_breaker_and_last_ticks_without_ticking(self):
+        four_h, two_h = self._app("4"), self._app("2")
+        four_h.last_tick = {"at": 1.0, "result": {"entries": {"results": [
+            {"symbol": "SOLUSDT", "side": "long", "result": {"status": "rejected", "reason": "entry_price_moved"}}]}}}
+        with patch.dict(render_web.STATUS, {"orders_enabled": True}), \
+             patch.object(render_web, "_rate_limited_until", 0.0), \
+             patch.object(render_web, "_consecutive_rate_limit_hits", 0), \
+             patch.object(LiveApp, "tick") as tick_mock:
+            snapshot = render_web.status_snapshot([four_h, two_h], now=lambda: 100.0)
+        tick_mock.assert_not_called()
+        self.assertTrue(snapshot["orders_enabled"])
+        self.assertEqual(snapshot["rate_limit"], {"cooling_down": False, "cooldown_ends_in_s": 0,
+                                                  "consecutive_hits": 0})
+        self.assertEqual(snapshot["apps"]["4"]["result"]["entries"]["results"][0]["result"]["reason"],
+                         "entry_price_moved")
+        self.assertIsNone(snapshot["apps"]["2"])
+
+    def test_status_snapshot_shows_an_active_cooldown(self):
+        with patch.object(render_web, "_rate_limited_until", 400.0), \
+             patch.object(render_web, "_consecutive_rate_limit_hits", 2):
+            snapshot = render_web.status_snapshot([], now=lambda: 100.0)
+        self.assertEqual(snapshot["rate_limit"], {"cooling_down": True, "cooldown_ends_in_s": 300,
+                                                  "consecutive_hits": 2})
