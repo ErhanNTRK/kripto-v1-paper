@@ -107,9 +107,17 @@ class LiveAppTelegramRoutingTests(unittest.TestCase):
 class LiveAppAutoEntryTests(unittest.TestCase):
     """Entries no longer wait for a Telegram "AL" reply, per the user's 18
     Sep 2026 instruction (he will not be at a computer to respond).
-    auto_enter() must process every pending candidate on its own, keyed by
-    the candidate's own signal timestamp so a repeat scan within the
-    freshness window is idempotent (same client id, not a double-open)."""
+    auto_enter() processes up to LiveApp.ENTRIES_PER_TICK pending
+    candidates per side per tick (not unbounded), keyed by the candidate's
+    own signal timestamp so a repeat scan within the freshness window is
+    idempotent (same client id, not a double-open). The cap exists because
+    each approve_buy/approve_short call does its own fresh, heavy Binance
+    account/orders scan (market.pilot_status()) -- taking every pending
+    candidate in one tick multiplies that scan by the candidate count and
+    live-tripped Binance's -1003 rate limit on 18 Sep 2026 when 5-6
+    candidates were pending at once, which in turn crashed that same
+    tick's exit check. Remaining candidates are picked up on later ticks,
+    not lost (pending_buys/pending_shorts persist until filled or expired)."""
 
     NOW_S = 1_700_000_000
     CONFIG = {"signal_confirmation_expiry_minutes": 10}
@@ -119,6 +127,10 @@ class LiveAppAutoEntryTests(unittest.TestCase):
     SHORT_SAVED = {"state": {"pending_shorts": {"BNBUSDT": {"stop": 800, "leverage": 3}},
                              "events": [{"type": "SHORT_ADAYI", "time": NOW_S * 1000 - 1000,
                                         "symbol": "BNBUSDT", "close": 750}]}}
+    MANY_LONG_SAVED = {"state": {
+        "pending_buys": {s: {"stop": 90} for s in ("SOLUSDT", "ETHUSDT", "BNBUSDT")},
+        "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": s, "close": 100}
+                  for s in ("SOLUSDT", "ETHUSDT", "BNBUSDT")]}}
     EMPTY_SAVED = {"state": {}}
 
     def _app(self):
@@ -142,6 +154,16 @@ class LiveAppAutoEntryTests(unittest.TestCase):
         # Keyed by the candidate's OWN timestamp, not a Telegram update_id.
         self.assertEqual(long_mock.call_args.args[0], self.NOW_S * 1000 - 1000)
 
+    def test_auto_enter_caps_long_entries_at_entries_per_tick(self):
+        app = self._app()
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.MANY_LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch.object(LiveApp, "_approve_long", return_value={"status": "ok"}) as long_mock:
+            result = app.auto_enter()
+        self.assertEqual(long_mock.call_count, LiveApp.ENTRIES_PER_TICK)
+        self.assertEqual(len(result["results"]), LiveApp.ENTRIES_PER_TICK)
+
     def test_auto_enter_is_a_noop_with_nothing_pending(self):
         app = self._app()
         with self._frozen_clock(), \
@@ -158,6 +180,39 @@ class LiveAppAutoEntryTests(unittest.TestCase):
         enter_mock.assert_called_once()
         scan_mock.assert_called_once()
         self.assertEqual(result["exits"]["status"], "scanned")
+
+
+class ScanResilienceTests(unittest.TestCase):
+    """A Binance error on one market (spot or futures) must never suppress
+    the exit check on the other -- exits are safety-critical and must
+    keep running. Live-tripped 18 Sep 2026 when a -1003 rate limit during
+    the spot side's live_positions() call propagated out of scan()
+    entirely, leaving the futures side (and the whole /scan HTTP request)
+    unchecked that tick."""
+
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "trailing_atr": 2.0}
+
+    def _app(self):
+        app = LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
+                     short_config=self.CONFIG, short_strategy_config={})
+        return app
+
+    def test_spot_failure_does_not_prevent_futures_exit_check(self):
+        app = self._app()
+        app.market.live_positions = MagicMock(side_effect=RuntimeError("Binance rejected order request: -1003"))
+        app.futures_market.live_positions = MagicMock(return_value=[])
+        result = app.scan()
+        self.assertEqual(result["status"], "scanned")
+        self.assertTrue(any(r.get("status") == "scan_failed" and r.get("side") == "spot" for r in result["results"]))
+        app.futures_market.live_positions.assert_called_once()
+
+    def test_futures_failure_does_not_prevent_spot_result(self):
+        app = self._app()
+        app.market.live_positions = MagicMock(return_value=[])
+        app.futures_market.live_positions = MagicMock(side_effect=RuntimeError("boom"))
+        result = app.scan()
+        self.assertEqual(result["status"], "scanned")
+        self.assertTrue(any(r.get("status") == "scan_failed" and r.get("side") == "futures" for r in result["results"]))
 
 
 class FillPnlTests(unittest.TestCase):

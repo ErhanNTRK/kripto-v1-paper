@@ -53,6 +53,11 @@ def telegram_command(payload, expected_chat):
     return {"update_id": int(payload["update_id"]), "command": text}
 
 class LiveApp:
+    # See auto_enter's docstring: bounds Binance API weight per automatic
+    # tick so a burst of simultaneous candidates can never itself trip a
+    # rate limit and starve the same tick's exit check.
+    ENTRIES_PER_TICK = 1
+
     def __init__(self, config, strategy_config, environment, short_config=None, short_strategy_config=None,
                  tag="", state_url=RUNTIME_STATE, state_short_url=RUNTIME_STATE_SHORT):
         self.config, self.environment = config, environment
@@ -109,7 +114,7 @@ class LiveApp:
         return result
 
     def auto_enter(self):
-        """Executes every currently pending signal automatically -- no
+        """Executes the current pending signal(s) automatically -- no
         Telegram "AL" reply needed -- per the user's 18 Sep 2026
         instruction (he will not be at a computer to reply). Reuses the
         exact same confirmed/approve machinery the old AL-triggered path
@@ -119,12 +124,27 @@ class LiveApp:
         (not a Telegram update_id), so a candidate seen again on a later
         scan cycle -- still within its freshness window -- reuses the
         SAME client order id and _known_or_place recognizes it as
-        already-placed instead of opening it twice."""
+        already-placed instead of opening it twice.
+
+        Capped at ENTRIES_PER_TICK per side (see class constant): each
+        approve_buy/approve_short call does its own fresh market.
+        pilot_status() (a full account+all-orders-per-universe-symbol
+        Binance scan) to re-check limits, so taking every pending
+        candidate in one tick multiplies that heavy call by the candidate
+        count. Live-tested 18 Sep 2026: 5-6 simultaneous candidates
+        (normal with min_breaks=1/very_loose/top_n=50) tripped Binance's
+        -1003 rate limit mid-batch and crashed the SAME tick's exit scan
+        right after, meaning open positions momentarily went unchecked --
+        a real safety gap, not just a missed entry. Untaken candidates are
+        not lost: pending_buys/pending_shorts persist until filled or
+        their signal_confirmation_expiry_minutes window lapses, so the
+        rest get taken over the next few 5-minute ticks instead of all at
+        once."""
         now_ms = int(time.time() * 1000)
         saved_long = fetch_runtime_state(url=self.state_url)
         saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
-        long_pending = pending_candidates(saved_long, now_ms, self.config)
-        short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
+        long_pending = pending_candidates(saved_long, now_ms, self.config)[:self.ENTRIES_PER_TICK]
+        short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)[:self.ENTRIES_PER_TICK]
                         if self.futures_executor else [])
         results = []
         for candidate in long_pending:
@@ -181,32 +201,49 @@ class LiveApp:
         return {"status": "batch", "results": results}
 
     def scan(self):
+        """Spot and futures sides are checked in their own try/except so a
+        Binance error on one side (e.g. a transient -1003 rate limit) can
+        never suppress the exit check on the other -- exits are the one
+        thing that must never silently stop running. Each side still
+        raises internally to its own except block rather than being
+        swallowed per-position, since a mid-loop exception here (as
+        opposed to inside a single position's exit decision) means
+        live_positions()/analysis() itself is failing, at which point
+        there is nothing further to safely check on that side anyway."""
         results = []
-        for position in self.market.live_positions():
-            feature, btc, high = self.market.analysis(position, ShortWindowLongModel.features, FOUR_HOUR)
-            reason = exit_decision(position, feature, btc, high,
-                                   {**self.config, **{"trailing_atr": self.market.strategy_config["trailing_atr"]}},
-                                   sell_fn=ShortWindowLongModel.sell)
-            if not reason: continue
-            if not execution_enabled(self.config, self.environment):
-                results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
-                continue
-            result = execute_exit(position, reason, self.executor)
-            pnl = _fill_pnl(position["entry"], result.get("order"), "long")
-            send_message(f"SATTIM: {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
-            results.append(result)
-        if self.futures_market:
-            for position in self.futures_market.live_positions():
-                feature, btc, low = self.futures_market.analysis(position, symmetric_features, FOUR_HOUR)
-                reason = short_exit_decision(position, feature, btc, low, self.short_config)
+        try:
+            for position in self.market.live_positions():
+                feature, btc, high = self.market.analysis(position, ShortWindowLongModel.features, FOUR_HOUR)
+                reason = exit_decision(position, feature, btc, high,
+                                       {**self.config, **{"trailing_atr": self.market.strategy_config["trailing_atr"]}},
+                                       sell_fn=ShortWindowLongModel.sell)
                 if not reason: continue
-                if not execution_enabled(self.short_config, self.environment):
+                if not execution_enabled(self.config, self.environment):
                     results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
                     continue
-                result = execute_short_exit(position, reason, self.futures_executor)
-                pnl = _fill_pnl(position["entry"], result.get("order"), "short")
-                send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
+                result = execute_exit(position, reason, self.executor)
+                pnl = _fill_pnl(position["entry"], result.get("order"), "long")
+                send_message(f"SATTIM: {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
                 results.append(result)
+        except Exception as exc:
+            print(f"Spot exit scan failed: {exc}", flush=True)
+            results.append({"status": "scan_failed", "side": "spot", "error": str(exc)})
+        if self.futures_market:
+            try:
+                for position in self.futures_market.live_positions():
+                    feature, btc, low = self.futures_market.analysis(position, symmetric_features, FOUR_HOUR)
+                    reason = short_exit_decision(position, feature, btc, low, self.short_config)
+                    if not reason: continue
+                    if not execution_enabled(self.short_config, self.environment):
+                        results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
+                        continue
+                    result = execute_short_exit(position, reason, self.futures_executor)
+                    pnl = _fill_pnl(position["entry"], result.get("order"), "short")
+                    send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
+                    results.append(result)
+            except Exception as exc:
+                print(f"Futures exit scan failed: {exc}", flush=True)
+                results.append({"status": "scan_failed", "side": "futures", "error": str(exc)})
         return {"status": "scanned", "results": results}
 
     def tick(self):
@@ -254,7 +291,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(body)
     def do_GET(self):
         if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
-        if self.path == "/scan": self._json(200, {app.tag or "default": app.tick() for app in APPS}); return
+        if self.path == "/scan":
+            # tick() already catches its own auto-entry/exit errors per app
+            # and per market side (see LiveApp.tick/scan) -- this try/except
+            # is only a last-resort backstop so an unexpected exception here
+            # returns a clean 500 instead of crashing the connection (which
+            # curl surfaces as a 502, as happened 18 Sep 2026 when a Binance
+            # rate limit hit mid-batch).
+            try:
+                self._json(200, {app.tag or "default": app.tick() for app in APPS})
+            except Exception as exc:
+                print(f"/scan handler failed: {exc}", flush=True)
+                self._json(500, {"status": "failed_closed"})
+            return
         self.send_error(404)
     def do_POST(self):
         if self.path != "/telegram": self.send_error(404); return
