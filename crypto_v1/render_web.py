@@ -1,5 +1,6 @@
 """Render Frankfurt health probe and authenticated Telegram command webhook."""
 import hmac, json, os, threading, time
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .binance_account import verify_from_environment
@@ -21,6 +22,24 @@ from .telegram import send_message
 
 STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False}
 APP = None
+
+
+def _fill_pnl(entry, order, side):
+    """Realized PNL from an exit fill's own reported quote amount, vs. the
+    position's recorded entry price -- None if the fill has no usable
+    quote/qty (e.g. an "already_stopped" result with no order field)."""
+    if not order:
+        return None
+    qty = Decimal(str(order.get("executedQty", "0")))
+    quote = Decimal(str(order.get("cummulativeQuoteQty", "0")))
+    if qty <= 0 or quote <= 0:
+        return None
+    entry_value = qty * Decimal(str(entry))
+    return quote - entry_value if side == "long" else entry_value - quote
+
+
+def _pnl_suffix(pnl):
+    return f" | PNL: {pnl:+.2f} USDT" if pnl is not None else ""
 
 def telegram_command(payload, expected_chat):
     message = payload.get("message", {})
@@ -44,38 +63,67 @@ class LiveApp:
                                                      self.futures_executor)
                                if short_config is not None else None)
 
-    def _approve_long(self, update_id, saved):
+    def _approve_long(self, update_id, saved, tag=""):
         result = approve_buy(update_id, "AL", int(time.time() * 1000),
                              saved, self.config, self.environment,
                              self.market, self.executor)
+        label = f"[{tag}] " if tag else ""
         if result["status"] == "preview":
             plan = result["plan"]
-            send_message(f"AL onayi dogrulandi: {plan['symbol']} | Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
+            send_message(f"{label}AL onayi dogrulandi: {plan['symbol']} | Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
         elif result["status"] == "bought_and_protected":
-            send_message(f"ALIM TAMAMLANDI VE KORUYUCU STOP AKTIF: {result['plan']['symbol']}")
+            send_message(f"{label}ALDIM: {result['plan']['symbol']} | risk {result['plan']['planned_loss_usdt']} USDT")
         elif result["status"] == "bought_then_emergency_sold":
-            send_message(f"ACIL GUVENLIK SATISI: {result['plan']['symbol']} koruyucu stop kurulamadi ve alim geri satildi.")
-        else: send_message(f"AL yapilmadi ({saved['state']['events'][0]['symbol'] if saved['state'].get('events') else '?'}): "
-                           + result.get("reason", "guvenlik kontrolu"))
+            send_message(f"{label}ACIL GUVENLIK SATISI: {result['plan']['symbol']} koruyucu stop kurulamadi ve alim geri satildi.")
+        # "no pending signal" / limit-hit rejections happen on almost every
+        # scan cycle now that entry is automatic -- silent, not spammed.
         return result
 
-    def _approve_short(self, update_id, saved):
+    def _approve_short(self, update_id, saved, tag=""):
         result = approve_short(update_id, "AL", int(time.time() * 1000),
                                saved, self.short_config, self.environment,
                                self.futures_market, self.futures_executor)
+        label = f"[{tag}] " if tag else ""
         if result["status"] == "preview":
             plan = result["plan"]
-            send_message(f"SHORT onayi dogrulandi: {plan['symbol']} | {plan['leverage']}x kaldirac | "
+            send_message(f"{label}SHORT onayi dogrulandi: {plan['symbol']} | {plan['leverage']}x kaldirac | "
                          f"Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
         elif result["status"] == "opened_and_protected":
             plan = result["plan"]
-            send_message(f"SHORT ACILDI VE KORUYUCU STOP AKTIF: {plan['symbol']} | {plan['leverage']}x kaldirac")
+            send_message(f"{label}ALDIM (SHORT): {plan['symbol']} | {plan['leverage']}x kaldirac")
         elif result["status"] == "opened_then_emergency_closed":
-            send_message(f"ACIL GUVENLIK KAPATMASI: {result['plan']['symbol']} "
+            send_message(f"{label}ACIL GUVENLIK KAPATMASI: {result['plan']['symbol']} "
                          f"({result.get('reason')}) short geri kapatildi.")
-        else: send_message(f"SHORT yapilmadi ({saved['state']['events'][0]['symbol'] if saved['state'].get('events') else '?'}): "
-                           + result.get("reason", "guvenlik kontrolu"))
         return result
+
+    def auto_enter(self):
+        """Executes every currently pending signal automatically -- no
+        Telegram "AL" reply needed -- per the user's 18 Sep 2026
+        instruction (he will not be at a computer to reply). Reuses the
+        exact same confirmed/approve machinery the old AL-triggered path
+        used (that path still works too, harmlessly redundant), just
+        triggered by the periodic scan loop instead of an incoming
+        Telegram message. Keyed by each candidate's own signal timestamp
+        (not a Telegram update_id), so a candidate seen again on a later
+        scan cycle -- still within its freshness window -- reuses the
+        SAME client order id and _known_or_place recognizes it as
+        already-placed instead of opening it twice."""
+        now_ms = int(time.time() * 1000)
+        saved_long = fetch_runtime_state()
+        saved_short = fetch_runtime_state_short() if self.futures_executor else {"state": {}}
+        long_pending = pending_candidates(saved_long, now_ms, self.config)
+        short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
+                        if self.futures_executor else [])
+        results = []
+        for candidate in long_pending:
+            isolated = isolate_candidate(saved_long, candidate["symbol"])
+            results.append({"symbol": candidate["symbol"], "side": "long",
+                            "result": self._approve_long(int(candidate["created_at"]), isolated)})
+        for candidate in short_pending:
+            isolated = isolate_short_candidate(saved_short, candidate["symbol"])
+            results.append({"symbol": candidate["symbol"], "side": "short",
+                            "result": self._approve_short(int(candidate["created_at"]), isolated)})
+        return {"status": "auto_entry", "results": results}
 
     def telegram(self, payload):
         """A single "AL" takes EVERY signal currently pending -- long and
@@ -130,7 +178,8 @@ class LiveApp:
                 results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
                 continue
             result = execute_exit(position, reason, self.executor)
-            send_message(f"OTOMATIK SAT: {position['symbol']} | Neden: {reason}")
+            pnl = _fill_pnl(position["entry"], result.get("order"), "long")
+            send_message(f"SATTIM: {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
             results.append(result)
         if self.futures_market:
             for position in self.futures_market.live_positions():
@@ -141,25 +190,39 @@ class LiveApp:
                     results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
                     continue
                 result = execute_short_exit(position, reason, self.futures_executor)
-                send_message(f"OTOMATIK SHORT KAPAT: {position['symbol']} | Neden: {reason}")
+                pnl = _fill_pnl(position["entry"], result.get("order"), "short")
+                send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
                 results.append(result)
         return {"status": "scanned", "results": results}
 
+    def tick(self):
+        """One full cycle: try to auto-enter any pending signal, then scan
+        open positions for exits. Entries are attempted first so a signal
+        that appears and immediately qualifies for exit conditions (rare,
+        but possible with very_loose) is still opened and protected before
+        anything else runs against it."""
+        entry_result = {"status": "auto_entry", "results": []}
+        try:
+            entry_result = self.auto_enter()
+        except Exception as exc:
+            print(f"Auto-entry failed: {exc}", flush=True)
+        return {"entries": entry_result, "exits": self.scan()}
+
 def run_periodic_scans(app, interval_seconds=300, sleep=time.sleep, max_iterations=None):
-    """Exit-monitor loop independent of GitHub Actions' free-tier cron, whose
-    scheduled runs have been observed to lag by hours rather than minutes.
-    Runs only while this Render process is warm; a cold free-tier instance
-    still needs an external request (health check, webhook, cron) to wake it,
+    """Independent of GitHub Actions' free-tier cron, whose scheduled runs
+    have been observed to lag by hours rather than minutes. Runs only
+    while this Render process is warm; a cold free-tier instance still
+    needs an external request (health check, webhook, cron) to wake it,
     but does not depend on that request landing on any particular schedule
-    to keep scanning once awake. The exchange-native protective stop placed
-    at entry time (live_controller.approve_buy) does not depend on this loop
-    at all -- it is a real resting order on Binance regardless."""
+    to keep ticking once awake. The exchange-native protective stop placed
+    at entry time (live_controller.approve_buy) does not depend on this
+    loop at all -- it is a real resting order on Binance regardless."""
     iterations = 0
     while max_iterations is None or iterations < max_iterations:
         try:
-            app.scan()
+            app.tick()
         except Exception as exc:
-            print(f"Periodic scan failed: {exc}", flush=True)
+            print(f"Periodic tick failed: {exc}", flush=True)
         iterations += 1
         sleep(interval_seconds)
 
@@ -171,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(body)
     def do_GET(self):
         if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
-        if self.path == "/scan": self._json(200, APP.scan()); return
+        if self.path == "/scan": self._json(200, APP.tick()); return
         self.send_error(404)
     def do_POST(self):
         if self.path != "/telegram": self.send_error(404); return
