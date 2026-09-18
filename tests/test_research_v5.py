@@ -33,6 +33,24 @@ class DirectionFiltersTests(unittest.TestCase):
         self.assertTrue(btc_down_ok(down_btc()))
         self.assertFalse(btc_down_ok(up_btc()))
 
+    def test_btc_filter_defaults_to_strict(self):
+        # price above ema50 but NOT a full stack -- passes only in "loose"/"off".
+        choppy = dict(c=100, ema20=101, ema50=99, ema200=90)
+        self.assertFalse(btc_up_ok(choppy))
+        self.assertFalse(btc_up_ok(choppy, "strict"))
+
+    def test_btc_filter_loose_only_requires_price_above_below_ema50(self):
+        choppy_up = dict(c=100, ema20=101, ema50=99, ema200=90)
+        choppy_down = dict(c=100, ema20=99, ema50=101, ema200=110)
+        self.assertTrue(btc_up_ok(choppy_up, "loose"))
+        self.assertTrue(btc_down_ok(choppy_down, "loose"))
+        self.assertFalse(btc_up_ok(dict(c=98, ema20=101, ema50=99, ema200=90), "loose"))
+
+    def test_btc_filter_off_always_passes_even_without_ema200(self):
+        self.assertTrue(btc_up_ok(None, "off"))
+        self.assertTrue(btc_up_ok({}, "off"))
+        self.assertTrue(btc_down_ok({}, "off"))
+
 
 class EntryExitTests(unittest.TestCase):
     def test_long_entry_needs_btc_up_and_two_breaks(self):
@@ -54,6 +72,18 @@ class EntryExitTests(unittest.TestCase):
         # 2-break requirement, not silently loosen live behavior.
         self.assertIsNone(long_entry(row(breaks_up=1), up_btc(), C))
         self.assertIsNone(short_entry(row(breaks_down=1), down_btc(), C))
+
+    def test_btc_filter_is_configurable_and_defaults_to_strict(self):
+        choppy_up = dict(c=100, ema20=101, ema50=99, ema200=90)
+        choppy_down = dict(c=100, ema20=99, ema50=101, ema200=110)
+        self.assertIsNone(long_entry(row(breaks_up=2), choppy_up, C))
+        self.assertIsNone(short_entry(row(breaks_down=2), choppy_down, C))
+        loose = dict(C, btc_filter="loose")
+        self.assertIsNotNone(long_entry(row(breaks_up=2), choppy_up, loose))
+        self.assertIsNotNone(short_entry(row(breaks_down=2), choppy_down, loose))
+        off = dict(C, btc_filter="off")
+        self.assertIsNotNone(long_entry(row(breaks_up=2), None, off))
+        self.assertIsNotNone(short_entry(row(breaks_down=2), None, off))
 
     def test_long_exit_on_trend_break_or_btc_turning_down(self):
         self.assertTrue(long_exit(row(c=90, long_exit=95), up_btc()))

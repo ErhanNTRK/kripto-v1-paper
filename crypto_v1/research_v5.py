@@ -24,12 +24,33 @@ WINDOWS = (10, 20, 40)  # four-hour bars: ~1.7 / 3.3 / 6.7 days -- about half of
 COST_HURDLE = 0.006  # expected 2R move must clear this fraction of price, same as V2
 
 
-def btc_up_ok(btc):
-    return bool(btc and btc.get("ema200") and btc["c"] > btc["ema20"] > btc["ema50"] > btc["ema200"])
+def btc_up_ok(btc, mode="strict"):
+    # mode is user-tunable (config["btc_filter"]), per the user's 18 Sep
+    # 2026 request that the BTC direction gate was blocking entries too
+    # often (0 signals in a real 7-day window even at min_breaks=1):
+    #   "strict" (default, original/live behavior): full EMA20>50>200 stack.
+    #   "loose": only requires price above EMA50 -- directional but far
+    #     less strict about a clean trend.
+    #   "off": the BTC filter is bypassed entirely (always True).
+    # The default keeps every already-deployed config's behavior
+    # unchanged unless explicitly loosened.
+    if mode == "off":
+        return True
+    if not btc or not btc.get("ema200"):
+        return False
+    if mode == "loose":
+        return btc["c"] > btc["ema50"]
+    return btc["c"] > btc["ema20"] > btc["ema50"] > btc["ema200"]
 
 
-def btc_down_ok(btc):
-    return bool(btc and btc.get("ema200") and btc["c"] < btc["ema20"] < btc["ema50"] < btc["ema200"])
+def btc_down_ok(btc, mode="strict"):
+    if mode == "off":
+        return True
+    if not btc or not btc.get("ema200"):
+        return False
+    if mode == "loose":
+        return btc["c"] < btc["ema50"]
+    return btc["c"] < btc["ema20"] < btc["ema50"] < btc["ema200"]
 
 
 def symmetric_features(rows, config):
@@ -56,7 +77,8 @@ def long_entry(row, btc, config):
     # explicit 18 Sep 2026 request that the default (2) was too rare to be
     # a usable, active system -- see v5-loosened-frequency.yml for the
     # walk-forward/frequency comparison that justified the live value.
-    if not btc_up_ok(btc) or not row.get("atr") or row.get("breaks_up", 0) < config.get("min_breaks", 2):
+    if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
+       or row.get("breaks_up", 0) < config.get("min_breaks", 2):
         return None
     stop = row["c"] - config["atr_multiplier"] * row["atr"]
     if stop <= 0 or 2 * (row["c"] - stop) / row["c"] < COST_HURDLE:
@@ -65,7 +87,8 @@ def long_entry(row, btc, config):
 
 
 def short_entry(row, btc, config):
-    if not btc_down_ok(btc) or not row.get("atr") or row.get("breaks_down", 0) < config.get("min_breaks", 2):
+    if not btc_down_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
+       or row.get("breaks_down", 0) < config.get("min_breaks", 2):
         return None
     stop = row["c"] + config["atr_multiplier"] * row["atr"]
     if 2 * (stop - row["c"]) / row["c"] < COST_HURDLE:
