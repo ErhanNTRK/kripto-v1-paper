@@ -22,7 +22,12 @@ from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel, symmetric_features
 from .telegram import send_message
 
-STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False}
+# "commit" is Render's own RENDER_GIT_COMMIT for the running build, so a
+# /health read (which paper.yml now prints into the Actions log) proves
+# whether a merge has actually been deployed -- without Render dashboard
+# access. Empty outside Render.
+STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False,
+          "commit": os.environ.get("RENDER_GIT_COMMIT", "")[:12]}
 APP = None
 APPS = []
 
@@ -382,6 +387,7 @@ def status_snapshot(apps=None, now=time.time):
     apps = APPS if apps is None else apps
     return {
         "orders_enabled": STATUS["orders_enabled"],
+        "commit": STATUS["commit"],
         "rate_limit": {
             "cooling_down": now() < _rate_limited_until,
             "cooldown_ends_in_s": max(0, int(_rate_limited_until - now())),
