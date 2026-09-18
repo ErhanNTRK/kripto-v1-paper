@@ -1,0 +1,99 @@
+name: V5 Son Hafta AL Sinyali Sikligi (Long + Short)
+
+on:
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'Kac gunluk gecmise bakilsin (varsayilan 7)'
+        default: '7'
+
+permissions:
+  contents: read
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch data (45-day EMA200 warm-up + requested window, with margin)
+        run: |
+          python -c "
+          import json
+          from crypto_v1.data import download
+          from crypto_v1.research_v2 import FOUR_HOUR
+          config = json.loads(open('config_v5_long.json', encoding='utf-8').read())
+          days_back = int('${{ inputs.days_back }}' or 7)
+          fetch_days = 45 + days_back + 5
+          download(config, 'data-recent', fetch_days, interval=FOUR_HOUR)
+          "
+      - name: Count LONG and SHORT entry conditions over the requested window
+        run: |
+          python -c "
+          import json, time
+          from crypto_v1.data import load
+          from crypto_v1.research_v2 import FOUR_HOUR
+          from crypto_v1.research_v5 import symmetric_features, long_entry, short_entry
+          from crypto_v1.risk import validate_config
+
+          days_back = int('${{ inputs.days_back }}' or 7)
+          config = validate_config(json.loads(open('config_v5_long.json', encoding='utf-8').read()))
+          manifest, data = load('data-recent', FOUR_HOUR)
+          symbols = [s for s in manifest['symbols'] if s != 'BTCUSDT']
+
+          btc_rows = symmetric_features(data['BTCUSDT'], config)
+          btc_by_t = {r['t']: r for r in btc_rows}
+          cutoff = manifest['end'] - days_back * 86400000
+
+          long_hits, short_hits = [], []
+          for symbol in symbols:
+              rows = data.get(symbol)
+              if not rows or len(rows) < 200:
+                  continue
+              features = symmetric_features(rows, config)
+              for row in features:
+                  if row['t'] < cutoff:
+                      continue
+                  btc = btc_by_t.get(row['t'])
+                  if not btc:
+                      continue
+                  if long_entry(row, btc, config) is not None:
+                      long_hits.append((row['t'], symbol, row['c']))
+                  if short_entry(row, btc, config) is not None:
+                      short_hits.append((row['t'], symbol, row['c']))
+
+          def fmt(hits):
+              return sorted(hits, key=lambda h: h[0])
+
+          print(f'Evren: {len(symbols)} coin (BTCUSDT haric, mevcut top_n secimi)')
+          print()
+          print(f'=== LONG (AL_ADAYI) - son {days_back} gun ===')
+          print(f'Sayi: {len(long_hits)}')
+          for t, s, c in fmt(long_hits):
+              print(f\"  {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(t/1000))} | {s} | kapanis={c}\")
+          print()
+          print(f'=== SHORT (SHORT_ADAYI) - son {days_back} gun ===')
+          print(f'Sayi: {len(short_hits)}')
+          for t, s, c in fmt(short_hits):
+              print(f\"  {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(t/1000))} | {s} | kapanis={c}\")
+
+          # Bars where >1 symbol fired simultaneously: the live system's
+          # 'require exactly one pending signal' rule fails these closed as
+          # ambiguous, so they would NOT have been actionable via a single AL.
+          from collections import Counter
+          per_bar = Counter(t for t, s, c in long_hits) + Counter(t for t, s, c in short_hits)
+          ambiguous_bars = sum(1 for t, n in per_bar.items() if n > 1)
+          actionable = sum(1 for t, n in per_bar.items() if n == 1)
+
+          total = len(long_hits) + len(short_hits)
+          print()
+          print(f'Toplam ham sinyal (kirilim kosulu saglanan sembol-bar): {total}')
+          print(f'Ayni bar icinde >1 sembol birden sinyal verdigi (belirsiz, AL ile onaylanamaz) bar sayisi: {ambiguous_bars}')
+          print(f'Tek basina AL ile onaylanabilir olurdu (bar basina tam 1 sinyal): {actionable}')
+          print(f'Gunluk ortalama (ham): {total/days_back:.2f}')
+          print(f'Gunluk ortalama (gercekci, onaylanabilir): {actionable/days_back:.2f}')
+          "
