@@ -17,6 +17,6 @@
   "rsi_max": 70,
   "breakout_bars": 20,
   "support_bars": 10,
-  "top_n": 20,
+  "top_n": 50,
   "excluded_bases": ["USDC", "FDUSD", "TUSD", "USDP", "DAI", "USDD", "USD1", "USDE", "USDS", "USDG", "RLUSD", "BFUSD", "AEUR", "EUR", "EURI", "USTC", "PAXG", "XAUT"]
 }
