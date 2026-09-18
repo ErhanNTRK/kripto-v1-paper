@@ -419,14 +419,35 @@ class TickConcurrencyAndStatusTests(unittest.TestCase):
         tick_mock.assert_not_called()
         self.assertTrue(snapshot["orders_enabled"])
         self.assertEqual(snapshot["rate_limit"], {"cooling_down": False, "cooldown_ends_in_s": 0,
-                                                  "consecutive_hits": 0})
+                                                  "consecutive_hits": 0, "last_message": ""})
         self.assertEqual(snapshot["apps"]["4"]["result"]["entries"]["results"][0]["result"]["reason"],
                          "entry_price_moved")
         self.assertIsNone(snapshot["apps"]["2"])
 
     def test_status_snapshot_shows_an_active_cooldown(self):
         with patch.object(render_web, "_rate_limited_until", 400.0), \
-             patch.object(render_web, "_consecutive_rate_limit_hits", 2):
+             patch.object(render_web, "_consecutive_rate_limit_hits", 2), \
+             patch.object(render_web, "_rate_limit_last_message", "HTTP 418: banned"):
             snapshot = render_web.status_snapshot([], now=lambda: 100.0)
         self.assertEqual(snapshot["rate_limit"], {"cooling_down": True, "cooldown_ends_in_s": 300,
-                                                  "consecutive_hits": 2})
+                                                  "consecutive_hits": 2, "last_message": "HTTP 418: banned"})
+
+    def test_an_ip_ban_pauses_until_binances_own_ban_clock_not_just_the_cooldown(self):
+        # HTTP 418's msg carries the exact end of the ban (epoch ms). A first
+        # hit's 5-minute cooldown would probe again inside the ban and extend
+        # it, so the pause must run to the later of the two clocks.
+        now = 1_000_000.0
+        banned_until_ms = int((now + 3 * 3600) * 1000)  # a 3-hour ban
+        msg = f"Way too much request weight used; IP banned until {banned_until_ms}. Please use WebSocket Streams."
+        with patch.object(render_web, "_rate_limited_until", 0.0), \
+             patch.object(render_web, "_consecutive_rate_limit_hits", 0), \
+             patch.object(render_web, "_rate_limit_last_message", ""), \
+             patch("crypto_v1.render_web.time.time", return_value=now):
+            render_web._note_if_rate_limited(OrderRejected(-1003, msg, 418))
+            self.assertGreaterEqual(render_web._rate_limited_until, now + 3 * 3600)
+            self.assertEqual(render_web._consecutive_rate_limit_hits, 1)
+            self.assertIn("HTTP 418", render_web._rate_limit_last_message)
+            # A plain 429 with no ban clock keeps the short first-tier cooldown.
+            render_web._consecutive_rate_limit_hits = 0
+            render_web._note_if_rate_limited(OrderRejected(-1003, "Too much request weight used", 429))
+            self.assertEqual(render_web._rate_limited_until, now + 300)

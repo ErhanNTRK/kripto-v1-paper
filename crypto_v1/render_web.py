@@ -1,5 +1,5 @@
 """Render Frankfurt health probe and authenticated Telegram command webhook."""
-import hmac, json, os, threading, time
+import hmac, json, os, re, threading, time
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -56,6 +56,8 @@ _RATE_LIMIT_BASE_COOLDOWN_S = 300
 _RATE_LIMIT_MAX_COOLDOWN_S = 3600
 _rate_limited_until = 0.0
 _consecutive_rate_limit_hits = 0
+_rate_limit_last_message = ""
+_BANNED_UNTIL = re.compile(r"banned until (\d{10,})")
 
 
 def _rate_limited():
@@ -63,14 +65,30 @@ def _rate_limited():
 
 
 def _note_if_rate_limited(exc):
-    global _rate_limited_until, _consecutive_rate_limit_hits
+    """Besides the doubling cooldown, honor Binance's own ban clock when it
+    gives one. HTTP 418 (-1003) is an IP ban, not a per-minute limit: its
+    msg reads "...IP banned until <epoch ms>...", the duration escalates for
+    repeat offenders (2 minutes up to 3 days), and EVERY request sent
+    before that time counts as a fresh violation that extends it. Live-
+    observed 18 Sep 2026: three consecutive hits on the already-lightened
+    code, one right after each cooldown expired -- consistent with probing
+    inside a ban rather than with our own request weight. Pausing until the
+    later of the two clocks stops the loop from feeding the ban."""
+    global _rate_limited_until, _consecutive_rate_limit_hits, _rate_limit_last_message
     if isinstance(exc, OrderRejected) and exc.code == -1003:
         _consecutive_rate_limit_hits += 1
         cooldown = min(_RATE_LIMIT_MAX_COOLDOWN_S,
                        _RATE_LIMIT_BASE_COOLDOWN_S * (2 ** (_consecutive_rate_limit_hits - 1)))
-        _rate_limited_until = time.time() + cooldown
+        until = time.time() + cooldown
+        _rate_limit_last_message = f"HTTP {exc.http_status}: {exc.message}" if exc.http_status else exc.message
+        match = _BANNED_UNTIL.search(exc.message or "")
+        if match:
+            banned_until = int(match.group(1)) / 1000  # Binance reports epoch milliseconds
+            until = max(until, banned_until + 5)
+        _rate_limited_until = until
         print(f"Binance rate limit hit ({_consecutive_rate_limit_hits}x in a row); "
-             f"pausing all Binance calls for {cooldown}s", flush=True)
+             f"pausing all Binance calls for {int(until - time.time())}s; {_rate_limit_last_message}",
+             flush=True)
 
 
 def _note_rate_limit_cleared():
@@ -392,6 +410,7 @@ def status_snapshot(apps=None, now=time.time):
             "cooling_down": now() < _rate_limited_until,
             "cooldown_ends_in_s": max(0, int(_rate_limited_until - now())),
             "consecutive_hits": _consecutive_rate_limit_hits,
+            "last_message": _rate_limit_last_message,
         },
         "apps": {app.tag or "default": app.last_tick for app in apps},
     }

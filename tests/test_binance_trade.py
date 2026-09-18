@@ -67,3 +67,23 @@ class BinanceTradeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             signed_order_request("POST", "/sapi/v1/capital/withdraw/apply", {},
                                  "api", self.pem)
+
+
+class RejectionDetailTests(unittest.TestCase):
+    def setUp(self):
+        key = Ed25519PrivateKey.generate()
+        self.pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode()
+
+    def test_rejection_carries_binance_msg_and_http_status_as_attributes_only(self):
+        # -1003 over HTTP 418 is an IP ban whose msg names the exact end of
+        # the ban; render_web reads it from .message. It must stay OUT of
+        # str(): exception text is logged, and Binance's msg is untrusted.
+        body = b'{"code":-1003,"msg":"Way too much request weight used; IP banned until 1789800000000."}'
+        error = urllib.error.HTTPError("https://example", 418, "teapot", {}, io.BytesIO(body))
+        with self.assertRaises(OrderRejected) as caught:
+            signed_order_request("GET", "/api/v3/openOrders", {}, "api", self.pem,
+                                 opener=Mock(side_effect=error))
+        self.assertEqual(caught.exception.code, -1003)
+        self.assertEqual(caught.exception.http_status, 418)
+        self.assertIn("banned until 1789800000000", caught.exception.message)
+        self.assertEqual(str(caught.exception), "Binance rejected order request: -1003")
