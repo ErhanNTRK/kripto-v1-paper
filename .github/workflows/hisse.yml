@@ -1,8 +1,9 @@
 name: Hisse Temettu Taramasi
 
 on:
-  schedule:
-    - cron: "30 6 * * *"  # ~09:30 Turkey time (UTC+3); GitHub free-tier cron can lag
+  # Scheduled run turned off per the user's 18 Sep 2026 request: no more
+  # dividend/stock Telegram messages at all. workflow_dispatch is left so
+  # it can still be run manually if wanted again later.
   workflow_dispatch:
 
 permissions:
