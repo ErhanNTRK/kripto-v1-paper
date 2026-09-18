@@ -21,9 +21,14 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0):
     live_orders = [o for o in orders if str(o.get("clientOrderId", "")).startswith("kv1f")]
     opens = [o for o in live_orders if o.get("side") == "SELL" and o.get("status") == "FILLED"
             and str(o.get("clientOrderId", "")).startswith("kv1fs")]
-    closes = [o for o in live_orders if o.get("side") == "BUY" and o.get("status") == "FILLED"
-             and (str(o.get("clientOrderId", "")).startswith("kv1fp")
-                  or str(o.get("clientOrderId", "")).startswith("kv1fe"))]
+    # Any BUY close, regardless of which of the three close reasons produced
+    # it (kv1fp protective stop, kv1fe emergency close, or kv1fx the normal
+    # automatic trend/emergency-risk exit from live_short_monitor) -- a
+    # previous version only recognized kv1fp/kv1fe, silently excluding the
+    # most common real exit path from realized_loss_today and weakening
+    # the daily-loss circuit breaker in may_open. Mirrors live_market.py's
+    # equivalent spot-side filter, which matches generically on "kv1".
+    closes = [o for o in live_orders if o.get("side") == "BUY" and o.get("status") == "FILLED"]
     opens_by_suffix = {str(o.get("clientOrderId", ""))[5:]: o for o in opens}
     fee = Decimal(str(config.get("live_fee_buffer_fraction", "0.001")))
     realized_loss = Decimal("0")

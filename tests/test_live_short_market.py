@@ -41,6 +41,21 @@ class SummarizeShortPilotTests(unittest.TestCase):
         # short sold at 100, bought back at 110 -> a real loss, plus the fee buffer
         self.assertGreater(result["realized_loss_today"], Decimal("9.9"))
 
+    def test_realized_loss_counts_the_normal_automatic_exit_too(self):
+        # kv1fx is live_short_monitor.execute_short_exit's prefix for the
+        # ordinary automatic trend/emergency-risk close -- the most common
+        # real exit path, not just the protective stop (kv1fp) or the
+        # controller's own emergency close (kv1fe). A regression here would
+        # silently exclude most real losses from the daily-loss breaker.
+        orders = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fs1", "side": "SELL", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 5000},
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fx1", "side": "BUY", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 6000},
+        ]
+        result = summarize_short_pilot({}, [], orders, C, day_start_ms=0)
+        self.assertGreater(result["realized_loss_today"], Decimal("9.9"))
+
     def test_realized_loss_ignores_closes_before_today(self):
         orders = [
             {"symbol": "SOLUSDT", "clientOrderId": "kv1fs1", "side": "SELL", "status": "FILLED",
