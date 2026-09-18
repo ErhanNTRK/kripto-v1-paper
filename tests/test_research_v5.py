@@ -46,6 +46,14 @@ class DirectionFiltersTests(unittest.TestCase):
         self.assertTrue(btc_down_ok(choppy_down, "loose"))
         self.assertFalse(btc_up_ok(dict(c=98, ema20=101, ema50=99, ema200=90), "loose"))
 
+    def test_btc_filter_very_loose_only_requires_price_above_below_ema20(self):
+        just_turned_up = dict(c=100, ema20=99, ema50=101, ema200=110)  # fails loose (c<ema50)
+        just_turned_down = dict(c=100, ema20=101, ema50=99, ema200=90)
+        self.assertFalse(btc_up_ok(just_turned_up, "loose"))
+        self.assertTrue(btc_up_ok(just_turned_up, "very_loose"))
+        self.assertFalse(btc_down_ok(just_turned_down, "loose"))
+        self.assertTrue(btc_down_ok(just_turned_down, "very_loose"))
+
     def test_btc_filter_off_always_passes_even_without_ema200(self):
         self.assertTrue(btc_up_ok(None, "off"))
         self.assertTrue(btc_up_ok({}, "off"))

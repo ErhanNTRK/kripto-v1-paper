@@ -39,7 +39,7 @@ jobs:
           real_funding = funding_rates('BTCUSDT', manifest['start'], manifest['end'])
           print(f'Cekilen funding olay sayisi: {len(real_funding)}')
 
-          for btc_filter in ('strict', 'loose', 'off'):
+          for btc_filter in ('loose', 'very_loose', 'off'):
               print()
               print(f'==================== btc_filter = {btc_filter} (min_breaks=1) ====================')
               config = dict(base_config, min_breaks=1, btc_filter=btc_filter)

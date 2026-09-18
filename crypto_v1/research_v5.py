@@ -30,14 +30,21 @@ def btc_up_ok(btc, mode="strict"):
     # often (0 signals in a real 7-day window even at min_breaks=1):
     #   "strict" (default, original/live behavior): full EMA20>50>200 stack.
     #   "loose": only requires price above EMA50 -- directional but far
-    #     less strict about a clean trend.
-    #   "off": the BTC filter is bypassed entirely (always True).
+    #     less strict about a clean trend. Live since 18 Sep 2026.
+    #   "very_loose": only requires price above EMA20 -- the shortest,
+    #     most reactive average; closer to "price just turned up" than any
+    #     real trend confirmation.
+    #   "off": the BTC filter is bypassed entirely (always True) -- tested
+    #     18 Sep 2026 and confirmed to break the walk-forward edge
+    #     (NO_GO); NOT deployed.
     # The default keeps every already-deployed config's behavior
     # unchanged unless explicitly loosened.
     if mode == "off":
         return True
     if not btc or not btc.get("ema200"):
         return False
+    if mode == "very_loose":
+        return btc["c"] > btc["ema20"]
     if mode == "loose":
         return btc["c"] > btc["ema50"]
     return btc["c"] > btc["ema20"] > btc["ema50"] > btc["ema200"]
@@ -48,6 +55,8 @@ def btc_down_ok(btc, mode="strict"):
         return True
     if not btc or not btc.get("ema200"):
         return False
+    if mode == "very_loose":
+        return btc["c"] < btc["ema20"]
     if mode == "loose":
         return btc["c"] < btc["ema50"]
     return btc["c"] < btc["ema20"] < btc["ema50"] < btc["ema200"]
