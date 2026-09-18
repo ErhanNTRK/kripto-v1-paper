@@ -1,0 +1,83 @@
+name: V5 Gevsetilmis Esik (min_breaks=1) - Siklik ve Walk-forward Karsilastirmasi
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch 300 days of data (covers walk-forward AND the last-7-day frequency count)
+        run: python -m crypto_v1 fetch --days 300 --data data-wf
+      - name: Compare min_breaks=2 (current live) vs min_breaks=1 (looser) on frequency and walk-forward GO/NO_GO
+        run: |
+          python -c "
+          import json, time
+          from collections import Counter
+          from crypto_v1.data import load
+          from crypto_v1.research_v2 import aggregate, FOUR_HOUR
+          from crypto_v1.research_v5 import symmetric_features, long_entry, short_entry, evaluate
+          from crypto_v1.funding import funding_rates
+          from crypto_v1.risk import validate_config
+
+          base_config = validate_config(json.loads(open('config_v5_long.json', encoding='utf-8').read()))
+          manifest, data = load('data-wf')
+          agg_data = {s: aggregate(rows, FOUR_HOUR) for s, rows in data.items()}
+          symbols = [s for s in manifest['symbols'] if s != 'BTCUSDT' and len(agg_data.get(s, [])) >= 200]
+
+          real_funding = funding_rates('BTCUSDT', manifest['start'], manifest['end'])
+
+          def count_last_days(config, days_back, end_ms):
+              btc_rows = symmetric_features(agg_data['BTCUSDT'], config)
+              btc_by_t = {r['t']: r for r in btc_rows}
+              cutoff = end_ms - days_back * 86400000
+              long_hits, short_hits = [], []
+              for symbol in symbols:
+                  features = symmetric_features(agg_data[symbol], config)
+                  for row in features:
+                      if row['t'] < cutoff:
+                          continue
+                      btc = btc_by_t.get(row['t'])
+                      if not btc:
+                          continue
+                      if long_entry(row, btc, config) is not None:
+                          long_hits.append((row['t'], symbol))
+                      if short_entry(row, btc, config) is not None:
+                          short_hits.append((row['t'], symbol))
+              per_bar = Counter(t for t, s in long_hits) + Counter(t for t, s in short_hits)
+              actionable = sum(1 for t, n in per_bar.items() if n == 1)
+              return len(long_hits), len(short_hits), actionable
+
+          for min_breaks in (2, 1):
+              print()
+              print(f'==================== min_breaks = {min_breaks} ====================')
+              config = dict(base_config, min_breaks=min_breaks)
+
+              l7, s7, actionable7 = count_last_days(config, 7, manifest['end'])
+              print(f'Son 7 gun -- LONG: {l7}, SHORT: {s7}, toplam ham: {l7+s7}, '
+                    f'tek-basina-AL-ile-onaylanabilir: {actionable7} '
+                    f'(gunluk ortalama gercekci: {actionable7/7:.2f})')
+
+              l30, s30, actionable30 = count_last_days(config, 30, manifest['end'])
+              print(f'Son 30 gun -- LONG: {l30}, SHORT: {s30}, toplam ham: {l30+s30}, '
+                    f'tek-basina-AL-ile-onaylanabilir: {actionable30} '
+                    f'(gunluk ortalama gercekci: {actionable30/30:.2f})')
+
+              print('--- Walk-forward (5 pencere, gercek funding maliyetiyle) ---')
+              result = evaluate(data, manifest['symbols'], config, manifest, count=5, funding=real_funding)
+              print('Verdict:', result['verdict'])
+              for w in result['windows']:
+                  print(f\"  pencere {w['window']}: normal={w['normal']['net_return']:.4f} \"
+                        f\"PF={w['normal']['profit_factor']}, trades={w['normal']['trade_count']}, \"
+                        f\"stress={w['stress']['net_return']:.4f} PF={w['stress']['profit_factor']}, \"
+                        f\"gecti={w['passed']}\")
+          "

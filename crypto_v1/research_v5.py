@@ -51,7 +51,12 @@ def symmetric_features(rows, config):
 
 
 def long_entry(row, btc, config):
-    if not btc_up_ok(btc) or not row.get("atr") or row.get("breaks_up", 0) < 2:
+    # min_breaks (default 2, of the 3 windows in WINDOWS) is user-tunable:
+    # lowering it to 1 trades signal quality for frequency, per the user's
+    # explicit 18 Sep 2026 request that the default (2) was too rare to be
+    # a usable, active system -- see v5-loosened-frequency.yml for the
+    # walk-forward/frequency comparison that justified the live value.
+    if not btc_up_ok(btc) or not row.get("atr") or row.get("breaks_up", 0) < config.get("min_breaks", 2):
         return None
     stop = row["c"] - config["atr_multiplier"] * row["atr"]
     if stop <= 0 or 2 * (row["c"] - stop) / row["c"] < COST_HURDLE:
@@ -60,7 +65,7 @@ def long_entry(row, btc, config):
 
 
 def short_entry(row, btc, config):
-    if not btc_down_ok(btc) or not row.get("atr") or row.get("breaks_down", 0) < 2:
+    if not btc_down_ok(btc) or not row.get("atr") or row.get("breaks_down", 0) < config.get("min_breaks", 2):
         return None
     stop = row["c"] + config["atr_multiplier"] * row["atr"]
     if 2 * (stop - row["c"]) / row["c"] < COST_HURDLE:

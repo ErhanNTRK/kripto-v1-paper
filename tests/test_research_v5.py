@@ -45,6 +45,16 @@ class EntryExitTests(unittest.TestCase):
         self.assertIsNone(short_entry(row(breaks_down=1), down_btc(), C))
         self.assertIsNone(short_entry(row(breaks_down=2), up_btc(), C))
 
+    def test_min_breaks_is_configurable_and_defaults_to_two(self):
+        loose = dict(C, min_breaks=1)
+        self.assertIsNotNone(long_entry(row(breaks_up=1), up_btc(), loose))
+        self.assertIsNotNone(short_entry(row(breaks_down=1), down_btc(), loose))
+        # Absent min_breaks in config (matches every config file already
+        # deployed before this option existed) must keep the original
+        # 2-break requirement, not silently loosen live behavior.
+        self.assertIsNone(long_entry(row(breaks_up=1), up_btc(), C))
+        self.assertIsNone(short_entry(row(breaks_down=1), down_btc(), C))
+
     def test_long_exit_on_trend_break_or_btc_turning_down(self):
         self.assertTrue(long_exit(row(c=90, long_exit=95), up_btc()))
         self.assertTrue(long_exit(row(c=100, long_exit=95), down_btc()))
