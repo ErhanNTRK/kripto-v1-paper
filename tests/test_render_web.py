@@ -1,5 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
+import crypto_v1.render_web as render_web
+from crypto_v1.binance_trade import OrderRejected
 from crypto_v1.render_web import LiveApp, _fill_pnl, telegram_command, run_periodic_scans
 
 class RenderWebTests(unittest.TestCase):
@@ -216,6 +218,59 @@ class ScanResilienceTests(unittest.TestCase):
         result = app.scan()
         self.assertEqual(result["status"], "scanned")
         self.assertTrue(any(r.get("status") == "scan_failed" and r.get("side") == "futures" for r in result["results"]))
+
+
+class RateLimitCircuitBreakerTests(unittest.TestCase):
+    """A real Binance -1003 (too many requests) must stop this process from
+    hitting Binance at all for a cooldown window -- retrying every 5
+    minutes while banned achieves nothing (every call fails anyway) and
+    risks the ban treating each attempt as a further violation. Live-
+    observed 18 Sep 2026: a burst of pilot_status() calls (one per pending
+    candidate, since fixed by ENTRIES_PER_TICK) tripped -1003 and it
+    persisted across several 5-minute ticks afterward."""
+
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "trailing_atr": 2.0}
+
+    def setUp(self):
+        self._saved = render_web._rate_limited_until
+        render_web._rate_limited_until = 0.0
+
+    def tearDown(self):
+        render_web._rate_limited_until = self._saved
+
+    def _app(self):
+        return LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
+                       short_config=self.CONFIG, short_strategy_config={})
+
+    def test_a_1003_rejection_starts_a_cooldown_and_the_next_tick_skips_entirely(self):
+        app = self._app()
+        app.market.live_positions = MagicMock(side_effect=OrderRejected(-1003))
+        app.futures_market.live_positions = MagicMock(return_value=[])
+        with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
+            app.tick()
+        self.assertTrue(render_web._rate_limited())
+        with patch.object(LiveApp, "auto_enter") as enter_mock, \
+             patch.object(LiveApp, "scan") as scan_mock:
+            result = app.tick()
+        self.assertEqual(result["status"], "cooling_down")
+        enter_mock.assert_not_called()
+        scan_mock.assert_not_called()
+
+    def test_a_different_rejection_code_does_not_start_a_cooldown(self):
+        app = self._app()
+        app.market.live_positions = MagicMock(side_effect=OrderRejected(-2011))
+        app.futures_market.live_positions = MagicMock(return_value=[])
+        with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
+            app.tick()
+        self.assertFalse(render_web._rate_limited())
+
+    def test_an_unrelated_exception_does_not_start_a_cooldown(self):
+        app = self._app()
+        app.market.live_positions = MagicMock(side_effect=RuntimeError("network blip"))
+        app.futures_market.live_positions = MagicMock(return_value=[])
+        with patch.object(LiveApp, "auto_enter", return_value={"status": "auto_entry", "results": []}):
+            app.tick()
+        self.assertFalse(render_web._rate_limited())
 
 
 class FillPnlTests(unittest.TestCase):

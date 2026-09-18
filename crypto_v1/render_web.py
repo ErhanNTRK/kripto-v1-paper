@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
-from .binance_trade import SpotExecutor
+from .binance_trade import OrderRejected, SpotExecutor
 from .live_controller import approve_buy
 from .live_execution import execution_enabled
 from .live_market import BinanceMarket
@@ -25,6 +25,27 @@ from .telegram import send_message
 STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False}
 APP = None
 APPS = []
+
+# Process-wide circuit breaker: -1003 is Binance's IP-level "too many
+# requests" rejection. Live-tripped 18 Sep 2026 by a burst of pilot_status()
+# calls (see LiveApp.ENTRIES_PER_TICK's docstring) and observed to persist
+# across many following ticks -- repeatedly retrying every 5 minutes while
+# still banned achieves nothing (every call fails anyway) and risks the ban
+# treating each further request as another violation. Shared across BOTH
+# apps (4H and 2H) since the ban is per source IP/account, not per app.
+_RATE_LIMIT_COOLDOWN_S = 300
+_rate_limited_until = 0.0
+
+
+def _rate_limited():
+    return time.time() < _rate_limited_until
+
+
+def _note_if_rate_limited(exc):
+    global _rate_limited_until
+    if isinstance(exc, OrderRejected) and exc.code == -1003:
+        _rate_limited_until = time.time() + _RATE_LIMIT_COOLDOWN_S
+        print(f"Binance rate limit hit; pausing all Binance calls for {_RATE_LIMIT_COOLDOWN_S}s", flush=True)
 
 
 def _fill_pnl(entry, order, side):
@@ -228,6 +249,7 @@ class LiveApp:
         except Exception as exc:
             print(f"Spot exit scan failed: {exc}", flush=True)
             results.append({"status": "scan_failed", "side": "spot", "error": str(exc)})
+            _note_if_rate_limited(exc)
         if self.futures_market:
             try:
                 for position in self.futures_market.live_positions():
@@ -244,6 +266,7 @@ class LiveApp:
             except Exception as exc:
                 print(f"Futures exit scan failed: {exc}", flush=True)
                 results.append({"status": "scan_failed", "side": "futures", "error": str(exc)})
+                _note_if_rate_limited(exc)
         return {"status": "scanned", "results": results}
 
     def tick(self):
@@ -251,12 +274,23 @@ class LiveApp:
         open positions for exits. Entries are attempted first so a signal
         that appears and immediately qualifies for exit conditions (rare,
         but possible with very_loose) is still opened and protected before
-        anything else runs against it."""
+        anything else runs against it.
+
+        Skips entirely while the process-wide Binance rate-limit cooldown
+        (see _rate_limited/_note_if_rate_limited) is active: every call
+        would fail anyway during a real -1003 ban, so retrying only wastes
+        the retry budget and risks the ban treating each attempt as a
+        further violation. The exchange-native protective stop placed at
+        entry time does not depend on this loop running -- it is a real
+        resting order on Binance regardless of whether we can poll it."""
+        if _rate_limited():
+            return {"status": "cooling_down", "entries": {"status": "skipped"}, "exits": {"status": "skipped"}}
         entry_result = {"status": "auto_entry", "results": []}
         try:
             entry_result = self.auto_enter()
         except Exception as exc:
             print(f"Auto-entry failed: {exc}", flush=True)
+            _note_if_rate_limited(exc)
         return {"entries": entry_result, "exits": self.scan()}
 
 def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None):
