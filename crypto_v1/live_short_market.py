@@ -15,10 +15,24 @@ def _decimal(value):
     return Decimal(str(value or "0"))
 
 
-def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0):
-    free_usdt = _decimal(account.get("availableBalance"))
-    equity = _decimal(account.get("totalMarginBalance") or account.get("totalWalletBalance"))
-    live_orders = [o for o in orders if str(o.get("clientOrderId", "")).startswith("kv1f")]
+def _belongs_to_tag(client_id, prefix_len, tag):
+    """See live_market._belongs_to_tag -- same scheme, futures prefixes
+    (kv1fs/kv1fp/kv1fx/kv1fe) are 5 chars instead of Spot's 4."""
+    if not tag:
+        return True
+    return str(client_id)[prefix_len:].startswith(str(tag))
+
+
+def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, tag=""):
+    """tag: see live_market.summarize_pilot's docstring -- same reasoning,
+    two systems (e.g. 4H and 2H) sharing the SAME real Futures wallet each
+    only own a slice of config["pilot_capital_usdt"], tracked via this
+    tag's own all-time realized P&L rather than the whole account's real
+    margin balance."""
+    account_free_usdt = _decimal(account.get("availableBalance"))
+    account_equity = _decimal(account.get("totalMarginBalance") or account.get("totalWalletBalance"))
+    live_orders = [o for o in orders if str(o.get("clientOrderId", "")).startswith("kv1f")
+                   and _belongs_to_tag(o.get("clientOrderId", ""), 5, tag)]
     opens = [o for o in live_orders if o.get("side") == "SELL" and o.get("status") == "FILLED"
             and str(o.get("clientOrderId", "")).startswith("kv1fs")]
     # Any BUY close, regardless of which of the three close reasons produced
@@ -31,30 +45,44 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0):
     closes = [o for o in live_orders if o.get("side") == "BUY" and o.get("status") == "FILLED"]
     opens_by_suffix = {str(o.get("clientOrderId", ""))[5:]: o for o in opens}
     fee = Decimal(str(config.get("live_fee_buffer_fraction", "0.001")))
-    realized_loss = Decimal("0")
+    realized_loss_today = Decimal("0")
+    realized_pnl_all_time = Decimal("0")
     for close in closes:
-        if int(close.get("updateTime", close.get("time", 0))) < day_start_ms:
-            continue
         suffix = str(close.get("clientOrderId", ""))[5:]
         open_order = opens_by_suffix.get(suffix)
-        if open_order:
-            received = _decimal(open_order.get("cumQuote"))
-            paid = _decimal(close.get("cumQuote"))
-            realized_loss += max(Decimal("0"), paid * (Decimal("1") + fee) - received * (Decimal("1") - fee))
-    protective = [o for o in open_orders if str(o.get("clientOrderId", "")).startswith("kv1fp")]
+        if not open_order:
+            continue
+        received = _decimal(open_order.get("cumQuote"))
+        paid = _decimal(close.get("cumQuote"))
+        pnl = received * (Decimal("1") - fee) - paid * (Decimal("1") + fee)
+        realized_pnl_all_time += pnl
+        if int(close.get("updateTime", close.get("time", 0))) >= day_start_ms:
+            realized_loss_today += max(Decimal("0"), -pnl)
+    protective = [o for o in open_orders if str(o.get("clientOrderId", "")).startswith("kv1fp")
+                  and _belongs_to_tag(o.get("clientOrderId", ""), 5, tag)]
     held_symbols = {o["symbol"] for o in protective}
-    pilot_drawdown = max(Decimal("0"), Decimal(str(config["pilot_capital_usdt"])) - equity)
+    committed = sum((_decimal(opens_by_suffix.get(str(o.get("clientOrderId", ""))[5:], {})
+                              .get("cumQuote")) for o in protective), Decimal("0"))
+    pilot_capital = Decimal(str(config["pilot_capital_usdt"]))
+    if tag:
+        equity = pilot_capital + realized_pnl_all_time
+        free_usdt = max(Decimal("0"), min(account_free_usdt, equity - committed))
+    else:
+        equity = account_equity
+        free_usdt = account_free_usdt
+    pilot_drawdown = max(Decimal("0"), pilot_capital - equity)
     return {"open_positions": len(held_symbols), "held_symbols": held_symbols,
             "opens_today": len({o["clientOrderId"] for o in opens
                                 if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}),
-            "realized_loss_today": realized_loss, "pilot_drawdown": pilot_drawdown,
+            "realized_loss_today": realized_loss_today, "pilot_drawdown": pilot_drawdown,
             "free_usdt": free_usdt, "equity": equity}
 
 
 class BinanceFuturesMarket:
-    def __init__(self, config, strategy_config, environment, executor):
+    def __init__(self, config, strategy_config, environment, executor, tag=""):
         self.config, self.strategy_config = config, strategy_config
         self.environment, self.executor = environment, executor
+        self.tag = tag
 
     def price(self, symbol):
         risk = self.executor.position_risk(symbol)
@@ -77,13 +105,15 @@ class BinanceFuturesMarket:
         with ThreadPoolExecutor(max_workers=5) as pool:
             batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
         orders = [order for batch in batches for order in batch]
-        return summarize_short_pilot(account, open_orders, orders, self.config, int(start))
+        return summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag)
 
     def live_positions(self):
         positions = []
         for stop in self.executor.open_orders():
             stop_id = str(stop.get("clientOrderId", ""))
             if not stop_id.startswith("kv1fp") or stop.get("side") != "BUY":
+                continue
+            if not _belongs_to_tag(stop_id, 5, self.tag):
                 continue
             open_order = self.executor.query(stop["symbol"], "kv1fs" + stop_id.removeprefix("kv1fp"))
             qty = Decimal(str(open_order.get("executedQty", "0")))

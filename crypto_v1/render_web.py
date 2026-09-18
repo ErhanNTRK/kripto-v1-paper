@@ -13,15 +13,18 @@ from .live_monitor import execute_exit, exit_decision
 from .live_short_controller import approve_short
 from .live_short_market import BinanceFuturesMarket
 from .live_short_monitor import execute_short_exit, short_exit_decision
-from .live_signal import (fetch_runtime_state, fetch_runtime_state_short,
-                          isolate_candidate, isolate_short_candidate,
-                          pending_candidates, pending_short_candidates)
+from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_2H, RUNTIME_STATE_SHORT,
+                          RUNTIME_STATE_SHORT_2H, fetch_runtime_state,
+                          fetch_runtime_state_short, isolate_candidate,
+                          isolate_short_candidate, pending_candidates,
+                          pending_short_candidates)
 from .research_v2 import FOUR_HOUR
 from .research_v5 import ShortWindowLongModel, symmetric_features
 from .telegram import send_message
 
 STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False}
 APP = None
+APPS = []
 
 
 def _fill_pnl(entry, order, side):
@@ -50,17 +53,26 @@ def telegram_command(payload, expected_chat):
     return {"update_id": int(payload["update_id"]), "command": text}
 
 class LiveApp:
-    def __init__(self, config, strategy_config, environment, short_config=None, short_strategy_config=None):
+    def __init__(self, config, strategy_config, environment, short_config=None, short_strategy_config=None,
+                 tag="", state_url=RUNTIME_STATE, state_short_url=RUNTIME_STATE_SHORT):
         self.config, self.environment = config, environment
+        # `tag` segregates capital/positions between parallel systems
+        # sharing one real Binance account (18 Sep 2026: 4H tag="4", 2H
+        # tag="2") -- see live_market.summarize_pilot / _belongs_to_tag.
+        # `state_url`/`state_short_url` let each tagged system read its own
+        # independently-published candidate feed (see github_worker.
+        # write_2h_signal_state) instead of always reading the 4H files.
+        self.tag = tag
+        self.state_url, self.state_short_url = state_url, state_short_url
         self.executor = SpotExecutor(config, environment)
-        self.market = BinanceMarket(config, strategy_config, environment, self.executor)
+        self.market = BinanceMarket(config, strategy_config, environment, self.executor, tag=tag)
         self.short_config = short_config
         # `is not None`, not truthiness: an empty-but-present short_config
         # dict must still enable the short subsystem, not silently disable
         # it the way a falsy `if short_config` check would.
         self.futures_executor = FuturesExecutor(short_config, environment) if short_config is not None else None
         self.futures_market = (BinanceFuturesMarket(short_config, short_strategy_config, environment,
-                                                     self.futures_executor)
+                                                     self.futures_executor, tag=tag)
                                if short_config is not None else None)
 
     def _approve_long(self, update_id, saved, tag=""):
@@ -109,20 +121,22 @@ class LiveApp:
         SAME client order id and _known_or_place recognizes it as
         already-placed instead of opening it twice."""
         now_ms = int(time.time() * 1000)
-        saved_long = fetch_runtime_state()
-        saved_short = fetch_runtime_state_short() if self.futures_executor else {"state": {}}
+        saved_long = fetch_runtime_state(url=self.state_url)
+        saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
         long_pending = pending_candidates(saved_long, now_ms, self.config)
         short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
                         if self.futures_executor else [])
         results = []
         for candidate in long_pending:
             isolated = isolate_candidate(saved_long, candidate["symbol"])
+            update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
             results.append({"symbol": candidate["symbol"], "side": "long",
-                            "result": self._approve_long(int(candidate["created_at"]), isolated)})
+                            "result": self._approve_long(update_id, isolated, tag=self.tag)})
         for candidate in short_pending:
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
+            update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
             results.append({"symbol": candidate["symbol"], "side": "short",
-                            "result": self._approve_short(int(candidate["created_at"]), isolated)})
+                            "result": self._approve_short(update_id, isolated, tag=self.tag)})
         return {"status": "auto_entry", "results": results}
 
     def telegram(self, payload):
@@ -146,8 +160,8 @@ class LiveApp:
             send_message("Komut reddedildi. Yalniz guncel tek AL sinyali icin AL yazin.")
             return {"status": "rejected", "reason": "invalid_command"}
         now_ms = int(time.time() * 1000)
-        saved_long = fetch_runtime_state()
-        saved_short = fetch_runtime_state_short() if self.futures_executor else {"state": {}}
+        saved_long = fetch_runtime_state(url=self.state_url)
+        saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
         long_pending = pending_candidates(saved_long, now_ms, self.config)
         short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
                         if self.futures_executor else [])
@@ -159,11 +173,11 @@ class LiveApp:
         for i, candidate in enumerate(long_pending):
             isolated = isolate_candidate(saved_long, candidate["symbol"])
             results.append({"symbol": candidate["symbol"], "side": "long",
-                            "result": self._approve_long(base_id + i, isolated)})
+                            "result": self._approve_long(base_id + i, isolated, tag=self.tag)})
         for i, candidate in enumerate(short_pending, start=len(long_pending)):
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
             results.append({"symbol": candidate["symbol"], "side": "short",
-                            "result": self._approve_short(base_id + i, isolated)})
+                            "result": self._approve_short(base_id + i, isolated, tag=self.tag)})
         return {"status": "batch", "results": results}
 
     def scan(self):
@@ -208,7 +222,7 @@ class LiveApp:
             print(f"Auto-entry failed: {exc}", flush=True)
         return {"entries": entry_result, "exits": self.scan()}
 
-def run_periodic_scans(app, interval_seconds=300, sleep=time.sleep, max_iterations=None):
+def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs
     have been observed to lag by hours rather than minutes. Runs only
     while this Render process is warm; a cold free-tier instance still
@@ -216,13 +230,19 @@ def run_periodic_scans(app, interval_seconds=300, sleep=time.sleep, max_iteratio
     but does not depend on that request landing on any particular schedule
     to keep ticking once awake. The exchange-native protective stop placed
     at entry time (live_controller.approve_buy) does not depend on this
-    loop at all -- it is a real resting order on Binance regardless."""
+    loop at all -- it is a real resting order on Binance regardless.
+    `apps` is a list so the 4H and 2H systems (18 Sep 2026) both get
+    ticked every cycle from one loop/thread; a single app's failure (try/
+    except per app, not around the whole list) never blocks the other."""
+    if not isinstance(apps, (list, tuple)):
+        apps = [apps]
     iterations = 0
     while max_iterations is None or iterations < max_iterations:
-        try:
-            app.tick()
-        except Exception as exc:
-            print(f"Periodic tick failed: {exc}", flush=True)
+        for app in apps:
+            try:
+                app.tick()
+            except Exception as exc:
+                print(f"Periodic tick failed: {exc}", flush=True)
         iterations += 1
         sleep(interval_seconds)
 
@@ -234,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(body)
     def do_GET(self):
         if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
-        if self.path == "/scan": self._json(200, APP.tick()); return
+        if self.path == "/scan": self._json(200, {app.tag or "default": app.tick() for app in APPS}); return
         self.send_error(404)
     def do_POST(self):
         if self.path != "/telegram": self.send_error(404); return
@@ -255,19 +275,33 @@ def main():
     # cap_at_target=false) drives live candidates and exits; see ARASTIRMA.md.
     strategy = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
     # v5 short side (Part 2, 18 Sep 2026): same signal mirrored, Binance
-    # Futures with leverage tiered 3x/5x by breakout strength. Manual
-    # "SHORT" Telegram confirmation to open (matching AL for the long
-    # side), automatic exits. Deployed directly to live after the signal
-    # passed walk-forward + real funding-cost validation -- see
-    # ARASTIRMA.md and the user's explicit 18 Sep 2026 instruction.
+    # Futures with leverage tiered 3x/5x by breakout strength. Automatic
+    # entry (no Telegram confirmation needed), automatic exits. Deployed
+    # directly to live after the signal passed walk-forward + real
+    # funding-cost validation -- see ARASTIRMA.md and the user's explicit
+    # 18 Sep 2026 instruction.
     short_config = json.loads(Path("short_live_config.json").read_text(encoding="utf-8"))
-    global APP
-    APP = LiveApp(config, strategy, os.environ, short_config, strategy)
+    # Two parallel systems sharing the same real Binance wallets, split by
+    # client-order-id tag (18 Sep 2026, user's explicit instruction): "4"
+    # is the original 4H system (rare entries, higher per-trade risk
+    # budget), "2" is a new 2H system (more frequent entries, lower
+    # per-trade risk budget, its own runtime-state files published by
+    # github_worker.write_2h_signal_state so it never touches the 4H
+    # candidate feed). Both read the SAME strategy params (config_v5_long/
+    # short_live_config's btc_filter, min_breaks, etc.) since the 4H vs 2H
+    # A/B test only ever varied the candle interval, not the strategy.
+    config_2h = json.loads(Path("live_config_2h.json").read_text(encoding="utf-8"))
+    short_config_2h = json.loads(Path("short_live_config_2h.json").read_text(encoding="utf-8"))
+    global APP, APPS
+    APP = LiveApp(config, strategy, os.environ, short_config, strategy, tag="4")
+    app_2h = LiveApp(config_2h, strategy, os.environ, short_config_2h, strategy, tag="2",
+                     state_url=RUNTIME_STATE_2H, state_short_url=RUNTIME_STATE_SHORT_2H)
+    APPS = [APP, app_2h]
     telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET"))
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ))
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
-    threading.Thread(target=run_periodic_scans, args=(APP,), daemon=True).start()
+    threading.Thread(target=run_periodic_scans, args=(APPS,), daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
 
 if __name__ == "__main__": main()

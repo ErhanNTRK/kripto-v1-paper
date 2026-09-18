@@ -11,6 +11,11 @@ import urllib.request
 # flow could never see a real candidate; fixed 18 Sep 2026.
 RUNTIME_STATE = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/state-relaxed.json"
 RUNTIME_STATE_SHORT = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/short_state.json"
+# 2H system (18 Sep 2026): published by github_worker.write_2h_signal_state,
+# same branch/mechanism as the 4H files above, just distinct filenames so
+# neither system can ever overwrite the other's state.
+RUNTIME_STATE_2H = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/state_2h.json"
+RUNTIME_STATE_SHORT_2H = "https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/runtime-state/short_state_2h.json"
 
 
 def _fetch(url, opener):
@@ -19,12 +24,12 @@ def _fetch(url, opener):
         return json.load(response)
 
 
-def fetch_runtime_state(opener=urllib.request.urlopen):
-    return _fetch(RUNTIME_STATE, opener)
+def fetch_runtime_state(opener=urllib.request.urlopen, url=RUNTIME_STATE):
+    return _fetch(url, opener)
 
 
-def fetch_runtime_state_short(opener=urllib.request.urlopen):
-    return _fetch(RUNTIME_STATE_SHORT, opener)
+def fetch_runtime_state_short(opener=urllib.request.urlopen, url=RUNTIME_STATE_SHORT):
+    return _fetch(url, opener)
 
 
 def pending_candidates(saved, now_ms, config):

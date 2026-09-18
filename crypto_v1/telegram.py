@@ -108,13 +108,24 @@ def deliver_short_events(short_state_path, database):
     overwritten fresh each cron tick with only that tick's candidates, so
     every event in it is new by construction; deliver_once's own key-based
     idempotency is still the guard against a duplicate send."""
-    saved = json.loads(Path(short_state_path).read_text(encoding='utf-8'))
+    return deliver_fresh_events(short_state_path, database, 'SHORT_ADAYI', 'short')
+
+
+def deliver_fresh_events(state_path, database, event_type, tag):
+    """Generalizes deliver_short_events for any freshly-overwritten
+    per-tick state file with no session/started_at to filter by --
+    used for the 2H system's state_2h.json/short_state_2h.json (18 Sep
+    2026), which are published the exact same way short_state.json is.
+    `tag` namespaces the idempotency key so the 4H and 2H systems, which
+    can both publish an event for the same symbol/time by coincidence,
+    are never mistaken for the same delivery."""
+    saved = json.loads(Path(state_path).read_text(encoding='utf-8'))
     recipient = os.environ.get('TELEGRAM_CHAT_ID', '')
     sent = 0
     for event in saved['state']['events']:
-        if event['type'] != 'SHORT_ADAYI':
+        if event['type'] != event_type:
             continue
-        key = hashlib.sha256(('short:'+recipient+':'+json.dumps(event, sort_keys=True)).encode()).hexdigest()
+        key = hashlib.sha256((tag+':'+recipient+':'+json.dumps(event, sort_keys=True)).encode()).hexdigest()
         if deliver_once(key, format_event(event), database):
             sent += 1
             time.sleep(1.1)

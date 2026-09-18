@@ -5,6 +5,8 @@
 !config_v2.json
 !config_v5_long.json
 !live_config.json
+!live_config_2h.json
 !short_live_config.json
+!short_live_config_2h.json
 !requirements.txt
 !Dockerfile

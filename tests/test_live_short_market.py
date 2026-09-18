@@ -78,5 +78,58 @@ class SummarizeShortPilotTests(unittest.TestCase):
         self.assertEqual(result["realized_loss_today"], Decimal("0"))
 
 
+class TaggedSubSystemTests(unittest.TestCase):
+    """Two systems (e.g. "4" for 4H, "2" for 2H) share the SAME real
+    Futures wallet -- each must only see and spend its own slice of
+    capital, tracked via its own all-time realized P&L, never the whole
+    account's real margin balance."""
+
+    CONFIG = {"pilot_capital_usdt": 17, "live_fee_buffer_fraction": 0.001}
+
+    def test_tag_equity_comes_from_its_own_realized_pnl_not_the_account_balance(self):
+        orders = [
+            {"clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 1},
+            {"clientOrderId": "kv1fp41", "side": "BUY", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 2},
+        ]
+        account = {"availableBalance": "1000", "totalMarginBalance": "1000"}
+        result = summarize_short_pilot(account, [], orders, self.CONFIG, 0, tag="4")
+        pnl = Decimal("110") * Decimal("0.999") - Decimal("100") * Decimal("1.001")
+        self.assertEqual(result["equity"], Decimal("17") + pnl)
+        self.assertGreater(result["equity"], Decimal("17"))  # this trade was a real profit
+
+    def test_orders_from_a_different_tag_never_leak_in(self):
+        orders = [
+            {"clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 1},
+            {"clientOrderId": "kv1fp41", "side": "BUY", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 2},  # tag 4: a real loss
+            {"clientOrderId": "kv1fs21", "side": "SELL", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 1},
+            {"clientOrderId": "kv1fp21", "side": "BUY", "status": "FILLED",
+             "cumQuote": "50", "updateTime": 2},   # tag 2: a real profit
+        ]
+        account = {"availableBalance": "1000", "totalMarginBalance": "1000"}
+        tag4 = summarize_short_pilot(account, [], orders, self.CONFIG, 0, tag="4")
+        tag2 = summarize_short_pilot(account, [], orders, self.CONFIG, 0, tag="2")
+        self.assertLess(tag4["equity"], Decimal("17"))
+        self.assertGreater(tag2["equity"], Decimal("17"))
+
+    def test_free_usdt_is_capped_by_this_tags_own_remaining_allocation(self):
+        orders = [{"clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
+                   "cumQuote": "12", "updateTime": 1}]
+        open_orders = [{"symbol": "SOLUSDT", "clientOrderId": "kv1fp41"}]
+        account = {"availableBalance": "1000", "totalMarginBalance": "1000"}
+        result = summarize_short_pilot(account, open_orders, orders, self.CONFIG, 0, tag="4")
+        self.assertEqual(result["free_usdt"], Decimal("5"))
+
+    def test_untagged_call_uses_the_real_account_balance(self):
+        account = {"availableBalance": "30.5", "totalMarginBalance": "33.2"}
+        result = summarize_short_pilot(account, [], [], self.CONFIG, 0)
+        self.assertEqual(result["equity"], Decimal("33.2"))
+        self.assertEqual(result["free_usdt"], Decimal("30.5"))
+
+
 if __name__ == '__main__':
     unittest.main()

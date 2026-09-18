@@ -7,11 +7,11 @@ from pathlib import Path
 from .backtest import report
 from .data import candles, get, load, universe, validate
 from .paper_trading import tick
-from .research_v2 import FOUR_HOUR
+from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
-from .short_signal import detect_short_candidates
-from .telegram import deliver_paper_events, deliver_once, deliver_short_events
+from .short_signal import detect_long_candidates, detect_short_candidates
+from .telegram import deliver_fresh_events, deliver_paper_events, deliver_once, deliver_short_events
 
 
 def private_chat_id(token):
@@ -91,6 +91,37 @@ def write_short_state(short_config, data_dir, runtime, now):
     write_json(runtime / "short_state.json", dict(state=dict(events=events, pending_shorts=pending_shorts)))
 
 
+def write_2h_signal_state(strategy_config, runtime, now_2h):
+    """Independent 2H-interval scan for the parallel 2H system (18 Sep
+    2026): its own fresh fetch and detect pass, deliberately NOT reusing
+    prepare_data/data_dir (4H) so a bug here can never affect the proven,
+    already-live 4H detection path above. Publishes AL_ADAYI/SHORT_ADAYI
+    state in the exact same shape the 4H files use (see write_short_state
+    and paper_trading's own state), so the existing pending_candidates/
+    isolate_candidate/approve_buy machinery in live_signal.py and
+    live_controller.py works for the 2H system completely unmodified."""
+    symbols = universe(strategy_config)
+    long_symbols = [s for s in symbols if s != "BTCUSDT"]
+    # Same 45-day floor as prepare_data's 4H fetch (see its comment on the
+    # BTC EMA200 floor) -- at 2H bars this is a much wider margin (~540
+    # bars vs the ~200 needed), which is fine, just extra cache-warm data.
+    start = now_2h - 45 * 24 * 60 * 60 * 1000
+    data = {}
+    for symbol in sorted(set(symbols + ["BTCUSDT"])):
+        data[symbol] = validate(candles(symbol, start, now_2h, TWO_HOUR), TWO_HOUR)
+    long_candidates = detect_long_candidates(data, long_symbols, strategy_config)
+    long_events = [dict(type="AL_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
+                   for c in long_candidates]
+    pending_buys = {c["symbol"]: dict(stop=c["stop"]) for c in long_candidates}
+    write_json(runtime / "state_2h.json", dict(state=dict(events=long_events, pending_buys=pending_buys)))
+    short_candidates = detect_short_candidates(data, long_symbols, strategy_config)
+    short_events = [dict(type="SHORT_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
+                    for c in short_candidates]
+    pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
+                      for c in short_candidates}
+    write_json(runtime / "short_state_2h.json", dict(state=dict(events=short_events, pending_shorts=pending_shorts)))
+
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
@@ -114,7 +145,9 @@ def main():
     # Paper-only overrides. Live trading reads live_config.json and is unaffected.
     if os.environ.get("PAPER_RELAX_LIMITS") == "1":
         config = dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000)
-    now = get("time")["serverTime"] // FOUR_HOUR * FOUR_HOUR
+    server_time = get("time")["serverTime"]
+    now = server_time // FOUR_HOUR * FOUR_HOUR
+    now_2h = server_time // TWO_HOUR * TWO_HOUR
     data_dir = prepare_data(config, runtime, now)
     state_path = runtime / os.environ.get("PAPER_STATE_FILE", "state.json")
     output = runtime / "report"
@@ -130,6 +163,7 @@ def main():
         state_path.unlink(missing_ok=True)
         tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
     write_short_state(config, data_dir, runtime, now)
+    write_2h_signal_state(config, runtime, now_2h)
     database = runtime / "telegram.sqlite"
     deliver_once(
         "connection:" + chat_id,
@@ -138,6 +172,8 @@ def main():
     )
     deliver_paper_events(state_path, database)
     deliver_short_events(runtime / "short_state.json", database)
+    deliver_fresh_events(runtime / "state_2h.json", database, "AL_ADAYI", "2h_long")
+    deliver_fresh_events(runtime / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
     # The once-a-day "Sanal portfoy / Gercek emir verilmedi" status heartbeat
     # was dropped per the user's 18 Sep 2026 request -- it read as confusing
     # noise once live trading was actually turned on (real AL/SHORT_ADAYI

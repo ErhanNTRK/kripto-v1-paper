@@ -1,20 +1,18 @@
 {
   "live_trading_enabled": true,
   "pilot_capital_usdt": 17,
-  "risk_per_trade_usdt": 5.0,
-  "daily_loss_limit_usdt": 12,
+  "risk_per_trade_usdt": 2.0,
+  "daily_loss_limit_usdt": 10,
   "pilot_loss_limit_usdt": 15,
-  "max_open_positions": 5,
+  "max_open_positions": 10,
   "max_buys_per_day": 40,
-  "minimum_reward_risk": 2.0,
-  "cap_at_target": false,
   "trailing_atr": 2.0,
-  "telegram_buy_confirmation_required": true,
+  "btc_filter": "very_loose",
   "telegram_buy_command": "AL",
   "signal_confirmation_expiry_minutes": 10,
   "require_exactly_one_pending_signal": true,
   "automatic_risk_exits": true,
   "profit_exit_confirmation_required": false,
-  "max_entry_drift_fraction": 0.005
-  ,"live_fee_buffer_fraction": 0.001
+  "max_entry_drift_fraction": 0.005,
+  "live_fee_buffer_fraction": 0.001
 }
