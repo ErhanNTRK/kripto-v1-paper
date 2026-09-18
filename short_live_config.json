@@ -7,7 +7,7 @@
   "max_open_positions": 5,
   "max_buys_per_day": 40,
   "trailing_atr": 2.0,
-  "btc_filter": "loose",
+  "btc_filter": "very_loose",
   "telegram_buy_command": "AL",
   "signal_confirmation_expiry_minutes": 10,
   "require_exactly_one_pending_signal": true,

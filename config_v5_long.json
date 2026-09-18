@@ -9,7 +9,7 @@
   "min_reward_risk": 2.0,
   "cap_at_target": false,
   "min_breaks": 1,
-  "btc_filter": "loose",
+  "btc_filter": "very_loose",
   "atr_multiplier": 2.0,
   "trailing_atr": 2.0,
   "volume_multiple": 1.5,
