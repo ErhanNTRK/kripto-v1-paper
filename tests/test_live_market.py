@@ -1,6 +1,7 @@
 import unittest
 from decimal import Decimal
-from crypto_v1.live_market import summarize_pilot
+from unittest.mock import MagicMock, patch
+from crypto_v1.live_market import BinanceMarket, summarize_pilot
 
 
 class LiveMarketTests(unittest.TestCase):
@@ -93,3 +94,41 @@ class TaggedSubSystemTests(unittest.TestCase):
         result = summarize_pilot(account, [], orders, {}, {"pilot_capital_usdt": 34}, 0)
         self.assertEqual(result["equity"], Decimal("50"))  # real account balance, untouched
         self.assertEqual(result["buys_today"], 1)
+
+
+class PilotStatusCacheTests(unittest.TestCase):
+    """pilot_status() fans an all_orders() call out to every symbol in the
+    scanning universe (~20 Binance weight each) -- live-observed 18 Sep
+    2026 as a real contributor to repeated -1003 rate-limit bans when
+    several near-simultaneous callers (multiple pending candidates, two
+    tagged systems) each trigger a fresh fetch within seconds. A short TTL
+    cache should collapse those into one real fetch."""
+
+    def _market(self, now_fn):
+        executor = MagicMock()
+        executor.open_orders.return_value = []
+        executor.all_orders.return_value = []
+        market = BinanceMarket({"pilot_capital_usdt": 17}, {"top_n": 1, "excluded_bases": []},
+                               {}, executor, now=now_fn)
+        market._account = MagicMock(return_value={"balances": []})
+        market._tickers = MagicMock(return_value={})
+        return market, executor
+
+    @patch("crypto_v1.live_market.universe", return_value=["BTCUSDT"])
+    def test_second_call_within_ttl_reuses_cached_result(self, _mock_universe):
+        clock = [1_000.0]
+        market, executor = self._market(lambda: clock[0])
+        first = market.pilot_status()
+        clock[0] += 10  # well inside the 90s TTL
+        second = market.pilot_status()
+        self.assertEqual(executor.all_orders.call_count, 1)  # not refetched
+        self.assertIs(first, second)
+
+    @patch("crypto_v1.live_market.universe", return_value=["BTCUSDT"])
+    def test_call_after_ttl_expires_refetches(self, _mock_universe):
+        clock = [1_000.0]
+        market, executor = self._market(lambda: clock[0])
+        market.pilot_status()
+        clock[0] += 91  # past the 90s TTL
+        market.pilot_status()
+        self.assertEqual(executor.all_orders.call_count, 2)
