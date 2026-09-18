@@ -35,6 +35,15 @@ jobs:
           PAPER_STATE_FILE: state-relaxed.json
         run: python -m crypto_v1.github_worker
       - name: Wake Frankfurt exit monitor
+        # This ping is a best-effort nudge, not a pipeline gate -- a failed
+        # or slow wake-up must never block publishing the freshly-scanned
+        # candidate state below. A GitHub Actions step's default `if:
+        # success()` means a failed step SKIPS every step after it; this
+        # silently starved the runtime-state branch of new candidates for
+        # ~10 minutes on 18 Sep 2026 when the Render service was crashing
+        # on /scan (a since-fixed rate-limit bug), because "Save paper
+        # state" below never ran at all that whole time.
+        continue-on-error: true
         run: curl --fail --silent --show-error --retry 2 --max-time 120 https://kripto-v1-frankfurt.onrender.com/scan
       - name: Save paper state
         shell: bash
