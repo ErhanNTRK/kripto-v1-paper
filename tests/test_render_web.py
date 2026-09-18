@@ -127,10 +127,13 @@ class LiveAppAutoEntryTests(unittest.TestCase):
     SHORT_SAVED = {"state": {"pending_shorts": {"BNBUSDT": {"stop": 800, "leverage": 3}},
                              "events": [{"type": "SHORT_ADAYI", "time": NOW_S * 1000 - 1000,
                                         "symbol": "BNBUSDT", "close": 750}]}}
+    # Built without a class-body comprehension: comprehensions get their own
+    # scope in Python 3 and cannot see NOW_S from the enclosing class body.
     MANY_LONG_SAVED = {"state": {
-        "pending_buys": {s: {"stop": 90} for s in ("SOLUSDT", "ETHUSDT", "BNBUSDT")},
-        "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": s, "close": 100}
-                  for s in ("SOLUSDT", "ETHUSDT", "BNBUSDT")]}}
+        "pending_buys": {"SOLUSDT": {"stop": 90}, "ETHUSDT": {"stop": 90}, "BNBUSDT": {"stop": 90}},
+        "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "SOLUSDT", "close": 100},
+                  {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "ETHUSDT", "close": 100},
+                  {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "BNBUSDT", "close": 100}]}}
     EMPTY_SAVED = {"state": {}}
 
     def _app(self):
