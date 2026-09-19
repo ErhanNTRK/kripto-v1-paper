@@ -1,0 +1,388 @@
+{
+  "fingerprint": "a78f763619034019e7233d5b16d8d529826b2f93bd3f1883d96c260eb95d1d23",
+  "state": {
+    "cash": 7295.088452615471,
+    "positions": {
+      "WLDUSDT": {
+        "qty": 1769.377564132387,
+        "entry": 0.43271624999999997,
+        "stop": 0.40549848630395285,
+        "target": 0.49040137296127506,
+        "initial_risk": 50.0,
+        "unit_risk": 0.028258524926259854,
+        "high": 0.447,
+        "entry_time": 1789718400000
+      },
+      "SOLUSDT": {
+        "qty": 12.429763571388607,
+        "entry": 105.83288999999999,
+        "stop": 110.15854791873265,
+        "target": 114.15417859609703,
+        "initial_risk": 49.994258668386856,
+        "unit_risk": 4.022140757646099,
+        "high": 114.32,
+        "entry_time": 1789718400000
+      },
+      "PUMPUSDT": {
+        "qty": 146480.11362044408,
+        "entry": 0.004240119,
+        "stop": 0.0039089839155251145,
+        "target": 0.004934231448769859,
+        "initial_risk": 49.98439422840652,
+        "unit_risk": 0.0003412367248562145,
+        "high": 0.004452,
+        "entry_time": 1789718400000
+      }
+    },
+    "pending_buys": {
+      "THEUSDT": {
+        "stop": 0.07053156580753078,
+        "score": 0.014794087239551602
+      },
+      "SUIUSDT": {
+        "stop": 0.8170062678380284,
+        "score": 2.530026663525664
+      },
+      "ENAUSDT": {
+        "stop": 0.17463974058306414,
+        "score": 2.5154470368626787
+      }
+    },
+    "pending_sells": {},
+    "day": "2026-09-19",
+    "day_equity": 10068.964238204551,
+    "halted": false,
+    "losses": 0,
+    "last_t": 1789804800000,
+    "marks": {
+      "ARBUSDT": 0.2117,
+      "BNBUSDT": 768.08,
+      "BTCUSDT": 81302.63,
+      "CRCLBUSDT": 91.88,
+      "DASHUSDT": 60.29,
+      "DOGEUSDT": 0.08841,
+      "ENAUSDT": 0.1911,
+      "ETHUSDT": 2639.67,
+      "LSKUSDT": 0.4431,
+      "MARSCOINUSDT": 0.1034,
+      "NEARUSDT": 3.684,
+      "PUMPUSDT": 0.004158,
+      "SOLUSDT": 111.9,
+      "SUIUSDT": 0.8633,
+      "SYNUSDT": 0.24518,
+      "THEUSDT": 0.074,
+      "UNIUSDT": 9.099,
+      "WLDUSDT": 0.4282,
+      "XRPUSDT": 1.4343,
+      "ZECUSDT": 1543.22
+    },
+    "trades": [],
+    "curve": [
+      {
+        "time": 1789718400000,
+        "equity": 10000.0,
+        "positions": 0,
+        "halted": false
+      },
+      {
+        "time": 1789732800000,
+        "equity": 10004.526269144968,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789747200000,
+        "equity": 10074.578922231376,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789761600000,
+        "equity": 10103.26871562361,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789776000000,
+        "equity": 10068.964238204551,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789790400000,
+        "equity": 10087.999988272975,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789804800000,
+        "equity": 10020.053907678841,
+        "positions": 3,
+        "halted": false
+      },
+      {
+        "time": 1789819200000,
+        "equity": 10052.690781649151,
+        "positions": 3,
+        "halted": false
+      }
+    ],
+    "events": [
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "BTCUSDT",
+        "close": 77798.01,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "ETHUSDT",
+        "close": 2490.0,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "SOLUSDT",
+        "close": 105.78,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "ENAUSDT",
+        "close": 0.1695,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "CRCLBUSDT",
+        "close": 87.04,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "WLDUSDT",
+        "close": 0.4324,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789718400000,
+        "symbol": "PUMPUSDT",
+        "close": 0.004239,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789718400000,
+        "symbol": "WLDUSDT",
+        "price": 0.43271624999999997,
+        "stop": 0.40549848630395285,
+        "target": 0.49040137296127506,
+        "risk": 50.0,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789718400000,
+        "symbol": "SOLUSDT",
+        "price": 105.83288999999999,
+        "stop": 102.0696355508624,
+        "target": 114.15417859609703,
+        "risk": 49.994258668386856,
+        "simulated": true
+      },
+      {
+        "type": "AL",
+        "time": 1789718400000,
+        "symbol": "PUMPUSDT",
+        "price": 0.004240119,
+        "stop": 0.0039089839155251145,
+        "target": 0.004934231448769859,
+        "risk": 49.98439422840652,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789732800000,
+        "symbol": "BTCUSDT",
+        "close": 78062.0,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789732800000,
+        "symbol": "ETHUSDT",
+        "close": 2508.12,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789732800000,
+        "symbol": "DOGEUSDT",
+        "close": 0.08535,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789732800000,
+        "symbol": "SUIUSDT",
+        "close": 0.792,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "BTCUSDT",
+        "close": 80725.6,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "ETHUSDT",
+        "close": 2584.06,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "XRPUSDT",
+        "close": 1.3853,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "NEARUSDT",
+        "close": 3.653,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "DOGEUSDT",
+        "close": 0.08751,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "SUIUSDT",
+        "close": 0.8037,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789747200000,
+        "symbol": "CRCLBUSDT",
+        "close": 91.05,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789761600000,
+        "symbol": "BTCUSDT",
+        "close": 81204.76,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789761600000,
+        "symbol": "ETHUSDT",
+        "close": 2636.71,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789761600000,
+        "symbol": "XRPUSDT",
+        "close": 1.4121,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789761600000,
+        "symbol": "BNBUSDT",
+        "close": 766.46,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789776000000,
+        "symbol": "ZECUSDT",
+        "close": 1562.07,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789776000000,
+        "symbol": "DASHUSDT",
+        "close": 63.58,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789790400000,
+        "symbol": "XRPUSDT",
+        "close": 1.4181,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789790400000,
+        "symbol": "SUIUSDT",
+        "close": 0.8296,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789790400000,
+        "symbol": "ENAUSDT",
+        "close": 0.1833,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789790400000,
+        "symbol": "CRCLBUSDT",
+        "close": 92.59,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789804800000,
+        "symbol": "SYNUSDT",
+        "close": 0.2419,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789819200000,
+        "symbol": "THEUSDT",
+        "close": 0.074,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789819200000,
+        "symbol": "SUIUSDT",
+        "close": 0.8633,
+        "simulated": true
+      },
+      {
+        "type": "AL_ADAYI",
+        "time": 1789819200000,
+        "symbol": "ENAUSDT",
+        "close": 0.1911,
+        "simulated": true
+      }
+    ],
+    "started_at": 1789718400000
+  }
+}
