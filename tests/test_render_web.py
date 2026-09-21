@@ -6,6 +6,49 @@ import crypto_v1.render_web as render_web
 from crypto_v1.binance_trade import OrderRejected
 from crypto_v1.render_web import LiveApp, _fill_pnl, telegram_command, run_periodic_scans
 
+class ApproveLongWiringTests(unittest.TestCase):
+    """_approve_long now opens a leveraged Futures long (21 Sep 2026),
+    replacing unleveraged Spot for new entries -- it must call
+    approve_long_leveraged with THIS app's short_config/futures_market/
+    futures_executor (the wallet/config the short side already trades
+    on), never the Spot config/market/executor. Using the wrong one
+    would size/pay from the wrong wallet entirely."""
+
+    CONFIG = {"signal_confirmation_expiry_minutes": 10}
+    SHORT_CONFIG = {"signal_confirmation_expiry_minutes": 10, "risk_per_trade_usdt": 2.0}
+
+    def _app(self):
+        return LiveApp(self.CONFIG, {}, {"TELEGRAM_CHAT_ID": "123"},
+                       short_config=self.SHORT_CONFIG, short_strategy_config={}, tag="2")
+
+    def test_approve_long_uses_the_futures_wallet_and_config_not_spot(self):
+        app = self._app()
+        saved = {"state": {}}
+        with patch("crypto_v1.render_web.approve_long_leveraged",
+                  return_value={"status": "rejected", "reason": "no_pending_signal"}) as mock_approve:
+            app._approve_long(7, saved, tag="2")
+        mock_approve.assert_called_once()
+        args = mock_approve.call_args.args
+        self.assertEqual(args[3], saved)
+        self.assertIs(args[4], app.short_config)
+        self.assertIsNot(args[4], app.config)
+        self.assertIs(args[6], app.futures_market)
+        self.assertIs(args[7], app.futures_executor)
+
+    def test_a_real_fill_sends_leverage_and_risk_in_the_aldim_message(self):
+        app = self._app()
+        plan = {"symbol": "ADAUSDT", "leverage": 2, "planned_loss_usdt": "1.00"}
+        with patch("crypto_v1.render_web.approve_long_leveraged",
+                  return_value={"status": "opened_and_protected", "plan": plan}), \
+             patch("crypto_v1.render_web.send_message") as send:
+            app._approve_long(7, {"state": {}}, tag="2")
+        send.assert_called_once()
+        message = send.call_args.args[0]
+        self.assertIn("ADAUSDT", message)
+        self.assertIn("2x", message)
+        self.assertIn("1.00", message)
+
+
 class RenderWebTests(unittest.TestCase):
     def test_periodic_scans_calls_tick_each_iteration_and_survives_errors(self):
         app = MagicMock()
@@ -336,7 +379,7 @@ class ScanResilienceTests(unittest.TestCase):
         app = LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
                      short_config=self.CONFIG, short_strategy_config={}, tag="2", interval=render_web.TWO_HOUR)
         position = {"symbol": "ADAUSDT", "buy_time": 0}
-        short_position = {"symbol": "BNBUSDT", "open_time": 0}
+        short_position = {"symbol": "BNBUSDT", "side": "short", "open_time": 0}
         app.market.live_positions = MagicMock(return_value=[position])
         app.market.analysis = MagicMock(return_value=({"c": 1}, {"c": 1}, 1))
         app.futures_market.live_positions = MagicMock(return_value=[short_position])
@@ -350,6 +393,24 @@ class ScanResilienceTests(unittest.TestCase):
     def test_default_interval_stays_four_hour_for_the_4h_app(self):
         app = self._app()
         self.assertEqual(app.interval, render_web.FOUR_HOUR)
+
+    def test_long_futures_exit_forces_cap_at_target_false(self):
+        # short_live_config.json has no "cap_at_target" key at all, so
+        # exit_decision's own default (True, "capped") would silently
+        # diverge from the walk-forward-validated "let winners run"
+        # behavior unless scan() explicitly overrides it for the leveraged
+        # long exit path.
+        app = LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
+                     short_config=self.CONFIG, short_strategy_config={"trailing_atr": 2.0})
+        long_position = {"symbol": "ADAUSDT", "side": "long", "open_time": 0}
+        app.market.live_positions = MagicMock(return_value=[])
+        app.futures_market.live_positions = MagicMock(return_value=[long_position])
+        app.futures_market.analysis = MagicMock(return_value=({"c": 1}, {"c": 1}, 1))
+        with patch("crypto_v1.render_web.exit_decision", return_value=None) as exit_decision_mock:
+            app.scan()
+        exit_decision_mock.assert_called_once()
+        passed_config = exit_decision_mock.call_args.args[4]
+        self.assertIs(passed_config["cap_at_target"], False)
 
 
 class RateLimitCircuitBreakerTests(unittest.TestCase):

@@ -47,3 +47,27 @@ def execute_short_exit(position, reason, executor):
     closed = _known_or_place(executor, symbol, exit_id,
                              lambda: executor.market_close_short(symbol, position["quantity"], exit_id))
     return {"status": "closed", "reason": reason, "order": closed}
+
+
+def execute_long_futures_exit(position, reason, executor):
+    """Mirrors execute_short_exit exactly for a leveraged LONG futures
+    position (21 Sep 2026): cancel the resting protective stop (kv1fq),
+    then market-close. The exit DECISION for a long is identical math to
+    Spot's live_monitor.exit_decision (same "high since entry" trailing
+    logic) -- only the order placement differs by venue, so that function
+    is reused as-is; only this execution half needed a futures-specific
+    twin."""
+    symbol, stop_id = position["symbol"], position["stop_client_id"]
+    try:
+        canceled = executor.cancel(symbol, stop_id)
+    except OrderStateUnknown:
+        canceled = executor.query(symbol, stop_id)
+    status = canceled.get("status")
+    if status == "FILLED":
+        return {"status": "already_stopped", "reason": reason}
+    if status not in {"CANCELED", "EXPIRED"}:
+        raise RuntimeError("protective stop cancellation is unconfirmed")
+    exit_id = "kv1fy" + stop_id.removeprefix("kv1fq")
+    closed = _known_or_place(executor, symbol, exit_id,
+                             lambda: executor.market_close_long(symbol, position["quantity"], exit_id))
+    return {"status": "closed", "reason": reason, "order": closed}

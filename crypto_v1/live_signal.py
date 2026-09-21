@@ -42,10 +42,22 @@ def pending_candidates(saved, now_ms, config):
             continue
         age = now_ms - int(event["time"])
         if 0 <= age <= expiry and event.get("symbol") in pending:
-            latest[event["symbol"]] = {
+            entry = pending[event["symbol"]]
+            candidate = {
                 "symbol": event["symbol"], "created_at": int(event["time"]),
-                "close": float(event["close"]), "stop": float(pending[event["symbol"]]["stop"]),
+                "close": float(event["close"]), "stop": float(entry["stop"]),
             }
+            # Carried through (not always present -- see github_worker.
+            # write_2h_signal_state and backtest.Engine.step) for the
+            # leveraged-long entry path (21 Sep 2026): an explicit
+            # "leverage" means use it as-is (the 2H system's fixed 2x);
+            # "breaks_up" alone means size by signal strength instead (the
+            # 4H system's 3x/5x tiering, via short_signal.leverage_for_signal).
+            if "leverage" in entry:
+                candidate["leverage"] = int(entry["leverage"])
+            if "breaks_up" in entry:
+                candidate["breaks_up"] = int(entry["breaks_up"])
+            latest[event["symbol"]] = candidate
     return [latest[s] for s in sorted(latest)]
 
 
