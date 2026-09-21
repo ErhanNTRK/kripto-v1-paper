@@ -7,13 +7,12 @@ from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
 from .github_worker import local_tick
-from .live_controller import approve_buy
 from .live_execution import execution_enabled
 from .live_market import BinanceMarket
 from .live_monitor import execute_exit, exit_decision
-from .live_short_controller import approve_short
+from .live_short_controller import approve_long_leveraged, approve_short
 from .live_short_market import BinanceFuturesMarket
-from .live_short_monitor import execute_short_exit, short_exit_decision
+from .live_short_monitor import execute_long_futures_exit, execute_short_exit, short_exit_decision
 from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_SHORT, fetch_runtime_state,
                           fetch_runtime_state_short, isolate_candidate,
                           isolate_short_candidate, pending_candidates,
@@ -167,17 +166,30 @@ class LiveApp:
                                if short_config is not None else None)
 
     def _approve_long(self, update_id, saved, tag=""):
-        result = approve_buy(update_id, "AL", int(time.time() * 1000),
-                             saved, self.config, self.environment,
-                             self.market, self.executor)
+        # Leveraged Futures long (21 Sep 2026), replacing unleveraged Spot
+        # for NEW entries per the user's explicit decision -- 4H's 3x/5x
+        # strength tiering matches the fully walk-forward-validated (5/5
+        # GO) 4H signal; 2H's fixed 2x reflects its NO_GO-overall (3/5)
+        # edge. Uses self.short_config/futures_market/futures_executor
+        # (the SAME Futures wallet the short side already trades on, see
+        # live_short_market.summarize_short_pilot's combined accounting)
+        # instead of self.config/market/executor (Spot) -- an
+        # already-open Spot long from before this change still exits
+        # through the unmodified Spot path in scan() below, untouched.
+        result = approve_long_leveraged(update_id, "AL", int(time.time() * 1000),
+                                        saved, self.short_config, self.environment,
+                                        self.futures_market, self.futures_executor)
         label = f"[{tag}] " if tag else ""
         if result["status"] == "preview":
             plan = result["plan"]
-            send_message(f"{label}AL onayi dogrulandi: {plan['symbol']} | Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
-        elif result["status"] == "bought_and_protected":
-            send_message(f"{label}ALDIM: {result['plan']['symbol']} | risk {result['plan']['planned_loss_usdt']} USDT")
-        elif result["status"] == "bought_then_emergency_sold":
-            send_message(f"{label}ACIL GUVENLIK SATISI: {result['plan']['symbol']} koruyucu stop kurulamadi ve alim geri satildi.")
+            send_message(f"{label}AL onayi dogrulandi: {plan['symbol']} | {plan['leverage']}x kaldirac | "
+                         f"Planlanan risk {plan['planned_loss_usdt']} USDT. Gercek emir kilidi kapali.")
+        elif result["status"] == "opened_and_protected":
+            plan = result["plan"]
+            send_message(f"{label}ALDIM: {plan['symbol']} | {plan['leverage']}x kaldirac | risk {plan['planned_loss_usdt']} USDT")
+        elif result["status"] == "opened_then_emergency_closed":
+            send_message(f"{label}ACIL GUVENLIK KAPATMASI: {result['plan']['symbol']} "
+                         f"({result.get('reason')}) long geri kapatildi.")
         # "no pending signal" / limit-hit rejections happen on almost every
         # scan cycle now that entry is automatic -- silent, not spammed.
         return result
@@ -376,16 +388,41 @@ class LiveApp:
             _note_if_rate_limited(exc)
         if self.futures_market:
             try:
+                # live_positions() now returns BOTH short and leveraged-long
+                # positions (21 Sep 2026), each tagged with its own "side" --
+                # dispatch to the matching decision/execution pair. The long
+                # exit reuses live_monitor.exit_decision verbatim (identical
+                # math to Spot's own long exit, since it's the same v5
+                # signal) with cap_at_target forced False regardless of what
+                # short_live_config.json happens to have, to match the
+                # walk-forward-tested "let winners run" behavior (config_v5_
+                # long.json/live_config.json set this explicitly for Spot;
+                # short_live_config.json has no such key at all, and
+                # exit_decision's own default is True/capped, which would
+                # silently diverge from what was actually validated).
                 for position in self.futures_market.live_positions():
-                    feature, btc, low = self.futures_market.analysis(position, symmetric_features, self.interval)
-                    reason = short_exit_decision(position, feature, btc, low, self.short_config)
+                    if position["side"] == "short":
+                        feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
+                        reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
+                    else:
+                        feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
+                        reason = exit_decision(position, feature, btc, extreme,
+                                               {**self.short_config,
+                                                "trailing_atr": self.futures_market.strategy_config["trailing_atr"],
+                                                "cap_at_target": False},
+                                               sell_fn=ShortWindowLongModel.sell)
                     if not reason: continue
                     if not execution_enabled(self.short_config, self.environment):
                         results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
                         continue
-                    result = execute_short_exit(position, reason, self.futures_executor)
-                    pnl = _fill_pnl(position["entry"], result.get("order"), "short")
-                    send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
+                    if position["side"] == "short":
+                        result = execute_short_exit(position, reason, self.futures_executor)
+                        pnl = _fill_pnl(position["entry"], result.get("order"), "short")
+                        send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
+                    else:
+                        result = execute_long_futures_exit(position, reason, self.futures_executor)
+                        pnl = _fill_pnl(position["entry"], result.get("order"), "long")
+                        send_message(f"SATTIM (KALDIRACLI KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
                     results.append(result)
             except Exception as exc:
                 print(f"Futures exit scan failed: {exc}", flush=True)

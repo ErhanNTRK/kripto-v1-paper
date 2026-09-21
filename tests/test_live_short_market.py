@@ -79,6 +79,142 @@ class SummarizeShortPilotTests(unittest.TestCase):
         self.assertEqual(result["realized_loss_today"], Decimal("0"))
 
 
+class LeveragedLongPilotAccountingTests(unittest.TestCase):
+    """Leveraged long shares the same Futures wallet as short (21 Sep
+    2026) but its open/close sides are REVERSED (open=BUY/kv1fl,
+    close=SELL/kv1fq|kv1fk|kv1fy) -- a regression here would misfile a
+    long open as an unmatched short close (both use BUY... no: a long's
+    OPEN is BUY, same side as a short's CLOSE, so without prefix-exact
+    matching a long open could be silently swallowed by the short-close
+    filter and produce nonsense P&L)."""
+
+    def test_a_profitable_long_is_paired_by_suffix_not_confused_with_a_short(self):
+        orders = [
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fl1", "side": "BUY", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 5000},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq1", "side": "SELL", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 6000},
+        ]
+        result = summarize_short_pilot({}, [], orders, C, day_start_ms=0)
+        self.assertEqual(result["realized_loss_today"], Decimal("0"))
+
+    def test_a_losing_long_counts_toward_realized_loss(self):
+        orders = [
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fl1", "side": "BUY", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 5000},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq1", "side": "SELL", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 6000},
+        ]
+        result = summarize_short_pilot({}, [], orders, C, day_start_ms=0)
+        self.assertGreater(result["realized_loss_today"], Decimal("9.9"))
+
+    def test_realized_loss_counts_the_normal_automatic_long_exit_too(self):
+        # kv1fy mirrors kv1fx (the short side's normal trend/emergency-risk
+        # exit prefix) for the long side.
+        orders = [
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fl1", "side": "BUY", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 5000},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fy1", "side": "SELL", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 6000},
+        ]
+        result = summarize_short_pilot({}, [], orders, C, day_start_ms=0)
+        self.assertGreater(result["realized_loss_today"], Decimal("9.9"))
+
+    def test_a_simultaneous_long_and_short_are_both_counted_not_confused(self):
+        orders = [
+            # Profitable short: sold 100, bought back 90.
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 5000},
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fp41", "side": "BUY", "status": "FILLED",
+             "cumQuote": "90", "updateTime": 6000},
+            # Profitable long: bought 100, sold 110.
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fl42", "side": "BUY", "status": "FILLED",
+             "cumQuote": "100", "updateTime": 5000},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq42", "side": "SELL", "status": "FILLED",
+             "cumQuote": "110", "updateTime": 6000},
+        ]
+        account = {"availableBalance": "1000", "totalMarginBalance": "1000"}
+        result = summarize_short_pilot(account, [], orders, {"pilot_capital_usdt": 17,
+                                                              "live_fee_buffer_fraction": 0.001}, 0, tag="4")
+        short_pnl = Decimal("100") * Decimal("0.999") - Decimal("90") * Decimal("1.001")
+        long_pnl = Decimal("110") * Decimal("0.999") - Decimal("100") * Decimal("1.001")
+        self.assertEqual(result["equity"], Decimal("17") + short_pnl + long_pnl)
+        self.assertEqual(result["realized_loss_today"], Decimal("0"))
+
+    def test_held_symbols_and_committed_capital_combine_both_sides(self):
+        open_orders = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fp41"},   # short's protective stop
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq42"},   # long's protective stop
+        ]
+        orders = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
+             "cumQuote": "50", "updateTime": 1},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fl42", "side": "BUY", "status": "FILLED",
+             "cumQuote": "30", "updateTime": 1},
+        ]
+        result = summarize_short_pilot({"availableBalance": "1000"}, open_orders, orders, C, 0, tag="4")
+        self.assertEqual(result["open_positions"], 2)
+        self.assertEqual(result["held_symbols"], {"SOLUSDT", "ADAUSDT"})
+        # free_usdt is capped at equity(pilot_capital=34) - committed(50+30=80) -> floored at 0.
+        self.assertEqual(result["free_usdt"], Decimal("0"))
+
+
+class LivePositionsTests(unittest.TestCase):
+    """live_positions() must tell a long and a short apart (21 Sep 2026):
+    a short's protective stop is kv1fp/BUY, a long's is kv1fq/SELL --
+    each tagged with its own "side" so the caller applies the right exit
+    logic and executor calls."""
+
+    def _market(self, executor):
+        return BinanceFuturesMarket(C, {}, {}, executor)
+
+    def test_recognizes_a_short_stop(self):
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fp1", "side": "BUY",
+             "stopPrice": "105", "origQty": "1"}]
+        executor.query.return_value = {"executedQty": "1", "cumQuote": "100", "time": 1}
+        positions = self._market(executor).live_positions()
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0]["side"], "short")
+        self.assertEqual(positions[0]["symbol"], "SOLUSDT")
+        executor.query.assert_called_once_with("SOLUSDT", "kv1fs1")
+
+    def test_recognizes_a_long_stop(self):
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq2", "side": "SELL",
+             "stopPrice": "0.20", "origQty": "50"}]
+        executor.query.return_value = {"executedQty": "50", "cumQuote": "10", "time": 1}
+        positions = self._market(executor).live_positions()
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0]["side"], "long")
+        self.assertEqual(positions[0]["symbol"], "ADAUSDT")
+        executor.query.assert_called_once_with("ADAUSDT", "kv1fl2")
+
+    def test_ignores_orders_that_are_neither_a_short_nor_a_long_stop(self):
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fs1", "side": "SELL"},  # the open itself, not a stop
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fp1", "side": "SELL"},  # wrong side for a short stop
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq2", "side": "BUY"},   # wrong side for a long stop
+        ]
+        self.assertEqual(self._market(executor).live_positions(), [])
+        executor.query.assert_not_called()
+
+    def test_returns_both_a_long_and_a_short_together(self):
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fp1", "side": "BUY",
+             "stopPrice": "105", "origQty": "1"},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq2", "side": "SELL",
+             "stopPrice": "0.20", "origQty": "50"},
+        ]
+        executor.query.return_value = {"executedQty": "1", "cumQuote": "10", "time": 1}
+        positions = self._market(executor).live_positions()
+        self.assertEqual({p["side"] for p in positions}, {"short", "long"})
+
+
 class TaggedSubSystemTests(unittest.TestCase):
     """Two systems (e.g. "4" for 4H, "2" for 2H) share the SAME real
     Futures wallet -- each must only see and spend its own slice of
@@ -218,6 +354,20 @@ class AnalysisTests(unittest.TestCase):
             _, _, low = self._market().analysis(
                 position, feature_fn=lambda rows, c: [dict(r) for r in rows], interval=interval)
         self.assertEqual(low, 5)  # min of bars closed since entry
+
+    def test_a_long_position_uses_high_since_entry_not_low(self):
+        # Leveraged long (21 Sep 2026): trailing needs the running HIGH,
+        # same math as live_market.BinanceMarket.analysis's spot long --
+        # opposite of the default (side-less/short) low-tracking above.
+        interval = self.INTERVAL
+        rows = self._rows([999 * interval, 1000 * interval, 1001 * interval], [10, 20, 15])
+        position = {"symbol": "ADAUSDT", "side": "long", "open_time": 1000 * interval + 1}
+        with patch("crypto_v1.live_short_market.get", return_value={"serverTime": 1002 * interval}), \
+             patch("crypto_v1.live_short_market.candles", return_value=rows):
+            _, _, high = self._market().analysis(
+                position, feature_fn=lambda rows, c: [dict(r) for r in rows], interval=interval)
+        # _rows sets h = l+1, so bars closed since entry have h in {21, 16}.
+        self.assertEqual(high, 21)
 
 
 if __name__ == '__main__':

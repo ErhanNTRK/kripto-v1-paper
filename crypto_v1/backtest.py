@@ -104,7 +104,15 @@ class Engine:
                 buy = self.model.buy if self.model else buy_signal
                 stop = self.model.stop if self.model else initial_stop
                 if symbol not in s['positions'] and f and buy(f, btc, c):
-                    s['pending_buys'][symbol] = dict(stop=stop(f, c), score=f.get('signal_score', f['v']/f['volume_avg']))
+                    # breaks_up (v5 models only; absent -> 0) lets the live
+                    # leveraged-long path (21 Sep 2026) size leverage by
+                    # signal strength without this module importing
+                    # short_signal.leverage_for_signal, which would create
+                    # backtest -> short_signal -> research_v5 -> backtest,
+                    # a circular import (research_v5 imports metrics from
+                    # here). The live controller does that lookup instead.
+                    s['pending_buys'][symbol] = dict(stop=stop(f, c), score=f.get('signal_score', f['v']/f['volume_avg']),
+                                                     breaks_up=f.get('breaks_up', 0))
                     s['events'].append(dict(type='AL_ADAYI', time=t+self.interval, symbol=symbol,
                                             close=f['c'], simulated=True))
         s['last_t'] = t

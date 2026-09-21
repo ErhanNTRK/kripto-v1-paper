@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 from crypto_v1.binance_trade import OrderRejected, OrderStateUnknown
-from crypto_v1.live_short_monitor import short_exit_decision, execute_short_exit
+from crypto_v1.live_short_monitor import execute_long_futures_exit, short_exit_decision, execute_short_exit
 
 P = {"symbol": "SOLUSDT", "entry": 100, "stop_price": 105, "quantity": "0.1", "stop_client_id": "kv1fp7"}
 F = {"c": 90, "atr": 2, "short_exit": 150}
@@ -65,6 +65,39 @@ class ExecuteShortExitTests(unittest.TestCase):
         e.query.return_value = {"status": "FILLED"}
         self.assertEqual(execute_short_exit(P, "emergency_risk", e)["status"], "already_stopped")
         e.market_close_short.assert_not_called()
+
+
+P_LONG = {"symbol": "ADAUSDT", "entry": 0.24, "stop_price": 0.23, "quantity": "50",
+         "stop_client_id": "kv1fq7"}
+
+
+class ExecuteLongFuturesExitTests(unittest.TestCase):
+    """Mirrors ExecuteShortExitTests exactly, side-flipped: cancels the
+    long's protective stop (kv1fq) then market-closes via
+    market_close_long, never market_close_short."""
+
+    def test_cancel_stop_then_close_once(self):
+        e = Mock()
+        e.cancel.return_value = {"status": "CANCELED"}
+        e.query.side_effect = OrderRejected(-2013)
+        e.market_close_long.return_value = {"status": "FILLED"}
+        r = execute_long_futures_exit(P_LONG, "trailing_profit", e)
+        self.assertEqual(r["status"], "closed")
+        e.market_close_long.assert_called_once()
+        e.market_close_short.assert_not_called()
+
+    def test_ambiguous_cancel_is_queried(self):
+        e = Mock()
+        e.cancel.side_effect = OrderStateUnknown("unknown")
+        e.query.return_value = {"status": "FILLED"}
+        self.assertEqual(execute_long_futures_exit(P_LONG, "emergency_risk", e)["status"], "already_stopped")
+        e.market_close_long.assert_not_called()
+
+    def test_unconfirmed_cancel_state_raises(self):
+        e = Mock()
+        e.cancel.return_value = {"status": "PARTIALLY_FILLED"}
+        with self.assertRaises(RuntimeError):
+            execute_long_futures_exit(P_LONG, "trailing_profit", e)
 
 
 if __name__ == '__main__':

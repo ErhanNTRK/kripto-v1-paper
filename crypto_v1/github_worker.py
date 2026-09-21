@@ -13,6 +13,7 @@ from .risk import validate_config
 from .short_signal import detect_long_candidates, detect_short_candidates
 from .telegram import deliver_fresh_events, deliver_paper_events, deliver_once, deliver_short_events
 
+TWO_HOUR_LONG_LEVERAGE = 2
 
 def private_chat_id(token):
     """Resolve one private chat that already sent /start; fail closed if ambiguous."""
@@ -165,7 +166,13 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     long_candidates = detect_long_candidates(data, long_symbols, strategy_config)
     long_events = [dict(type="AL_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                    for c in long_candidates]
-    pending_buys = {c["symbol"]: dict(stop=c["stop"]) for c in long_candidates}
+    # Fixed 2x, not the strength-tiered 3x/5x used for 4H longs and for
+    # shorts on both timeframes: the 2H v5 walk-forward is NO_GO overall
+    # (3/5 windows, not 5/5 -- see ARASTIRMA.md-adjacent research run 21
+    # Sep 2026), so its edge isn't validated enough to lean on with the
+    # same leverage as the fully-validated (5/5 GO) 4H signal. User's
+    # explicit 21 Sep 2026 decision.
+    pending_buys = {c["symbol"]: dict(stop=c["stop"], leverage=TWO_HOUR_LONG_LEVERAGE) for c in long_candidates}
     _write_candidate_state(runtime / "state_2h.json", now_2h, long_events, pending_buys, "pending_buys")
     short_candidates = detect_short_candidates(data, long_symbols, strategy_config)
     short_events = [dict(type="SHORT_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
