@@ -34,6 +34,49 @@ class LiveMarketTests(unittest.TestCase):
         self.assertEqual(result["buys_today"], 0)
 
 
+class AnalysisTests(unittest.TestCase):
+    """analysis()'s trailing "high since entry" computation, regression-
+    covered 21 Sep 2026 after it crashed live for a real just-opened
+    position: "Spot exit scan failed: max() iterable argument is empty".
+    A bar's "t" is its OPEN time, but the candle used for entry CLOSES at
+    floor(buy_time, interval) -- its own open time is one interval
+    earlier -- so filtering for t >= that floor excludes the entry candle
+    itself and finds nothing until a further candle has closed."""
+
+    INTERVAL = 7_200_000  # 2h
+
+    @staticmethod
+    def _rows(times, highs):
+        return [dict(t=t, o=h, h=h, l=h - 1, c=h, v=1) for t, h in zip(times, highs)]
+
+    @staticmethod
+    def _market():
+        market = BinanceMarket.__new__(BinanceMarket)
+        market.strategy_config = {}
+        return market
+
+    def test_falls_back_to_the_entry_candles_own_high_when_nothing_closed_since(self):
+        interval = self.INTERVAL
+        now = 1000 * interval
+        rows = self._rows([now - 3 * interval, now - 2 * interval, now - interval], [10, 11, 12])
+        position = {"symbol": "ADAUSDT", "buy_time": now + 1}  # bought right after "now"'s boundary
+        with patch("crypto_v1.live_market.get", return_value={"serverTime": now}), \
+             patch("crypto_v1.live_market.candles", return_value=rows):
+            _, _, high = self._market().analysis(
+                position, feature_fn=lambda rows, c: [dict(r) for r in rows], interval=interval)
+        self.assertEqual(high, 12)  # the entry candle's own high, not a crash
+
+    def test_uses_the_real_post_entry_high_once_a_candle_has_closed_since(self):
+        interval = self.INTERVAL
+        rows = self._rows([999 * interval, 1000 * interval, 1001 * interval], [10, 20, 15])
+        position = {"symbol": "ADAUSDT", "buy_time": 1000 * interval + 1}
+        with patch("crypto_v1.live_market.get", return_value={"serverTime": 1002 * interval}), \
+             patch("crypto_v1.live_market.candles", return_value=rows):
+            _, _, high = self._market().analysis(
+                position, feature_fn=lambda rows, c: [dict(r) for r in rows], interval=interval)
+        self.assertEqual(high, 20)  # max of bars closed since entry (1000*interval, 1001*interval)
+
+
 class TaggedSubSystemTests(unittest.TestCase):
     """Two systems (e.g. "4" for 4H, "2" for 2H) share the SAME real Spot
     wallet -- each must only see and spend its OWN slice of capital,

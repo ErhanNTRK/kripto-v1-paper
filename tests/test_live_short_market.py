@@ -180,5 +180,45 @@ class FuturesPilotStatusCacheTests(unittest.TestCase):
         self.assertEqual(executor.all_orders.call_count, 2)
 
 
+class AnalysisTests(unittest.TestCase):
+    """Mirrors test_live_market.AnalysisTests for the short side's "low
+    since entry" computation -- same 21 Sep 2026 fix, same reasoning: a
+    bar's "t" is its OPEN time, but the candle used for entry CLOSES at
+    floor(open_time, interval), one interval after its own open."""
+
+    INTERVAL = 7_200_000  # 2h
+
+    @staticmethod
+    def _rows(times, lows):
+        return [dict(t=t, o=l, h=l + 1, l=l, c=l, v=1) for t, l in zip(times, lows)]
+
+    @staticmethod
+    def _market():
+        market = BinanceFuturesMarket.__new__(BinanceFuturesMarket)
+        market.strategy_config = {}
+        return market
+
+    def test_falls_back_to_the_entry_candles_own_low_when_nothing_closed_since(self):
+        interval = self.INTERVAL
+        now = 1000 * interval
+        rows = self._rows([now - 3 * interval, now - 2 * interval, now - interval], [10, 9, 8])
+        position = {"symbol": "BNBUSDT", "open_time": now + 1}
+        with patch("crypto_v1.live_short_market.get", return_value={"serverTime": now}), \
+             patch("crypto_v1.live_short_market.candles", return_value=rows):
+            _, _, low = self._market().analysis(
+                position, feature_fn=lambda rows, c: [dict(r) for r in rows], interval=interval)
+        self.assertEqual(low, 8)  # the entry candle's own low, not a crash
+
+    def test_uses_the_real_post_entry_low_once_a_candle_has_closed_since(self):
+        interval = self.INTERVAL
+        rows = self._rows([999 * interval, 1000 * interval, 1001 * interval], [10, 5, 7])
+        position = {"symbol": "BNBUSDT", "open_time": 1000 * interval + 1}
+        with patch("crypto_v1.live_short_market.get", return_value={"serverTime": 1002 * interval}), \
+             patch("crypto_v1.live_short_market.candles", return_value=rows):
+            _, _, low = self._market().analysis(
+                position, feature_fn=lambda rows, c: [dict(r) for r in rows], interval=interval)
+        self.assertEqual(low, 5)  # min of bars closed since entry
+
+
 if __name__ == '__main__':
     unittest.main()
