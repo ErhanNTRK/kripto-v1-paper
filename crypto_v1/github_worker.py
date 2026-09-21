@@ -11,7 +11,7 @@ from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
 from .short_signal import detect_long_candidates, detect_short_candidates
-from .telegram import deliver_fresh_events, deliver_paper_events, deliver_once, deliver_short_events
+from .telegram import deliver_paper_events, deliver_once
 
 TWO_HOUR_LONG_LEVERAGE = 2
 
@@ -235,12 +235,10 @@ def local_tick(runtime_dir):
     write_short_state(config, data_dir, runtime_dir, now)
     write_2h_signal_state(config, runtime_dir, now_2h)
     database = runtime_dir / "telegram.sqlite"
+    # AL_ADAYI/SHORT_ADAYI candidate notifications dropped (21 Sep 2026,
+    # user request): entries are fully automatic, so the candidate message
+    # told the user nothing actionable. Only real AL/SAT fills go out.
     deliver_paper_events(state_path, database)
-    deliver_short_events(runtime_dir / "short_state.json", database)
-    # 2H AL_ADAYI notifications dropped (21 Sep 2026, user request): entries
-    # are fully automatic, so the candidate message told the user nothing
-    # actionable. SHORT_ADAYI is untouched.
-    deliver_fresh_events(runtime_dir / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
     shutil.rmtree(data_dir, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
 
@@ -294,14 +292,11 @@ def main():
         database,
     )
     deliver_paper_events(state_path, database)
-    deliver_short_events(runtime / "short_state.json", database)
-    deliver_fresh_events(runtime / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
     # The once-a-day "Sanal portfoy / Gercek emir verilmedi" status heartbeat
     # was dropped per the user's 18 Sep 2026 request -- it read as confusing
-    # noise once live trading was actually turned on (real AL/SHORT_ADAYI
-    # alerts and real fill/exit confirmations already show the system is
-    # alive; format_daily_status is kept, unused, in case a heartbeat is
-    # wanted again later).
+    # noise once live trading was actually turned on (real fill/exit
+    # confirmations already show the system is alive; format_daily_status
+    # is kept, unused, in case a heartbeat is wanted again later).
     shutil.rmtree(data_dir, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
     print("Paper update completed")
