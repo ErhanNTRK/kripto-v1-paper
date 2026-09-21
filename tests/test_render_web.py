@@ -1,5 +1,6 @@
 import time
 import unittest
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 import crypto_v1.render_web as render_web
 from crypto_v1.binance_trade import OrderRejected
@@ -516,6 +517,44 @@ class TickConcurrencyAndStatusTests(unittest.TestCase):
             snapshot = render_web.status_snapshot([], now=lambda: 100.0)
         self.assertEqual(snapshot["rate_limit"], {"cooling_down": True, "cooldown_ends_in_s": 300,
                                                   "consecutive_hits": 2, "last_message": "HTTP 418: banned"})
+
+    def test_positions_snapshot_reports_real_quantity_stop_and_unrealized_pnl(self):
+        # Added 21 Sep 2026, the first day real fills existed: how much did
+        # it actually buy, where is the stop, what is it worth right now.
+        # entry/stop/quantity come from live_positions() (the exchange-
+        # native fill and protective stop), price from a fresh ticker read.
+        app = self._app("4")
+        app.market = MagicMock()
+        app.market.live_positions.return_value = [
+            {"symbol": "ADAUSDT", "entry": Decimal("0.50"), "stop_price": Decimal("0.47"),
+             "quantity": "100", "stop_client_id": "kv1s4x", "buy_time": 0}]
+        app.market.price.return_value = Decimal("0.55")
+        app.futures_market = None
+        snapshot = render_web.positions_snapshot([app])
+        position = snapshot["4"]["spot"][0]
+        self.assertEqual(position["symbol"], "ADAUSDT")
+        self.assertEqual(position["side"], "long")
+        self.assertEqual(Decimal(position["cost_usdt"]), Decimal("50"))
+        self.assertEqual(Decimal(position["current_value_usdt"]), Decimal("55"))
+        self.assertEqual(Decimal(position["unrealized_pnl_usdt"]), Decimal("5"))
+        self.assertEqual(position["unrealized_pnl_pct"], "10.00")
+        self.assertEqual(snapshot["4"]["futures"], [])
+
+    def test_positions_snapshot_flips_pnl_sign_for_a_short(self):
+        # A short is up when price FALLS below entry -- the opposite of a
+        # long -- and its stop sits ABOVE current price, not below.
+        app = self._app("2")
+        app.market = MagicMock(live_positions=MagicMock(return_value=[]))
+        app.futures_market = MagicMock()
+        app.futures_market.live_positions.return_value = [
+            {"symbol": "BNBUSDT", "entry": Decimal("800"), "stop_price": Decimal("840"),
+             "quantity": "1", "stop_client_id": "kv1fp2x", "open_time": 0}]
+        app.futures_market.price.return_value = Decimal("760")
+        snapshot = render_web.positions_snapshot([app])
+        position = snapshot["2"]["futures"][0]
+        self.assertEqual(position["side"], "short")
+        self.assertEqual(Decimal(position["unrealized_pnl_usdt"]), Decimal("40"))
+        self.assertEqual(position["unrealized_pnl_pct"], "5.00")
 
     def test_an_ip_ban_pauses_until_binances_own_ban_clock_not_just_the_cooldown(self):
         # HTTP 418's msg carries the exact end of the ban (epoch ms). A first
