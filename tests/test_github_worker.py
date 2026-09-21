@@ -113,9 +113,7 @@ class LocalTickTests(unittest.TestCase):
                  patch('crypto_v1.github_worker.tick') as mock_tick, \
                  patch('crypto_v1.github_worker.write_short_state') as mock_short, \
                  patch('crypto_v1.github_worker.write_2h_signal_state') as mock_2h, \
-                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0) as mock_dp, \
-                 patch('crypto_v1.github_worker.deliver_short_events', return_value=0) as mock_ds, \
-                 patch('crypto_v1.github_worker.deliver_fresh_events', return_value=0) as mock_df:
+                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0) as mock_dp:
                 local_tick(runtime)
         # The paper engine's own daily-loss/consecutive-loss halt must never
         # be allowed to silently starve the live candidate feed -- same
@@ -126,11 +124,9 @@ class LocalTickTests(unittest.TestCase):
         mock_tick.assert_called_once()
         mock_short.assert_called_once()
         mock_2h.assert_called_once()
+        # AL_ADAYI/SHORT_ADAYI candidate notifications were dropped
+        # (21 Sep 2026); only real AL/SAT fills go out via deliver_paper_events.
         mock_dp.assert_called_once()
-        mock_ds.assert_called_once()
-        # 2H AL_ADAYI notifications were dropped (21 Sep 2026); only the
-        # 2H SHORT_ADAYI call remains.
-        mock_df.assert_called_once()
 
     def test_retries_once_on_new_paper_state_required(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -142,9 +138,7 @@ class LocalTickTests(unittest.TestCase):
                       side_effect=[ValueError('new paper state required'), None]) as mock_tick, \
                  patch('crypto_v1.github_worker.write_short_state'), \
                  patch('crypto_v1.github_worker.write_2h_signal_state'), \
-                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0), \
-                 patch('crypto_v1.github_worker.deliver_short_events', return_value=0), \
-                 patch('crypto_v1.github_worker.deliver_fresh_events', return_value=0):
+                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0):
                 local_tick(runtime)
             self.assertEqual(mock_tick.call_count, 2)
             self.assertFalse((runtime / 'state-relaxed.json').exists())
