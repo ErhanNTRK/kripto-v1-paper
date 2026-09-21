@@ -78,6 +78,43 @@ def prepare_data(config, runtime, now):
     return data_dir
 
 
+def _write_candidate_state(path, now, events, pending, pending_key):
+    """Merge into the previous write instead of blindly overwriting, but
+    ONLY when it's still the same candle window (the previous write's own
+    "window" marker equals `now`) -- a new window still fully replaces, so
+    a candle that has moved on drops its old candidates as before.
+
+    Bug found live 21 Sep 2026, the first day local_tick ran every 5
+    minutes instead of GitHub Actions' rare cron: universe() re-ranks the
+    top_n symbols by 24h quoteVolume fresh on EVERY call, and in a fast-
+    moving market that ranking visibly shifts within minutes. A symbol
+    that qualified and got a real AL_ADAYI Telegram message on one pass
+    could drop out of the top_n list on the VERY NEXT pass (5 minutes
+    later, same candle, well inside signal_confirmation_expiry_minutes) --
+    and since write_2h_signal_state/write_short_state rebuilt `events`/
+    `pending_buys` from scratch each call, that symbol's entry vanished
+    from the published state entirely, so auto_enter never saw it again
+    even though the candidate was still fresh by every timing rule.
+    Merging by symbol (newest re-detection wins, an old one otherwise
+    kept) fixes this without weakening the real freshness check, which
+    still lives in live_signal.pending_candidates and is unaffected."""
+    previous = None
+    if path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = None
+    if previous and previous.get("state", {}).get("window") == now:
+        old_state = previous["state"]
+        merged_pending = dict(old_state.get(pending_key, {}))
+        merged_pending.update(pending)
+        by_symbol = {e["symbol"]: e for e in old_state.get("events", [])}
+        by_symbol.update({e["symbol"]: e for e in events})
+        events = [by_symbol[s] for s in sorted(by_symbol)]
+        pending = merged_pending
+    write_json(path, dict(state={"events": events, pending_key: pending, "window": now}))
+
+
 def write_short_state(short_config, data_dir, runtime, now):
     """Detect live short candidates from the same freshly-fetched 4h
     universe the long paper tick just used, and publish them the same way
@@ -94,7 +131,7 @@ def write_short_state(short_config, data_dir, runtime, now):
               for c in candidates]
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in candidates}
-    write_json(runtime / "short_state.json", dict(state=dict(events=events, pending_shorts=pending_shorts)))
+    _write_candidate_state(runtime / "short_state.json", now, events, pending_shorts, "pending_shorts")
     # Visible in the live process's own console (e.g. the PC's PowerShell
     # window) so "why did 0 candidates come out of N symbols" is
     # answerable by eye, not just by reading the strategy code -- added
@@ -129,13 +166,13 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     long_events = [dict(type="AL_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                    for c in long_candidates]
     pending_buys = {c["symbol"]: dict(stop=c["stop"]) for c in long_candidates}
-    write_json(runtime / "state_2h.json", dict(state=dict(events=long_events, pending_buys=pending_buys)))
+    _write_candidate_state(runtime / "state_2h.json", now_2h, long_events, pending_buys, "pending_buys")
     short_candidates = detect_short_candidates(data, long_symbols, strategy_config)
     short_events = [dict(type="SHORT_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                     for c in short_candidates]
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in short_candidates}
-    write_json(runtime / "short_state_2h.json", dict(state=dict(events=short_events, pending_shorts=pending_shorts)))
+    _write_candidate_state(runtime / "short_state_2h.json", now_2h, short_events, pending_shorts, "pending_shorts")
     print(f"2H tarama: {len(long_symbols)} sembol kontrol edildi, "
          f"{len(long_candidates)} AL_ADAYI, {len(short_candidates)} SHORT_ADAYI bulundu.", flush=True)
 
