@@ -14,6 +14,30 @@ class RenderWebTests(unittest.TestCase):
         self.assertEqual(app.tick.call_count, 3)
         self.assertEqual(sleeps, [5, 5, 5])
 
+    def test_periodic_scans_calls_detect_before_apps_each_iteration(self):
+        # detect (github_worker.local_tick bound to a runtime dir, 21 Sep
+        # 2026) must run BEFORE the apps tick, same thread/iteration, so
+        # entries always see what detection just wrote -- never a stale or
+        # concurrently-written file from a separate loop.
+        app = MagicMock()
+        order = []
+        detect = MagicMock(side_effect=lambda: order.append('detect'))
+        app.tick.side_effect = lambda: order.append('tick')
+        run_periodic_scans(app, interval_seconds=1, sleep=lambda s: None, max_iterations=2, detect=detect)
+        self.assertEqual(detect.call_count, 2)
+        self.assertEqual(order, ['detect', 'tick', 'detect', 'tick'])
+
+    def test_periodic_scans_survives_detect_failure_and_still_ticks_apps(self):
+        app = MagicMock()
+        detect = MagicMock(side_effect=Exception('boom'))
+        run_periodic_scans(app, interval_seconds=1, sleep=lambda s: None, max_iterations=2, detect=detect)
+        self.assertEqual(app.tick.call_count, 2)
+
+    def test_periodic_scans_without_detect_is_unaffected(self):
+        app = MagicMock()
+        run_periodic_scans(app, interval_seconds=1, sleep=lambda s: None, max_iterations=2)
+        self.assertEqual(app.tick.call_count, 2)
+
     def test_only_verified_private_chat_is_accepted(self):
         payload = {"update_id": 7, "message": {"text": " AL ", "chat": {"id": 123, "type": "private"}}}
         self.assertEqual(telegram_command(payload, "123"), {"update_id": 7, "command": "AL"})
