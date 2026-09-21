@@ -100,7 +100,12 @@ def deliver_paper_events(state_path, database):
     cutoff = saved['state']['started_at']
     sent = 0
     for event in saved['state']['events']:
-        if event['time'] < cutoff or event['type'] not in ('AL', 'SAT', 'AL_ADAYI'):
+        # AL_ADAYI is no longer sent (21 Sep 2026): entries are fully
+        # automatic, so the candidate notification told the user nothing
+        # actionable and was pure noise. The real ALDIM/SATTIM fill
+        # messages (sent directly by render_web.LiveApp, not through this
+        # function) are unaffected.
+        if event['time'] < cutoff or event['type'] not in ('AL', 'SAT'):
             continue
         key = hashlib.sha256((identity+json.dumps(event, sort_keys=True)).encode()).hexdigest()
         if deliver_once(key, format_event(event), database):

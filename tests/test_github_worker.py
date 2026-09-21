@@ -128,7 +128,9 @@ class LocalTickTests(unittest.TestCase):
         mock_2h.assert_called_once()
         mock_dp.assert_called_once()
         mock_ds.assert_called_once()
-        self.assertEqual(mock_df.call_count, 2)  # 2H long + 2H short
+        # 2H AL_ADAYI notifications were dropped (21 Sep 2026); only the
+        # 2H SHORT_ADAYI call remains.
+        mock_df.assert_called_once()
 
     def test_retries_once_on_new_paper_state_required(self):
         with tempfile.TemporaryDirectory() as tmp:
