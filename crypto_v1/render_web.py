@@ -457,6 +457,54 @@ def status_snapshot(apps=None, now=time.time):
     }
 
 
+def _position_view(position, current_price, side):
+    """entry/stop/quantity come straight off the exchange-native fill and
+    protective stop order (live_market.BinanceMarket.live_positions / the
+    futures mirror) -- never re-derived locally -- so this is exactly what
+    a person would see checking Binance directly, just pre-computed."""
+    entry = Decimal(str(position["entry"]))
+    stop = Decimal(str(position["stop_price"]))
+    qty = Decimal(str(position["quantity"]))
+    price = Decimal(str(current_price))
+    signed = (price - entry) if side == "long" else (entry - price)
+    stop_signed = (price - stop) if side == "long" else (stop - price)
+    return {
+        "symbol": position["symbol"],
+        "side": side,
+        "quantity": str(qty),
+        "entry_price": str(entry),
+        "current_price": str(price),
+        "stop_price": str(stop),
+        "cost_usdt": str(qty * entry),
+        "current_value_usdt": str(qty * price),
+        "unrealized_pnl_usdt": str(qty * signed),
+        "unrealized_pnl_pct": f"{(signed / entry * 100):.2f}" if entry else "0",
+        "distance_to_stop_pct": f"{(stop_signed / price * 100):.2f}" if price else "0",
+    }
+
+
+def positions_snapshot(apps=None):
+    """Read-only GET /positions: real quantity, entry, stop and live
+    unrealized P&L per open position, straight from Binance (a signed
+    account/order read, unlike /status which touches nothing). Added 21
+    Sep 2026 the first day real fills existed to answer -- once entries
+    stopped silently failing -- the very next question: how much did it
+    actually buy, where is the stop, what is it worth right now."""
+    apps = APPS if apps is None else apps
+    result = {}
+    for app in apps:
+        spot, futures = [], []
+        for position in app.market.live_positions():
+            price = app.market.price(position["symbol"])
+            spot.append(_position_view(position, price, "long"))
+        if app.futures_market:
+            for position in app.futures_market.live_positions():
+                price = app.futures_market.price(position["symbol"])
+                futures.append(_position_view(position, price, "short"))
+        result[app.tag or "default"] = {"spot": spot, "futures": futures}
+    return result
+
+
 def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None, detect=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs
     have been observed to lag by hours rather than minutes. Runs only
@@ -508,6 +556,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
         if self.path == "/status": self._json(200, status_snapshot()); return
+        if self.path == "/positions":
+            try:
+                self._json(200, positions_snapshot())
+            except Exception as exc:
+                print(f"/positions handler failed: {exc}", flush=True)
+                self._json(500, {"status": "failed_closed"})
+            return
         if self.path == "/scan":
             # tick() already catches its own auto-entry/exit errors per app
             # and per market side (see LiveApp.tick/scan) -- this try/except
