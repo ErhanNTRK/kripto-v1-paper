@@ -18,7 +18,7 @@ from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_SHORT, fetch_runtime_stat
                           fetch_runtime_state_short, isolate_candidate,
                           isolate_short_candidate, pending_candidates,
                           pending_short_candidates)
-from .research_v2 import FOUR_HOUR
+from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel, symmetric_features
 from .telegram import send_message
 
@@ -128,8 +128,20 @@ class LiveApp:
     ENTRIES_PER_TICK = 1
 
     def __init__(self, config, strategy_config, environment, short_config=None, short_strategy_config=None,
-                 tag="", state_url=RUNTIME_STATE, state_short_url=RUNTIME_STATE_SHORT):
+                 tag="", state_url=RUNTIME_STATE, state_short_url=RUNTIME_STATE_SHORT, interval=FOUR_HOUR):
         self.config, self.environment = config, environment
+        # scan()'s exit check must fetch/analyze candles on THIS system's
+        # own interval (2H for tag "2", 4H for tag "4"). Bug found live
+        # 21 Sep 2026: it was hardcoded to FOUR_HOUR for every app, so a
+        # position the 2H system opened -- often mid-way through the
+        # CURRENT, still-open 4H bar -- had its buy_time floored to that
+        # in-progress 4H bar's start, which has no closed candle yet:
+        # "Spot exit scan failed: max() iterable argument is empty",
+        # meaning the just-opened ADA/AAVE positions' trailing/trend exit
+        # was never actually being checked (the exchange-native protective
+        # stop was still resting regardless -- that part never depended on
+        # this loop).
+        self.interval = interval
         # `tag` segregates capital/positions between parallel systems
         # sharing one real Binance account (18 Sep 2026: 4H tag="4", 2H
         # tag="2") -- see live_market.summarize_pilot / _belongs_to_tag.
@@ -346,7 +358,7 @@ class LiveApp:
         results = []
         try:
             for position in self.market.live_positions():
-                feature, btc, high = self.market.analysis(position, ShortWindowLongModel.features, FOUR_HOUR)
+                feature, btc, high = self.market.analysis(position, ShortWindowLongModel.features, self.interval)
                 reason = exit_decision(position, feature, btc, high,
                                        {**self.config, **{"trailing_atr": self.market.strategy_config["trailing_atr"]}},
                                        sell_fn=ShortWindowLongModel.sell)
@@ -365,7 +377,7 @@ class LiveApp:
         if self.futures_market:
             try:
                 for position in self.futures_market.live_positions():
-                    feature, btc, low = self.futures_market.analysis(position, symmetric_features, FOUR_HOUR)
+                    feature, btc, low = self.futures_market.analysis(position, symmetric_features, self.interval)
                     reason = short_exit_decision(position, feature, btc, low, self.short_config)
                     if not reason: continue
                     if not execution_enabled(self.short_config, self.environment):
@@ -635,7 +647,8 @@ def main():
     APP = LiveApp(config, strategy, os.environ, short_config, strategy, tag="4",
                  state_url=local_url("state-relaxed.json"), state_short_url=local_url("short_state.json"))
     app_2h = LiveApp(config_2h, strategy, os.environ, short_config_2h, strategy, tag="2",
-                     state_url=local_url("state_2h.json"), state_short_url=local_url("short_state_2h.json"))
+                     state_url=local_url("state_2h.json"), state_short_url=local_url("short_state_2h.json"),
+                     interval=TWO_HOUR)
     APPS = [APP, app_2h]
     telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET"))
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
