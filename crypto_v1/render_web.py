@@ -235,9 +235,12 @@ class LiveApp:
                 break
             isolated = isolate_candidate(saved_long, candidate["symbol"])
             update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
-            result = self._approve_long(update_id, isolated, tag=self.tag)
+            result = self._attempt(candidate, "long",
+                                   lambda: self._approve_long(update_id, isolated, tag=self.tag))
             results.append({"symbol": candidate["symbol"], "side": "long", "result": result})
-            if result.get("status") != "rejected":
+            if result.get("status") == "failed" and _rate_limited():
+                break
+            if result.get("status") not in ("rejected", "failed"):
                 taken += 1
         taken = 0
         for candidate in short_pending:
@@ -245,11 +248,41 @@ class LiveApp:
                 break
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
             update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
-            result = self._approve_short(update_id, isolated, tag=self.tag)
+            result = self._attempt(candidate, "short",
+                                   lambda: self._approve_short(update_id, isolated, tag=self.tag))
             results.append({"symbol": candidate["symbol"], "side": "short", "result": result})
-            if result.get("status") != "rejected":
+            if result.get("status") == "failed" and _rate_limited():
+                break
+            if result.get("status") not in ("rejected", "failed"):
                 taken += 1
         return {"status": "auto_entry", "results": results}
+
+    def _attempt(self, candidate, side, approve):
+        """One candidate's failure must never abort the whole tick's entry
+        pass. Live-observed 21 Sep 2026: the first-ever real buy attempts
+        all died with -1111 (BAD_PRECISION), and because the exception
+        escaped auto_enter, the OTHER 16 pending candidates that tick were
+        never even tried and /status showed an empty results list with no
+        clue why. A failure is now recorded per candidate (visible in
+        /status) and the loop moves on; it does not count against
+        ENTRIES_PER_TICK since nothing was opened. A Telegram alert goes
+        out only for failures that are NOT a plain Binance rejection
+        (OrderRejected means nothing was placed) -- those are the rare,
+        possibly-unprotected cases a person should look at now."""
+        label = f"[{self.tag}] " if self.tag else ""
+        try:
+            return approve()
+        except Exception as exc:
+            print(f"Auto-entry failed for {candidate['symbol']} ({side}): {exc}", flush=True)
+            _note_if_rate_limited(exc)
+            if not isinstance(exc, OrderRejected):
+                try:
+                    send_message(f"{label}GIRIS HATASI: {candidate['symbol']} ({side}) | {exc} | "
+                                 "Pozisyon durumunu Binance'te kontrol edin.")
+                except Exception as send_exc:
+                    print(f"Telegram alert failed: {send_exc}", flush=True)
+            return {"status": "failed", "error": str(exc),
+                    "code": getattr(exc, "code", None)}
 
     def telegram(self, payload):
         """A single "AL" takes EVERY signal currently pending -- long and

@@ -213,6 +213,47 @@ class LiveAppAutoEntryTests(unittest.TestCase):
         self.assertEqual([r["symbol"] for r in result["results"]], ["BNBUSDT", "ETHUSDT"])
         self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
 
+    def test_a_failed_candidate_does_not_abort_the_rest_of_the_tick(self):
+        # Live 21 Sep 2026: every first-ever buy attempt raised -1111 out of
+        # _approve_long, the exception escaped auto_enter, and the other 16
+        # pending candidates that tick were never tried -- /status showed
+        # results: [] with no clue why. A failure is now a per-candidate
+        # result, does not spend the ENTRIES_PER_TICK budget, and the loop
+        # moves on to the next symbol.
+        app = self._app()
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.MANY_LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch("crypto_v1.render_web.send_message") as send, \
+             patch.object(LiveApp, "_approve_long",
+                          side_effect=[OrderRejected(-1111),
+                                       {"status": "bought_and_protected"},
+                                       {"status": "bought_and_protected"}]) as long_mock:
+            result = app.auto_enter()
+        self.assertEqual(long_mock.call_count, 1 + LiveApp.ENTRIES_PER_TICK)
+        self.assertEqual([r["symbol"] for r in result["results"]], ["BNBUSDT", "ETHUSDT"])
+        self.assertEqual(result["results"][0]["result"]["status"], "failed")
+        self.assertEqual(result["results"][0]["result"]["code"], -1111)
+        self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
+        # A plain Binance rejection (nothing placed) is not worth a Telegram alert.
+        send.assert_not_called()
+
+    def test_a_non_rejection_failure_alerts_telegram_and_continues(self):
+        app = self._app()
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.MANY_LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch("crypto_v1.render_web.send_message") as send, \
+             patch.object(LiveApp, "_approve_long",
+                          side_effect=[RuntimeError("buy was not fully filled; operator review required"),
+                                       {"status": "bought_and_protected"},
+                                       {"status": "bought_and_protected"}]) as long_mock:
+            result = app.auto_enter()
+        self.assertEqual(long_mock.call_count, 2)
+        self.assertEqual(result["results"][0]["result"]["status"], "failed")
+        send.assert_called_once()
+        self.assertIn("BNBUSDT", send.call_args.args[0])
+
     def test_auto_enter_is_a_noop_with_nothing_pending(self):
         app = self._app()
         with self._frozen_clock(), \

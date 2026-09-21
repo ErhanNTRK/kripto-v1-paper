@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from .binance_trade import OrderRejected, OrderStateUnknown
-from .live_execution import _down, execution_enabled, protective_order_plan
+from .live_execution import _down, execution_enabled, protective_order_plan, quote_amount
 from .live_limits import confirmed_signal, may_open
 from .live_signal import pending_candidates
 
@@ -50,7 +50,7 @@ def approve_buy(update_id, command, now_ms, saved, config, environment, market, 
     if not execution_enabled(config, environment):
         return {"status": "preview", "reason": "real_orders_disabled", "plan": plan}
     buy_id = f"kv1b{int(update_id)}"
-    quote = format(Decimal(plan["quantity"]) * price, "f")
+    quote = quote_amount(plan["quantity"], price, rules)
     buy = _known_or_place(executor, signal["symbol"], buy_id,
                           lambda: executor.market_buy(signal["symbol"], quote, buy_id))
     if buy.get("status") != "FILLED" or Decimal(str(buy.get("executedQty", "0"))) <= 0:

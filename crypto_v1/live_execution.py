@@ -40,7 +40,22 @@ def symbol_rules(exchange_symbol):
         "step_size": Decimal(lot["stepSize"]),
         "min_qty": Decimal(lot["minQty"]),
         "min_notional": Decimal(notional["minNotional"]),
+        # Max decimals Binance accepts for quoteOrderQty (8 for every USDT
+        # pair today; read from exchangeInfo rather than assumed).
+        "quote_precision": int(exchange_symbol.get("quoteAssetPrecision", 8)),
     }
+
+
+def quote_amount(quantity, price, rules):
+    """quoteOrderQty for a MARKET buy of `quantity` at `price`, rounded DOWN
+    to the symbol's quote precision. Live-observed 21 Sep 2026: quantity
+    (step-rounded, 8 decimals as Binance formats stepSize) times lastPrice
+    (8 decimals as Binance formats it) is a 16-decimal Decimal, and sending
+    it verbatim got every single auto-entry rejected with -1111
+    BAD_PRECISION -- the first real buy attempts the system ever made."""
+    precision = int(rules.get("quote_precision", 8))
+    return format(_down(Decimal(str(quantity)) * Decimal(str(price)),
+                        Decimal(1).scaleb(-precision)), "f")
 
 
 def futures_symbol_rules(exchange_symbol):

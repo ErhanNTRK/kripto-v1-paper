@@ -64,6 +64,26 @@ class LiveControllerTests(unittest.TestCase):
         executor.market_buy.assert_called_once()
         executor.protective_stop.assert_called_once()
 
+    def test_market_buy_quote_amount_fits_binance_quote_precision(self):
+        # Regression (21 Sep 2026): the first real buys ever attempted were
+        # all rejected with -1111 BAD_PRECISION because quantity (8-decimal
+        # stepSize format) times lastPrice (8-decimal format) was sent
+        # verbatim as a 16-decimal quoteOrderQty.
+        class EightDecimalMarket(Market):
+            def price(self, symbol): return Decimal("100.00000000")
+            def rules(self, symbol):
+                return dict(RULES, step_size=Decimal("0.00100000"), quote_precision=8)
+        executor = Mock()
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013)]
+        executor.market_buy.return_value = {"status": "FILLED", "executedQty": "0.068"}
+        executor.protective_stop.return_value = {"status": "NEW"}
+        result = approve_buy(7, "AL", 501000, SAVED, dict(C, live_trading_enabled=True),
+                             {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, EightDecimalMarket(), executor)
+        self.assertEqual(result["status"], "bought_and_protected")
+        quote = executor.market_buy.call_args.args[1]
+        self.assertGreaterEqual(Decimal(quote).as_tuple().exponent, -8)
+        self.assertEqual(Decimal(quote), Decimal("6.8"))
+
     def test_ambiguous_buy_is_queried_not_repeated(self):
         executor = Mock()
         executor.query.side_effect = [OrderRejected(-2013),
