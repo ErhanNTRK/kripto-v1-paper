@@ -4,7 +4,7 @@ from decimal import Decimal
 from crypto_v1.live_execution import (LIVE_PHRASE, execution_enabled,
                                        futures_symbol_rules, leveraged_order_plan,
                                        liquidation_is_safe, protective_order_plan,
-                                       symbol_rules)
+                                       quote_amount, symbol_rules)
 
 
 class LiveExecutionTests(unittest.TestCase):
@@ -26,6 +26,26 @@ class LiveExecutionTests(unittest.TestCase):
         self.assertEqual(plan["stop_price"], "19")
         self.assertEqual(plan["stop_limit_price"], "18.99")
         self.assertLessEqual(Decimal(plan["planned_loss_usdt"]), Decimal("0.34"))
+
+    def test_rules_carry_quote_precision_from_exchange_info_defaulting_to_8(self):
+        filters = [
+            {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+            {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+            {"filterType": "MIN_NOTIONAL", "minNotional": "5"},
+        ]
+        self.assertEqual(symbol_rules({"filters": filters, "quoteAssetPrecision": 6})["quote_precision"], 6)
+        self.assertEqual(symbol_rules({"filters": filters})["quote_precision"], 8)
+
+    def test_quote_amount_never_exceeds_the_quote_precision(self):
+        # Regression (21 Sep 2026): stepSize- and lastPrice-formatted
+        # Decimals both carry 8 decimals, so their product carried 16 and
+        # every real market buy was rejected with -1111 BAD_PRECISION.
+        quote = quote_amount("0.03800000", "261.40000000", {"quote_precision": 8})
+        self.assertEqual(quote, "9.93320000")
+        self.assertGreaterEqual(Decimal(quote).as_tuple().exponent, -8)
+        # Rounds DOWN, never up, and honors a smaller precision.
+        self.assertEqual(quote_amount("0.0123", "3.33333", {"quote_precision": 2}), "0.04")
+        self.assertEqual(Decimal(quote_amount("1", "5", {})), Decimal("5"))
 
     def test_minimum_order_fails_closed(self):
         rules = {"tick_size": Decimal("0.01"), "step_size": Decimal("0.001"),
