@@ -81,14 +81,16 @@ if (-not (Test-Path $LivePath)) { [IO.File]::WriteAllText($LivePath, "ENABLE_KRI
 # Uyku modunu kapat (fis takiliyken): bilgisayar uyursa bot durur.
 try { powercfg /change standby-timeout-ac 0 | Out-Null; powercfg /change hibernate-timeout-ac 0 | Out-Null } catch {}
 
-# Masaustu kisayolu: sonraki baslatmalar icin.
+# Masaustu kisayolu: sonraki baslatmalar icin. $PSCommandPath bos olabilir
+# (script "irm ... | iex" ile calistirilinca diskte bir dosya olmadigindan),
+# bu yuzden yerel bir kopya tutmak yerine .bat her seferinde en guncel
+# scripti GitHub'dan indirip calistirir.
 $Bat = Join-Path ([Environment]::GetFolderPath("Desktop")) "Kripto Bot.bat"
 @"
 @echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "$Base\baslat.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ErhanNTRK/kripto-v1-paper/main/deploy/windows-baslat.ps1 | iex"
 pause
 "@ | Set-Content -Path $Bat -Encoding ASCII
-Copy-Item $PSCommandPath (Join-Path $Base "baslat.ps1") -Force -ErrorAction SilentlyContinue
 
 function Read-Secret($file) {
     $p = Join-Path $Secrets $file
