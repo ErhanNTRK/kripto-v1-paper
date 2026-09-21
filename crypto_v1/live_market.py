@@ -199,5 +199,20 @@ class BinanceMarket:
         btc_rows = coin_rows if position["symbol"] == "BTCUSDT" else candles("BTCUSDT", start, now, interval)
         coin = feature_fn(coin_rows, self.strategy_config)[-1]
         btc = feature_fn(btc_rows, self.strategy_config)[-1]
-        high = max(row["h"] for row in coin_rows if row["t"] >= position["buy_time"] // interval * interval)
+        # Bug found live 21 Sep 2026, first day scan() ran minutes (not
+        # hours) after a fresh entry: a bar's "t" is its OPEN time, but a
+        # candle used for entry CLOSES at floor(buy_time, interval) -- its
+        # own open time is one interval EARLIER. Filtering coin_rows for
+        # t >= floor(buy_time, interval) therefore excludes the entry
+        # candle itself AND the still-forming next candle (not closed yet,
+        # so not even in coin_rows), leaving nothing until a further full
+        # candle closes -- max() on that empty result crashed every tick
+        # for a real just-opened position ("max() iterable argument is
+        # empty"). Falls back to the entry candle's own high (coin["h"],
+        # the last available closed bar) when nothing has closed since
+        # entry yet: a safe, momentarily-conservative reference that
+        # self-corrects the moment real post-entry data exists.
+        since_entry = [row["h"] for row in coin_rows
+                       if row["t"] >= position["buy_time"] // interval * interval]
+        high = max(since_entry) if since_entry else coin["h"]
         return coin, btc, high

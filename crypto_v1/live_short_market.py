@@ -159,5 +159,10 @@ class BinanceFuturesMarket:
         btc_rows = coin_rows if position["symbol"] == "BTCUSDT" else candles("BTCUSDT", start, now, interval)
         coin = feature_fn(coin_rows, self.strategy_config)[-1]
         btc = feature_fn(btc_rows, self.strategy_config)[-1]
-        low = min(row["l"] for row in coin_rows if row["t"] >= position["open_time"] // interval * interval)
+        # Mirrors live_market.BinanceMarket.analysis's fix (21 Sep 2026):
+        # see its comment for why filtering by t >= floor(open_time,
+        # interval) alone can be empty right after a fresh entry.
+        since_entry = [row["l"] for row in coin_rows
+                       if row["t"] >= position["open_time"] // interval * interval]
+        low = min(since_entry) if since_entry else coin["l"]
         return coin, btc, low
