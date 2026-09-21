@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from crypto_v1.github_worker import (prepare_data, private_chat_id,
+from crypto_v1.github_worker import (local_tick, prepare_data, private_chat_id,
                                      write_2h_signal_state, write_short_state)
 from crypto_v1.research_v2 import FOUR_HOUR, TWO_HOUR
 
@@ -93,6 +93,69 @@ class GithubWorkerTests(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=Response(payload)):
             with self.assertRaises(RuntimeError):
                 private_chat_id("secret")
+
+
+class LocalTickTests(unittest.TestCase):
+    """local_tick (21 Sep 2026) runs the same detection pipeline as main(),
+    but from render_web's own periodic loop instead of GitHub Actions'
+    schedule trigger -- live-observed to actually fire every 2-5 hours
+    despite being configured for every 15 minutes. These tests exercise
+    its own new orchestration only (relaxed-limits override, retry-once
+    behavior); prepare_data/write_short_state/write_2h_signal_state/
+    deliver_* already have their own coverage above and in
+    test_telegram.py, so they're mocked here."""
+
+    def test_relaxes_paper_limits_and_runs_the_full_pipeline_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            with patch('crypto_v1.github_worker.get', return_value={'serverTime': 800 * FOUR_HOUR}), \
+                 patch('crypto_v1.github_worker.prepare_data', return_value=runtime / 'data') as mock_prepare, \
+                 patch('crypto_v1.github_worker.tick') as mock_tick, \
+                 patch('crypto_v1.github_worker.write_short_state') as mock_short, \
+                 patch('crypto_v1.github_worker.write_2h_signal_state') as mock_2h, \
+                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0) as mock_dp, \
+                 patch('crypto_v1.github_worker.deliver_short_events', return_value=0) as mock_ds, \
+                 patch('crypto_v1.github_worker.deliver_fresh_events', return_value=0) as mock_df:
+                local_tick(runtime)
+        # The paper engine's own daily-loss/consecutive-loss halt must never
+        # be allowed to silently starve the live candidate feed -- same
+        # override paper.yml applies via PAPER_RELAX_LIMITS=1.
+        used_config = mock_prepare.call_args.args[0]
+        self.assertEqual(used_config['daily_loss_fraction'], 0.05)
+        self.assertEqual(used_config['max_consecutive_losses'], 100000)
+        mock_tick.assert_called_once()
+        mock_short.assert_called_once()
+        mock_2h.assert_called_once()
+        mock_dp.assert_called_once()
+        mock_ds.assert_called_once()
+        self.assertEqual(mock_df.call_count, 2)  # 2H long + 2H short
+
+    def test_retries_once_on_new_paper_state_required(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            (runtime / 'state-relaxed.json').write_text('{}', encoding='utf-8')
+            with patch('crypto_v1.github_worker.get', return_value={'serverTime': 800 * FOUR_HOUR}), \
+                 patch('crypto_v1.github_worker.prepare_data', return_value=runtime / 'data'), \
+                 patch('crypto_v1.github_worker.tick',
+                      side_effect=[ValueError('new paper state required'), None]) as mock_tick, \
+                 patch('crypto_v1.github_worker.write_short_state'), \
+                 patch('crypto_v1.github_worker.write_2h_signal_state'), \
+                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0), \
+                 patch('crypto_v1.github_worker.deliver_short_events', return_value=0), \
+                 patch('crypto_v1.github_worker.deliver_fresh_events', return_value=0):
+                local_tick(runtime)
+            self.assertEqual(mock_tick.call_count, 2)
+            self.assertFalse((runtime / 'state-relaxed.json').exists())
+
+    def test_reraises_unrelated_value_errors_without_retrying(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            with patch('crypto_v1.github_worker.get', return_value={'serverTime': 800 * FOUR_HOUR}), \
+                 patch('crypto_v1.github_worker.prepare_data', return_value=runtime / 'data'), \
+                 patch('crypto_v1.github_worker.tick', side_effect=ValueError('unrelated')) as mock_tick:
+                with self.assertRaises(ValueError):
+                    local_tick(runtime)
+            self.assertEqual(mock_tick.call_count, 1)
 
 
 class WriteShortStateTests(unittest.TestCase):

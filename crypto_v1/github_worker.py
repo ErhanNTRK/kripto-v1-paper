@@ -39,8 +39,14 @@ def private_chat_id(token):
 
 
 def write_json(path, value):
+    """Atomic (write to a sibling temp file, then rename) since local_tick
+    now runs in the same live process as LiveApp's own periodic tick, which
+    reads these same files from a different point in its loop -- a plain
+    write left a window where a concurrent read could see a truncated file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
 
 
 def prepare_data(config, runtime, now):
@@ -120,6 +126,65 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in short_candidates}
     write_json(runtime / "short_state_2h.json", dict(state=dict(events=short_events, pending_shorts=pending_shorts)))
+
+
+def local_tick(runtime_dir):
+    """Runs the same live-candidate-detection pipeline as main() (data fetch,
+    paper-engine tick for 4H AL_ADAYI, write_short_state, write_2h_signal_state,
+    Telegram delivery), but synchronously and repeatably from within the live
+    execution process itself (render_web.run_periodic_scans's own loop, see
+    its `detect` parameter) instead of GitHub Actions' schedule trigger.
+
+    Live-observed 21 Sep 2026: paper.yml is configured to run every 15
+    minutes but GitHub's free-tier scheduler was actually firing it every
+    2-5 HOURS -- a documented GitHub Actions limitation for high-frequency
+    cron, not something fixable by asking harder. A candidate detected
+    hours after its actual candle close is often already past
+    signal_confirmation_expiry_minutes, or still "fresh" by timestamp but
+    at a price that has drifted past max_entry_drift_fraction -- either way
+    it gets silently rejected, which likely explains at least some of the
+    historical "AL_ADAYI geldi, ALDIM gelmedi" reports independent of the
+    separate Binance IP-ban issue. run_periodic_scans's own docstring
+    already states this exact principle for entries/exits; this extends it
+    to detection, which is the piece that was still solely GitHub-Actions-
+    gated.
+
+    TELEGRAM_CHAT_ID is read directly from the environment here (already a
+    required secret for render_web to send anything at all) rather than
+    auto-resolved via private_chat_id -- that resolution mutates
+    os.environ globally and would race with the rest of the live process
+    reading the same variable."""
+    runtime_dir = Path(runtime_dir)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    config = validate_config(json.loads(Path("config_v5_long.json").read_text(encoding="utf-8")))
+    # Same override paper.yml applies via PAPER_RELAX_LIMITS=1: this paper
+    # engine only decides whether to flag a candidate, never risks real
+    # money itself (live_config.json/live_limits.py do that separately at
+    # the execution layer), so its own daily-loss/consecutive-loss halt
+    # must never be allowed to silently starve the live candidate feed.
+    config = dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000)
+    server_time = get("time")["serverTime"]
+    now = server_time // FOUR_HOUR * FOUR_HOUR
+    now_2h = server_time // TWO_HOUR * TWO_HOUR
+    data_dir = prepare_data(config, runtime_dir, now)
+    state_path = runtime_dir / "state-relaxed.json"
+    output = runtime_dir / "report"
+    try:
+        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+    except ValueError as error:
+        if "new paper state" not in str(error):
+            raise
+        state_path.unlink(missing_ok=True)
+        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+    write_short_state(config, data_dir, runtime_dir, now)
+    write_2h_signal_state(config, runtime_dir, now_2h)
+    database = runtime_dir / "telegram.sqlite"
+    deliver_paper_events(state_path, database)
+    deliver_short_events(runtime_dir / "short_state.json", database)
+    deliver_fresh_events(runtime_dir / "state_2h.json", database, "AL_ADAYI", "2h_long")
+    deliver_fresh_events(runtime_dir / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
+    shutil.rmtree(data_dir, ignore_errors=True)
+    shutil.rmtree(output, ignore_errors=True)
 
 
 def main():

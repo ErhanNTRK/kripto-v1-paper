@@ -1,8 +1,21 @@
 name: Kripto V1 Paper
 
 on:
-  schedule:
-    - cron: "2,17,32,47 * * * *"
+  # schedule disabled 21 Sep 2026: configured for every 15 minutes, but
+  # GitHub's free-tier scheduler was live-observed to actually fire it
+  # every 2-5 HOURS instead (a documented GitHub Actions limitation for
+  # high-frequency cron, not fixable from this file). A candidate detected
+  # that late is often already past signal_confirmation_expiry_minutes, or
+  # still "fresh" by timestamp but at a price that has drifted past
+  # max_entry_drift_fraction -- either way silently rejected, likely
+  # explaining some of the "AL_ADAYI geldi, ALDIM gelmedi" history
+  # independent of the separate Binance IP-ban issue. Candidate detection
+  # now runs locally instead, in the same reliable process/loop as
+  # entries/exits (see render_web.run_periodic_scans's `detect` param and
+  # github_worker.local_tick) -- this workflow would only add hours-stale,
+  # duplicate Telegram sends (its own separate telegram.sqlite never sees
+  # the live process's dedupe) on top of that. workflow_dispatch is kept
+  # as a manual backstop for whenever no live process is running at all.
   workflow_dispatch:
 
 permissions:

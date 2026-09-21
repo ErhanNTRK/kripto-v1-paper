@@ -6,6 +6,7 @@ from pathlib import Path
 from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
+from .github_worker import local_tick
 from .live_controller import approve_buy
 from .live_execution import execution_enabled
 from .live_market import BinanceMarket
@@ -13,8 +14,7 @@ from .live_monitor import execute_exit, exit_decision
 from .live_short_controller import approve_short
 from .live_short_market import BinanceFuturesMarket
 from .live_short_monitor import execute_short_exit, short_exit_decision
-from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_2H, RUNTIME_STATE_SHORT,
-                          RUNTIME_STATE_SHORT_2H, fetch_runtime_state,
+from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_SHORT, fetch_runtime_state,
                           fetch_runtime_state_short, isolate_candidate,
                           isolate_short_candidate, pending_candidates,
                           pending_short_candidates)
@@ -416,7 +416,7 @@ def status_snapshot(apps=None, now=time.time):
     }
 
 
-def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None):
+def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None, detect=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs
     have been observed to lag by hours rather than minutes. Runs only
     while this Render process is warm; a cold free-tier instance still
@@ -427,11 +427,29 @@ def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterati
     loop at all -- it is a real resting order on Binance regardless.
     `apps` is a list so the 4H and 2H systems (18 Sep 2026) both get
     ticked every cycle from one loop/thread; a single app's failure (try/
-    except per app, not around the whole list) never blocks the other."""
+    except per app, not around the whole list) never blocks the other.
+
+    `detect`, when given, is a zero-arg callable (github_worker.local_tick
+    bound to a runtime dir) run once per iteration BEFORE the apps tick --
+    candidate detection itself was still solely GitHub-Actions-gated even
+    after entries/exits moved to this loop (21 Sep 2026), which meant a
+    candidate could be discovered hours late and already past its freshness
+    window. Called from this same loop/thread, immediately before the apps
+    read the files it just wrote, so there is never a concurrent read of a
+    half-written file. A detect() failure is caught here, same as a single
+    app's tick failure, and never stops the apps from ticking -- entries/
+    exits on already-known candidates/positions must keep working even if
+    one detection pass failed (a transient network error fetching candles,
+    say)."""
     if not isinstance(apps, (list, tuple)):
         apps = [apps]
     iterations = 0
     while max_iterations is None or iterations < max_iterations:
+        if detect is not None:
+            try:
+                detect()
+            except Exception as exc:
+                print(f"Local candidate detection failed: {exc}", flush=True)
         for app in apps:
             try:
                 app.tick()
@@ -499,16 +517,36 @@ def main():
     # A/B test only ever varied the candle interval, not the strategy.
     config_2h = json.loads(Path("live_config_2h.json").read_text(encoding="utf-8"))
     short_config_2h = json.loads(Path("short_live_config_2h.json").read_text(encoding="utf-8"))
+    # Candidate detection now runs locally, in this same process's periodic
+    # loop (see run_periodic_scans's `detect` param / github_worker.
+    # local_tick), instead of solely depending on GitHub Actions' schedule
+    # trigger -- live-observed 21 Sep 2026 to actually fire every 2-5 HOURS
+    # despite being configured for every 15 minutes, a documented GitHub
+    # Actions limitation for high-frequency cron. State files therefore
+    # point at this process's own local runtime dir, not the GitHub raw
+    # URLs, so entries always act on what this process itself just
+    # detected -- never on a stale or hours-delayed remote fetch.
+    runtime_dir = Path(os.environ.get("CRYPTO_STORAGE", "runtime")).resolve()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    def local_url(name):
+        # Path.as_uri(), not an f-string: on Windows (the PC deployment
+        # target) an absolute path uses backslashes and no drive-letter
+        # slash ("C:\Users\..."), which urllib fails to parse as a URL --
+        # as_uri() produces the correct "file:///C:/Users/..." on Windows
+        # and "file:///..." on Linux/macOS alike.
+        return (runtime_dir / name).as_uri()
     global APP, APPS
-    APP = LiveApp(config, strategy, os.environ, short_config, strategy, tag="4")
+    APP = LiveApp(config, strategy, os.environ, short_config, strategy, tag="4",
+                 state_url=local_url("state-relaxed.json"), state_short_url=local_url("short_state.json"))
     app_2h = LiveApp(config_2h, strategy, os.environ, short_config_2h, strategy, tag="2",
-                     state_url=RUNTIME_STATE_2H, state_short_url=RUNTIME_STATE_SHORT_2H)
+                     state_url=local_url("state_2h.json"), state_short_url=local_url("short_state_2h.json"))
     APPS = [APP, app_2h]
     telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET"))
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ))
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
-    threading.Thread(target=run_periodic_scans, args=(APPS,), daemon=True).start()
+    threading.Thread(target=run_periodic_scans, args=(APPS,),
+                     kwargs={"detect": lambda: local_tick(runtime_dir)}, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
 
 if __name__ == "__main__": main()
