@@ -78,6 +78,43 @@ def prepare_data(config, runtime, now):
     return data_dir
 
 
+def _write_candidate_state(path, now, events, pending, pending_key):
+    """Merge into the previous write instead of blindly overwriting, but
+    ONLY when it's still the same candle window (the previous write's own
+    "window" marker equals `now`) -- a new window still fully replaces, so
+    a candle that has moved on drops its old candidates as before.
+
+    Bug found live 21 Sep 2026, the first day local_tick ran every 5
+    minutes instead of GitHub Actions' rare cron: universe() re-ranks the
+    top_n symbols by 24h quoteVolume fresh on EVERY call, and in a fast-
+    moving market that ranking visibly shifts within minutes. A symbol
+    that qualified and got a real AL_ADAYI Telegram message on one pass
+    could drop out of the top_n list on the VERY NEXT pass (5 minutes
+    later, same candle, well inside signal_confirmation_expiry_minutes) --
+    and since write_2h_signal_state/write_short_state rebuilt `events`/
+    `pending_buys` from scratch each call, that symbol's entry vanished
+    from the published state entirely, so auto_enter never saw it again
+    even though the candidate was still fresh by every timing rule.
+    Merging by symbol (newest re-detection wins, an old one otherwise
+    kept) fixes this without weakening the real freshness check, which
+    still lives in live_signal.pending_candidates and is unaffected."""
+    previous = None
+    if path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = None
+    if previous and previous.get("state", {}).get("window") == now:
+        old_state = previous["state"]
+        merged_pending = dict(old_state.get(pending_key, {}))
+        merged_pending.update(pending)
+        by_symbol = {e["symbol"]: e for e in old_state.get("events", [])}
+        by_symbol.update({e["symbol"]: e for e in events})
+        events = [by_symbol[s] for s in sorted(by_symbol)]
+        pending = merged_pending
+    write_json(path, dict(state={"events": events, pending_key: pending, "window": now}))
+
+
 def write_short_state(short_config, data_dir, runtime, now):
     """Detect live short candidates from the same freshly-fetched 4h
     universe the long paper tick just used, and publish them the same way
@@ -94,7 +131,7 @@ def write_short_state(short_config, data_dir, runtime, now):
               for c in candidates]
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in candidates}
-    write_json(runtime / "short_state.json", dict(state=dict(events=events, pending_shorts=pending_shorts)))
+    _write_candidate_state(runtime / "short_state.json", now, events, pending_shorts, "pending_shorts")
     # Visible in the live process's own console (e.g. the PC's PowerShell
     # window) so "why did 0 candidates come out of N symbols" is
     # answerable by eye, not just by reading the strategy code -- added
@@ -129,74 +166,15 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     long_events = [dict(type="AL_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                    for c in long_candidates]
     pending_buys = {c["symbol"]: dict(stop=c["stop"]) for c in long_candidates}
-    write_json(runtime / "state_2h.json", dict(state=dict(events=long_events, pending_buys=pending_buys)))
+    _write_candidate_state(runtime / "state_2h.json", now_2h, long_events, pending_buys, "pending_buys")
     short_candidates = detect_short_candidates(data, long_symbols, strategy_config)
     short_events = [dict(type="SHORT_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                     for c in short_candidates]
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in short_candidates}
-    write_json(runtime / "short_state_2h.json", dict(state=dict(events=short_events, pending_shorts=pending_shorts)))
+    _write_candidate_state(runtime / "short_state_2h.json", now_2h, short_events, pending_shorts, "pending_shorts")
     print(f"2H tarama: {len(long_symbols)} sembol kontrol edildi, "
          f"{len(long_candidates)} AL_ADAYI, {len(short_candidates)} SHORT_ADAYI bulundu.", flush=True)
-
-
-def local_tick(runtime_dir):
-    """Runs the same live-candidate-detection pipeline as main() (data fetch,
-    paper-engine tick for 4H AL_ADAYI, write_short_state, write_2h_signal_state,
-    Telegram delivery), but synchronously and repeatably from within the live
-    execution process itself (render_web.run_periodic_scans's own loop, see
-    its `detect` parameter) instead of GitHub Actions' schedule trigger.
-
-    Live-observed 21 Sep 2026: paper.yml is configured to run every 15
-    minutes but GitHub's free-tier scheduler was actually firing it every
-    2-5 HOURS -- a documented GitHub Actions limitation for high-frequency
-    cron, not something fixable by asking harder. A candidate detected
-    hours after its actual candle close is often already past
-    signal_confirmation_expiry_minutes, or still "fresh" by timestamp but
-    at a price that has drifted past max_entry_drift_fraction -- either way
-    it gets silently rejected, which likely explains at least some of the
-    historical "AL_ADAYI geldi, ALDIM gelmedi" reports independent of the
-    separate Binance IP-ban issue. run_periodic_scans's own docstring
-    already states this exact principle for entries/exits; this extends it
-    to detection, which is the piece that was still solely GitHub-Actions-
-    gated.
-
-    TELEGRAM_CHAT_ID is read directly from the environment here (already a
-    required secret for render_web to send anything at all) rather than
-    auto-resolved via private_chat_id -- that resolution mutates
-    os.environ globally and would race with the rest of the live process
-    reading the same variable."""
-    runtime_dir = Path(runtime_dir)
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    config = validate_config(json.loads(Path("config_v5_long.json").read_text(encoding="utf-8")))
-    # Same override paper.yml applies via PAPER_RELAX_LIMITS=1: this paper
-    # engine only decides whether to flag a candidate, never risks real
-    # money itself (live_config.json/live_limits.py do that separately at
-    # the execution layer), so its own daily-loss/consecutive-loss halt
-    # must never be allowed to silently starve the live candidate feed.
-    config = dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000)
-    server_time = get("time")["serverTime"]
-    now = server_time // FOUR_HOUR * FOUR_HOUR
-    now_2h = server_time // TWO_HOUR * TWO_HOUR
-    data_dir = prepare_data(config, runtime_dir, now)
-    state_path = runtime_dir / "state-relaxed.json"
-    output = runtime_dir / "report"
-    try:
-        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
-    except ValueError as error:
-        if "new paper state" not in str(error):
-            raise
-        state_path.unlink(missing_ok=True)
-        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
-    write_short_state(config, data_dir, runtime_dir, now)
-    write_2h_signal_state(config, runtime_dir, now_2h)
-    database = runtime_dir / "telegram.sqlite"
-    deliver_paper_events(state_path, database)
-    deliver_short_events(runtime_dir / "short_state.json", database)
-    deliver_fresh_events(runtime_dir / "state_2h.json", database, "AL_ADAYI", "2h_long")
-    deliver_fresh_events(runtime_dir / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
-    shutil.rmtree(data_dir, ignore_errors=True)
-    shutil.rmtree(output, ignore_errors=True)
 
 
 def local_tick(runtime_dir):

@@ -275,3 +275,51 @@ class WriteTwoHourSignalStateTests(unittest.TestCase):
                 write_2h_signal_state(self.C, Path(tmp), now_2h=now)
         start = mock_candles.call_args_list[0].args[1]
         self.assertGreaterEqual((now - start) / TWO_HOUR, 200)
+
+    def test_symbol_dropping_out_of_the_reranked_universe_keeps_its_candidate(self):
+        # Bug found live 21 Sep 2026: universe() re-ranks by 24h volume
+        # fresh on every local_tick call (every 5 minutes once live, not
+        # GitHub Actions' old rare cron), and a symbol can fall out of
+        # top_n between two calls still evaluating the SAME candle
+        # (now_2h unchanged) in a fast-moving market. Before
+        # _write_candidate_state's merge, the second call's full overwrite
+        # silently erased the first call's already-Telegram-announced,
+        # still-fresh AL_ADAYI candidate before auto_enter ever saw it.
+        n = 260
+        rows = self._rows(n, 2.0)
+        now_2h = n * TWO_HOUR
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            with patch('crypto_v1.github_worker.universe', return_value=['ALTUSDT', 'BETAUSDT']), \
+                 patch('crypto_v1.github_worker.candles', side_effect=lambda symbol, start, end, interval: rows), \
+                 patch('crypto_v1.github_worker.validate', side_effect=lambda rows, interval: rows):
+                write_2h_signal_state(self.C, runtime, now_2h=now_2h)
+            first = json.loads((runtime / "state_2h.json").read_text(encoding="utf-8"))
+            self.assertIn("ALTUSDT", first["state"]["pending_buys"])
+            self.assertIn("BETAUSDT", first["state"]["pending_buys"])
+            # Same window, but ALTUSDT fell out of the freshly re-ranked
+            # top_n this time -- it must still be in the merged output.
+            with patch('crypto_v1.github_worker.universe', return_value=['BETAUSDT']), \
+                 patch('crypto_v1.github_worker.candles', side_effect=lambda symbol, start, end, interval: rows), \
+                 patch('crypto_v1.github_worker.validate', side_effect=lambda rows, interval: rows):
+                write_2h_signal_state(self.C, runtime, now_2h=now_2h)
+            second = json.loads((runtime / "state_2h.json").read_text(encoding="utf-8"))
+        self.assertIn("ALTUSDT", second["state"]["pending_buys"])
+        self.assertIn("BETAUSDT", second["state"]["pending_buys"])
+
+    def test_a_new_window_still_fully_replaces_old_candidates(self):
+        n = 260
+        rows = self._rows(n, 2.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            with patch('crypto_v1.github_worker.universe', return_value=['ALTUSDT']), \
+                 patch('crypto_v1.github_worker.candles', side_effect=lambda symbol, start, end, interval: rows), \
+                 patch('crypto_v1.github_worker.validate', side_effect=lambda rows, interval: rows):
+                write_2h_signal_state(self.C, runtime, now_2h=n * TWO_HOUR)
+            with patch('crypto_v1.github_worker.universe', return_value=['BETAUSDT']), \
+                 patch('crypto_v1.github_worker.candles', side_effect=lambda symbol, start, end, interval: rows), \
+                 patch('crypto_v1.github_worker.validate', side_effect=lambda rows, interval: rows):
+                write_2h_signal_state(self.C, runtime, now_2h=(n + 1) * TWO_HOUR)
+            saved = json.loads((runtime / "state_2h.json").read_text(encoding="utf-8"))
+        self.assertNotIn("ALTUSDT", saved["state"]["pending_buys"])
+        self.assertIn("BETAUSDT", saved["state"]["pending_buys"])
