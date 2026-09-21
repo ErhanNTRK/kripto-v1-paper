@@ -95,6 +95,16 @@ def write_short_state(short_config, data_dir, runtime, now):
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in candidates}
     write_json(runtime / "short_state.json", dict(state=dict(events=events, pending_shorts=pending_shorts)))
+    # Visible in the live process's own console (e.g. the PC's PowerShell
+    # window) so "why did 0 candidates come out of N symbols" is
+    # answerable by eye, not just by reading the strategy code -- added
+    # 21 Sep 2026 after the user questioned whether a scan of a visibly
+    # rising market finding nothing meant the logic was wrong (it wasn't:
+    # this is a fresh-breakout detector, not an "is it up today" filter,
+    # and min_breaks/btc_filter were already at their loosest validated
+    # setting -- see research_v5.btc_up_ok's docstring).
+    print(f"4H short tarama: {len(symbols)} sembol kontrol edildi, {len(candidates)} SHORT_ADAYI bulundu.",
+         flush=True)
 
 
 def write_2h_signal_state(strategy_config, runtime, now_2h):
@@ -126,6 +136,8 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
                       for c in short_candidates}
     write_json(runtime / "short_state_2h.json", dict(state=dict(events=short_events, pending_shorts=pending_shorts)))
+    print(f"2H tarama: {len(long_symbols)} sembol kontrol edildi, "
+         f"{len(long_candidates)} AL_ADAYI, {len(short_candidates)} SHORT_ADAYI bulundu.", flush=True)
 
 
 def local_tick(runtime_dir):
