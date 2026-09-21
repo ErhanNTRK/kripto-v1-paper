@@ -325,6 +325,32 @@ class ScanResilienceTests(unittest.TestCase):
         self.assertEqual(result["status"], "scanned")
         self.assertTrue(any(r.get("status") == "scan_failed" and r.get("side") == "futures" for r in result["results"]))
 
+    def test_scan_analyzes_positions_on_the_apps_own_interval_not_always_4h(self):
+        # Bug found live 21 Sep 2026: scan() hardcoded FOUR_HOUR for every
+        # app's exit check. A position the 2H system opened mid-way through
+        # the current, still-open 4H bar had its buy_time floored to that
+        # bar's start, which has no closed 4H candle yet -- analysis()'s
+        # max() over an empty filtered list crashed with "Spot exit scan
+        # failed: max() iterable argument is empty", silently skipping the
+        # exit check for a real, just-opened position every single tick.
+        app = LiveApp(self.CONFIG, {"trailing_atr": 2.0}, {"TELEGRAM_CHAT_ID": "123"},
+                     short_config=self.CONFIG, short_strategy_config={}, tag="2", interval=render_web.TWO_HOUR)
+        position = {"symbol": "ADAUSDT", "buy_time": 0}
+        short_position = {"symbol": "BNBUSDT", "open_time": 0}
+        app.market.live_positions = MagicMock(return_value=[position])
+        app.market.analysis = MagicMock(return_value=({"c": 1}, {"c": 1}, 1))
+        app.futures_market.live_positions = MagicMock(return_value=[short_position])
+        app.futures_market.analysis = MagicMock(return_value=({"c": 1}, {"c": 1}, 1))
+        with patch("crypto_v1.render_web.exit_decision", return_value=None), \
+             patch("crypto_v1.render_web.short_exit_decision", return_value=None):
+            app.scan()
+        self.assertEqual(app.market.analysis.call_args.args[2], render_web.TWO_HOUR)
+        self.assertEqual(app.futures_market.analysis.call_args.args[2], render_web.TWO_HOUR)
+
+    def test_default_interval_stays_four_hour_for_the_4h_app(self):
+        app = self._app()
+        self.assertEqual(app.interval, render_web.FOUR_HOUR)
+
 
 class RateLimitCircuitBreakerTests(unittest.TestCase):
     """A real Binance -1003 (too many requests) must stop this process from
