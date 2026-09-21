@@ -112,8 +112,7 @@ class LocalTickTests(unittest.TestCase):
                  patch('crypto_v1.github_worker.prepare_data', return_value=runtime / 'data') as mock_prepare, \
                  patch('crypto_v1.github_worker.tick') as mock_tick, \
                  patch('crypto_v1.github_worker.write_short_state') as mock_short, \
-                 patch('crypto_v1.github_worker.write_2h_signal_state') as mock_2h, \
-                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0) as mock_dp:
+                 patch('crypto_v1.github_worker.write_2h_signal_state') as mock_2h:
                 local_tick(runtime)
         # The paper engine's own daily-loss/consecutive-loss halt must never
         # be allowed to silently starve the live candidate feed -- same
@@ -124,9 +123,12 @@ class LocalTickTests(unittest.TestCase):
         mock_tick.assert_called_once()
         mock_short.assert_called_once()
         mock_2h.assert_called_once()
-        # AL_ADAYI/SHORT_ADAYI candidate notifications were dropped
-        # (21 Sep 2026); only real AL/SAT fills go out via deliver_paper_events.
-        mock_dp.assert_called_once()
+        # All candidate/fill Telegram notifications from this shadow paper
+        # state were dropped (21 Sep 2026): AL_ADAYI/SHORT_ADAYI told the
+        # user nothing actionable, and this state's own AL/SAT events are
+        # a closed-candle SIMULATION that never places a real order --
+        # format_event gave no visual hint of that, so it looked identical
+        # to a real fill and confused the user into expecting a real buy.
 
     def test_retries_once_on_new_paper_state_required(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -137,8 +139,7 @@ class LocalTickTests(unittest.TestCase):
                  patch('crypto_v1.github_worker.tick',
                       side_effect=[ValueError('new paper state required'), None]) as mock_tick, \
                  patch('crypto_v1.github_worker.write_short_state'), \
-                 patch('crypto_v1.github_worker.write_2h_signal_state'), \
-                 patch('crypto_v1.github_worker.deliver_paper_events', return_value=0):
+                 patch('crypto_v1.github_worker.write_2h_signal_state'):
                 local_tick(runtime)
             self.assertEqual(mock_tick.call_count, 2)
             self.assertFalse((runtime / 'state-relaxed.json').exists())
