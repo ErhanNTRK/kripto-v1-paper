@@ -11,7 +11,7 @@ from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel
 from .risk import validate_config
 from .short_signal import detect_long_candidates, detect_short_candidates
-from .telegram import deliver_paper_events, deliver_once
+from .telegram import deliver_once
 
 TWO_HOUR_LONG_LEVERAGE = 2
 
@@ -234,11 +234,6 @@ def local_tick(runtime_dir):
         tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
     write_short_state(config, data_dir, runtime_dir, now)
     write_2h_signal_state(config, runtime_dir, now_2h)
-    database = runtime_dir / "telegram.sqlite"
-    # AL_ADAYI/SHORT_ADAYI candidate notifications dropped (21 Sep 2026,
-    # user request): entries are fully automatic, so the candidate message
-    # told the user nothing actionable. Only real AL/SAT fills go out.
-    deliver_paper_events(state_path, database)
     shutil.rmtree(data_dir, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
 
@@ -291,7 +286,15 @@ def main():
         "Kripto V1 baglantisi kuruldu. Sanal takip basladi. Gercek emir verilmiyor.",
         database,
     )
-    deliver_paper_events(state_path, database)
+    # AL/SAT paper-engine "fill" messages dropped too (21 Sep 2026, user
+    # report): this whole state is a closed-candle SHADOW simulation
+    # (paper_trading.tick, real_order_enabled=False, every event stamped
+    # simulated=True) that never places a real order -- format_event's
+    # generic "KRIPTO V1 | SINYAL / AL - SYMBOL" rendering gave no hint of
+    # that, so a simulated buy looked identical to a real one and the user
+    # reasonably expected a real purchase to follow. The shadow engine
+    # itself (tick() above) still runs for ongoing model validation; only
+    # its Telegram delivery is removed.
     # The once-a-day "Sanal portfoy / Gercek emir verilmedi" status heartbeat
     # was dropped per the user's 18 Sep 2026 request -- it read as confusing
     # noise once live trading was actually turned on (real fill/exit
