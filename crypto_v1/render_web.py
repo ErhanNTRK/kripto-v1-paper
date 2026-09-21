@@ -272,6 +272,14 @@ class LiveApp:
         label = f"[{self.tag}] " if self.tag else ""
         try:
             return approve()
+        except ValueError as exc:
+            # Planning refused before any order existed (below Binance
+            # minimums, plan exceeds risk budget, free capital too small):
+            # a rejection like any other, not an incident -- and with a
+            # dozen pending candidates it would otherwise re-alert every
+            # single tick once the pilot capital is used up.
+            print(f"Auto-entry not planned for {candidate['symbol']} ({side}): {exc}", flush=True)
+            return {"status": "rejected", "reason": str(exc)}
         except Exception as exc:
             print(f"Auto-entry failed for {candidate['symbol']} ({side}): {exc}", flush=True)
             _note_if_rate_limited(exc)

@@ -238,6 +238,26 @@ class LiveAppAutoEntryTests(unittest.TestCase):
         # A plain Binance rejection (nothing placed) is not worth a Telegram alert.
         send.assert_not_called()
 
+    def test_a_planning_value_error_is_a_plain_rejection_without_alert(self):
+        # protective_order_plan raises ValueError when the pilot capital can
+        # no longer fund a minimum-size order; with many candidates pending
+        # that recurs every tick and must not page anyone or spend budget.
+        app = self._app()
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.MANY_LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch("crypto_v1.render_web.send_message") as send, \
+             patch.object(LiveApp, "_approve_long",
+                          side_effect=[ValueError("order is below Binance minimums"),
+                                       {"status": "bought_and_protected"},
+                                       {"status": "bought_and_protected"}]) as long_mock:
+            result = app.auto_enter()
+        self.assertEqual(long_mock.call_count, 2)
+        self.assertEqual(result["results"][0]["result"],
+                         {"status": "rejected", "reason": "order is below Binance minimums"})
+        self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
+        send.assert_not_called()
+
     def test_a_non_rejection_failure_alerts_telegram_and_continues(self):
         app = self._app()
         with self._frozen_clock(), \
