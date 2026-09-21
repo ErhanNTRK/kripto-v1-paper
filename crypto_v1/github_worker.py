@@ -237,7 +237,9 @@ def local_tick(runtime_dir):
     database = runtime_dir / "telegram.sqlite"
     deliver_paper_events(state_path, database)
     deliver_short_events(runtime_dir / "short_state.json", database)
-    deliver_fresh_events(runtime_dir / "state_2h.json", database, "AL_ADAYI", "2h_long")
+    # 2H AL_ADAYI notifications dropped (21 Sep 2026, user request): entries
+    # are fully automatic, so the candidate message told the user nothing
+    # actionable. SHORT_ADAYI is untouched.
     deliver_fresh_events(runtime_dir / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
     shutil.rmtree(data_dir, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
@@ -293,7 +295,6 @@ def main():
     )
     deliver_paper_events(state_path, database)
     deliver_short_events(runtime / "short_state.json", database)
-    deliver_fresh_events(runtime / "state_2h.json", database, "AL_ADAYI", "2h_long")
     deliver_fresh_events(runtime / "short_state_2h.json", database, "SHORT_ADAYI", "2h_short")
     # The once-a-day "Sanal portfoy / Gercek emir verilmedi" status heartbeat
     # was dropped per the user's 18 Sep 2026 request -- it read as confusing

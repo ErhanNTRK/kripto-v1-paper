@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from crypto_v1.telegram import (deliver_fresh_events, deliver_once, deliver_short_events,
-                                format_daily_status, format_event, send_message)
+from crypto_v1.telegram import (deliver_fresh_events, deliver_once, deliver_paper_events,
+                                deliver_short_events, format_daily_status, format_event, send_message)
 
 
 class TelegramTests(unittest.TestCase):
@@ -111,6 +111,27 @@ class TelegramTests(unittest.TestCase):
             sent = deliver_fresh_events(path, db, 'AL_ADAYI', '2h_long')
             self.assertEqual(sent, 1)
             send.assert_called_once()
+
+    def test_deliver_paper_events_no_longer_sends_al_adayi(self):
+        # Regression (21 Sep 2026, user request): entries are fully
+        # automatic, so the AL_ADAYI candidate message told the user
+        # nothing actionable and was pure notification spam. Real AL/SAT
+        # fills from this same state file must still go out.
+        saved = {'state': {'started_at': 0, 'events': [
+            {'type': 'AL_ADAYI', 'time': 1000, 'symbol': 'SOLUSDT', 'close': 100},
+            {'type': 'AL', 'time': 1000, 'symbol': 'SOLUSDT', 'price': 100},
+        ]}}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('crypto_v1.telegram.send_message', return_value=1) as send, \
+             patch('crypto_v1.telegram.time.sleep'):
+            path = Path(folder) / 'state.json'
+            path.write_text(json.dumps(saved), encoding='utf-8')
+            db = Path(folder) / 'delivery.sqlite'
+            sent = deliver_paper_events(path, db)
+            self.assertEqual(sent, 1)
+            send.assert_called_once()
+            self.assertIn('SOLUSDT', send.call_args.args[0])
+            self.assertNotIn('ADAYI', send.call_args.args[0])
 
     def test_deliver_fresh_events_keys_are_namespaced_by_tag(self):
         # An identical event delivered under two different tags (e.g. the
