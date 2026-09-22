@@ -148,8 +148,18 @@ class BinanceFuturesMarket:
         raise RuntimeError("no mark price available for " + symbol)
 
     def rules(self, symbol):
+        """Futures exchangeInfo ignores a `symbol` param (unlike Spot's) and
+        returns every contract, BTCUSDT first. Bug found 22 Sep 2026: taking
+        symbols[0] sized every Futures entry with BTCUSDT's 0.10 tick and 50
+        USDT min notional, so a sub-dollar coin's stop rounded down toward 0
+        ("rounded plan exceeds risk budget") and pricier coins fell under the
+        minimum ("order is below Binance minimums") -- every candidate was
+        silently rejected at planning time, no order ever sent."""
         info = self.executor.request("GET", {"symbol": symbol}, path="/fapi/v1/exchangeInfo")
-        return futures_symbol_rules(info["symbols"][0])
+        for entry in info["symbols"]:
+            if entry.get("symbol") == symbol:
+                return futures_symbol_rules(entry)
+        raise ValueError("symbol is not listed on Binance Futures: " + symbol)
 
     def _raw_pilot_data(self):
         with BinanceFuturesMarket._raw_pilot_lock:

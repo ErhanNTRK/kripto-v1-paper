@@ -393,5 +393,36 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(high, 21)
 
 
+def _contract(symbol, tick, step, notional):
+    return {"symbol": symbol, "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": tick},
+        {"filterType": "LOT_SIZE", "stepSize": step, "minQty": step},
+        {"filterType": "MIN_NOTIONAL", "notional": notional}]}
+
+
+class RulesTests(unittest.TestCase):
+    """Futures exchangeInfo ignores `symbol` and returns every contract,
+    BTCUSDT first (live-verified 22 Sep 2026): rules() must pick the
+    requested symbol, not symbols[0]."""
+
+    def _market(self, symbols):
+        executor = MagicMock()
+        executor.request.return_value = {"symbols": symbols}
+        return BinanceFuturesMarket(C, {}, {}, executor)
+
+    def test_picks_the_requested_symbol_not_the_first(self):
+        market = self._market([_contract("BTCUSDT", "0.10", "0.001", "50"),
+                               _contract("ADAUSDT", "0.00010", "1", "5")])
+        rules = market.rules("ADAUSDT")
+        self.assertEqual(rules["tick_size"], Decimal("0.0001"))
+        self.assertEqual(rules["step_size"], Decimal("1"))
+        self.assertEqual(rules["min_notional"], Decimal("5"))
+
+    def test_unlisted_symbol_is_a_planning_rejection(self):
+        market = self._market([_contract("BTCUSDT", "0.10", "0.001", "50")])
+        with self.assertRaises(ValueError):
+            market.rules("ADAUSDT")
+
+
 if __name__ == '__main__':
     unittest.main()
