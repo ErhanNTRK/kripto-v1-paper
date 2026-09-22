@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from .binance_trade import OrderRejected, OrderStateUnknown
 from .live_controller import _known_or_place
-from .live_execution import execution_enabled, leveraged_order_plan, liquidation_is_safe
+from .live_execution import execution_enabled, leveraged_order_plan, liquidation_is_safe, safe_leverage
 from .live_limits import confirmed_signal, may_open
 from .live_signal import pending_candidates, pending_short_candidates
 from .short_signal import leverage_for_signal
@@ -43,9 +43,15 @@ def approve_short(update_id, command, now_ms, saved, config, environment, market
     drift = Decimal(str(config.get("max_entry_drift_fraction", 0.005)))
     if price >= stop or price < close * (Decimal("1") - drift):
         return {"status": "rejected", "reason": "entry_price_moved"}
+    # The signal's 3x/5x tier is a ceiling; the stop distance decides (see
+    # live_execution.safe_leverage). Under the price-based 20% buffer the
+    # short side is the tighter one: a typical 5-9% stop lands on 2x.
+    leverage = safe_leverage("short", price, stop, signal["leverage"], LIQUIDATION_SAFETY_BUFFER)
+    if leverage is None:
+        return {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"}
     rules = market.rules(signal["symbol"])
     plan = leveraged_order_plan("short", price, stop, status["free_usdt"],
-                                config["risk_per_trade_usdt"], signal["leverage"], rules)
+                                config["risk_per_trade_usdt"], leverage, rules)
     plan.update(symbol=signal["symbol"], entry_price=format(price, "f"))
     if not execution_enabled(config, environment):
         return {"status": "preview", "reason": "real_orders_disabled", "plan": plan}
@@ -117,9 +123,12 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
     drift = Decimal(str(config.get("max_entry_drift_fraction", 0.005)))
     if price <= stop or price > close * (Decimal("1") + drift):
         return {"status": "rejected", "reason": "entry_price_moved"}
-    leverage = signal.get("leverage")
+    tier = signal.get("leverage")
+    if tier is None:
+        tier = leverage_for_signal(signal.get("breaks_up", 0))
+    leverage = safe_leverage("long", price, stop, tier, LIQUIDATION_SAFETY_BUFFER)
     if leverage is None:
-        leverage = leverage_for_signal(signal.get("breaks_up", 0))
+        return {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"}
     rules = market.rules(signal["symbol"])
     plan = leveraged_order_plan("long", price, stop, status["free_usdt"],
                                 config["risk_per_trade_usdt"], leverage, rules)

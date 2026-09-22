@@ -2,8 +2,9 @@ import unittest
 from decimal import Decimal
 
 from crypto_v1.live_execution import (LIVE_PHRASE, execution_enabled,
-                                       futures_symbol_rules, leveraged_order_plan,
-                                       liquidation_is_safe, protective_order_plan,
+                                       estimated_liquidation_price, futures_symbol_rules,
+                                       leveraged_order_plan, liquidation_is_safe,
+                                       protective_order_plan, safe_leverage,
                                        quote_amount, symbol_rules)
 
 
@@ -137,6 +138,44 @@ class LeveragedOrderPlanTests(unittest.TestCase):
         # silently opens a position bigger than the allocated capital.
         with self.assertRaises(ValueError):
             leveraged_order_plan("long", "20000", "19999", "0.01", "1000", 1, self.RULES)
+
+
+class SafeLeverageTests(unittest.TestCase):
+    """The 3x/5x tier is a ceiling; the stop distance decides. Numbers use
+    the module's assumed 2.5% maintenance margin and the 20% buffer."""
+
+    def test_estimated_liquidation_price_long_and_short(self):
+        self.assertAlmostEqual(float(estimated_liquidation_price("long", "100", 4)), 76.923, places=3)
+        self.assertAlmostEqual(float(estimated_liquidation_price("short", "100", 4)), 121.951, places=3)
+
+    def test_a_typical_7pct_long_stop_lands_on_4x_not_the_5x_tier(self):
+        self.assertEqual(safe_leverage("long", "100", "93", 5), 4)
+
+    def test_a_wider_long_stop_steps_down_to_3x(self):
+        self.assertEqual(safe_leverage("long", "100", "91.5", 5), 3)
+
+    def test_the_tier_stays_a_ceiling_when_the_stop_would_allow_more(self):
+        self.assertEqual(safe_leverage("long", "100", "95", 3), 3)
+
+    def test_a_very_tight_long_stop_reaches_the_full_5x_tier(self):
+        self.assertEqual(safe_leverage("long", "100", "99", 5), 5)
+
+    def test_short_side_is_tighter_under_the_price_based_buffer(self):
+        # The buffer is 20% of the LIQUIDATION price; a short's liquidation
+        # sits above entry, so the same 20% eats far more of the room.
+        self.assertEqual(safe_leverage("short", "100", "105", 5), 2)
+        self.assertEqual(safe_leverage("short", "100", "103", 5), 3)
+
+    def test_a_stop_too_wide_for_even_2x_returns_none(self):
+        self.assertIsNone(safe_leverage("long", "100", "50", 5))
+        self.assertIsNone(safe_leverage("short", "100", "125", 5))
+
+    def test_the_chosen_leverage_passes_the_real_check_and_the_next_one_up_fails(self):
+        for side, entry, stop in (("long", "100", "93"), ("long", "100", "91.5"),
+                                  ("short", "100", "105"), ("short", "100", "103")):
+            chosen = safe_leverage(side, entry, stop, 5)
+            self.assertTrue(liquidation_is_safe(side, stop, estimated_liquidation_price(side, entry, chosen)))
+            self.assertFalse(liquidation_is_safe(side, stop, estimated_liquidation_price(side, entry, chosen + 1)))
 
 
 class LiquidationIsSafeTests(unittest.TestCase):
