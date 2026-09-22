@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
 
-from .data import INTERVAL, candles, get, universe
+from .data import INTERVAL, candles, futures_get, get, universe
 from .live_execution import futures_symbol_rules
 
 
@@ -141,11 +141,16 @@ class BinanceFuturesMarket:
         self._now = now
 
     def price(self, symbol):
-        risk = self.executor.position_risk(symbol)
-        for entry in risk:
-            if entry.get("symbol") == symbol:
-                return Decimal(str(entry["markPrice"]))
-        raise RuntimeError("no mark price available for " + symbol)
+        """Public mark price. positionRisk (used until 22 Sep 2026) reports
+        markPrice "0" for a symbol with NO open position -- i.e. for every
+        new entry -- so approve_long_leveraged saw price 0 <= stop and
+        rejected every candidate as "entry_price_moved" (live: BCH/HBAR at
+        19:00, prices actually well inside the allowed band). Never let a
+        zero through: a missing price must fail the attempt, not size it."""
+        mark = Decimal(str(futures_get("premiumIndex", {"symbol": symbol}).get("markPrice", "0")))
+        if mark <= 0:
+            raise RuntimeError("no mark price available for " + symbol)
+        return mark
 
     def rules(self, symbol):
         """Futures exchangeInfo ignores a `symbol` param (unlike Spot's) and

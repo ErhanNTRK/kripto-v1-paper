@@ -424,5 +424,25 @@ class RulesTests(unittest.TestCase):
             market.rules("ADAUSDT")
 
 
+class PriceTests(unittest.TestCase):
+    """positionRisk reports markPrice "0" when no position is open (live 22
+    Sep 2026), which rejected every new entry: price must come from the
+    public premiumIndex, and a zero must never be returned."""
+
+    def test_uses_the_public_mark_price_not_position_risk(self):
+        executor = MagicMock()
+        with patch("crypto_v1.live_short_market.futures_get",
+                   return_value={"symbol": "BCHUSDT", "markPrice": "326.37"}) as get:
+            price = BinanceFuturesMarket(C, {}, {}, executor).price("BCHUSDT")
+        self.assertEqual(price, Decimal("326.37"))
+        get.assert_called_once_with("premiumIndex", {"symbol": "BCHUSDT"})
+        executor.position_risk.assert_not_called()
+
+    def test_zero_mark_price_fails_instead_of_sizing(self):
+        with patch("crypto_v1.live_short_market.futures_get", return_value={"markPrice": "0"}):
+            with self.assertRaises(RuntimeError):
+                BinanceFuturesMarket(C, {}, {}, MagicMock()).price("BCHUSDT")
+
+
 if __name__ == '__main__':
     unittest.main()
