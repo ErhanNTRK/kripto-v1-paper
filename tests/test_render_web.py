@@ -811,3 +811,44 @@ class TickConcurrencyAndStatusTests(unittest.TestCase):
             render_web._consecutive_rate_limit_hits = 0
             render_web._note_if_rate_limited(OrderRejected(-1003, "Too much request weight used", 429))
             self.assertEqual(render_web._rate_limited_until, now + 300)
+
+
+class EntryHistoryTests(unittest.TestCase):
+    """22 Sep 2026: /status kept only the latest tick, so a candidate's
+    rejections (seen for ~30 minutes) were overwritten by empty ticks before
+    anyone looked. Attempts are now kept, and an unexpected rejection is
+    reported once per candidate on Telegram."""
+    NOW_S = 1_000_000
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "telegram_buy_command": "AL"}
+    SAVED = {"state": {"pending_buys": {"SOLUSDT": {"stop": 90}},
+                       "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000,
+                                   "symbol": "SOLUSDT", "close": 100}]}}
+
+    def _run(self, app, result):
+        with patch("crypto_v1.render_web.time.time", return_value=self.NOW_S),              patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.SAVED),              patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={"state": {}}),              patch("crypto_v1.render_web.send_message") as send,              patch.object(LiveApp, "_approve_long", return_value=result):
+            app.auto_enter()
+        return send
+
+    def _app(self):
+        return LiveApp(self.CONFIG, {}, {"TELEGRAM_CHAT_ID": "123"},
+                       short_config=self.CONFIG, short_strategy_config={}, tag="2")
+
+    def test_attempts_are_kept_across_ticks(self):
+        app = self._app()
+        self._run(app, {"status": "rejected", "reason": "entry_price_moved"})
+        self._run(app, {"status": "rejected", "reason": "entry_price_moved"})
+        self.assertEqual(len(app.recent_entries), 2)
+        self.assertEqual(app.recent_entries[0]["symbol"], "SOLUSDT")
+        self.assertEqual(app.recent_entries[0]["reason"], "entry_price_moved")
+
+    def test_unexpected_rejection_is_reported_once_per_candidate(self):
+        app = self._app()
+        first = self._run(app, {"status": "rejected", "reason": "entry_price_moved"})
+        second = self._run(app, {"status": "rejected", "reason": "entry_price_moved"})
+        first.assert_called_once()
+        self.assertIn("SOLUSDT", first.call_args.args[0])
+        second.assert_not_called()
+
+    def test_capacity_rejection_stays_quiet(self):
+        send = self._run(self._app(), {"status": "rejected", "reason": "position_limit"})
+        send.assert_not_called()

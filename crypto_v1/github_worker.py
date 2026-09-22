@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .backtest import report
@@ -13,7 +14,28 @@ from .risk import validate_config
 from .short_signal import detect_long_candidates, detect_short_candidates
 from .telegram import deliver_once
 
-TWO_HOUR_LONG_LEVERAGE = 2
+# A CEILING, not a fixed value: approve_long_leveraged passes it through
+# live_execution.safe_leverage, which lowers it whenever the stop is too
+# wide for 4x to stay clear of liquidation. Raised from a fixed 2x on 22
+# Sep 2026 (user's explicit decision, together with 2H risk_per_trade_usdt
+# 2.0 -> 1.5) so a 34.55 USDT 2H slice can hold 3-4 positions at once
+# instead of one position tying up ~20-30 USDT of margin.
+TWO_HOUR_LONG_LEVERAGE = 4
+
+# Parallel public-kline fetches. Sequential fetching measured ~3s per
+# symbol from the PC (22 Sep 2026), so one detection pass over ~50 symbols
+# on both 4H and 2H took ~10 minutes -- a third of the 30-minute entry
+# window gone before auto_enter ever saw a candidate. klines costs weight
+# 2, so 8 in flight is far below Binance's 6000/min IP budget.
+FETCH_WORKERS = 8
+
+
+def fetch_all(symbols, start, end, interval):
+    symbols = sorted(set(symbols))
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+        rows = list(pool.map(lambda s: validate(candles(s, start, end, interval), interval), symbols))
+    return dict(zip(symbols, rows))
+
 
 def private_chat_id(token):
     """Resolve one private chat that already sent /start; fail closed if ambiguous."""
@@ -86,8 +108,7 @@ def prepare_data(config, runtime, now):
     # paper state despite real market moves (18 Sep 2026).
     start = now - 45 * 24 * 60 * 60 * 1000
     data_dir.mkdir(parents=True, exist_ok=True)
-    for symbol in sorted(set(symbols + ["BTCUSDT"])):
-        rows = validate(candles(symbol, start, now, FOUR_HOUR), FOUR_HOUR)
+    for symbol, rows in fetch_all(symbols + ["BTCUSDT"], start, now, FOUR_HOUR).items():
         write_json(data_dir / f"{symbol}.json", rows)
     run_manifest = dict(manifest, start=start, end=now, captured_at=now)
     write_json(data_dir / "manifest.json", run_manifest)
@@ -161,7 +182,8 @@ def write_short_state(short_config, data_dir, runtime, now):
     candidates = detect_short_candidates(data, symbols, short_config)
     events = [dict(type="SHORT_ADAYI", time=now, symbol=c["symbol"], close=c["close"])
               for c in candidates]
-    pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
+    pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"],
+                                         breaks_down=c["breaks_down"], score=c["volume_ratio"])
                       for c in candidates}
     _write_candidate_state(runtime / "short_state.json", now, events, pending_shorts, "pending_shorts")
     # Visible in the live process's own console (e.g. the PC's PowerShell
@@ -191,28 +213,36 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     # BTC EMA200 floor) -- at 2H bars this is a much wider margin (~540
     # bars vs the ~200 needed), which is fine, just extra cache-warm data.
     start = now_2h - 45 * 24 * 60 * 60 * 1000
-    data = {}
-    for symbol in sorted(set(symbols + ["BTCUSDT"])):
-        data[symbol] = validate(candles(symbol, start, now_2h, TWO_HOUR), TWO_HOUR)
+    data = fetch_all(symbols + ["BTCUSDT"], start, now_2h, TWO_HOUR)
     long_candidates = detect_long_candidates(data, long_symbols, strategy_config)
     long_events = [dict(type="AL_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                    for c in long_candidates]
-    # Fixed 2x, not the strength-tiered 3x/5x used for 4H longs and for
-    # shorts on both timeframes: the 2H v5 walk-forward is NO_GO overall
-    # (3/5 windows, not 5/5 -- see ARASTIRMA.md-adjacent research run 21
-    # Sep 2026), so its edge isn't validated enough to lean on with the
-    # same leverage as the fully-validated (5/5 GO) 4H signal. User's
-    # explicit 21 Sep 2026 decision.
-    pending_buys = {c["symbol"]: dict(stop=c["stop"], leverage=TWO_HOUR_LONG_LEVERAGE) for c in long_candidates}
+    # TWO_HOUR_LONG_LEVERAGE ceiling, not the strength-tiered 3x/5x: the 2H
+    # v5 walk-forward is NO_GO overall (3/5 windows, not 5/5), so 2H is sized
+    # for more, smaller positions (see the constant) rather than bigger ones.
+    pending_buys = {c["symbol"]: dict(stop=c["stop"], leverage=TWO_HOUR_LONG_LEVERAGE,
+                                     breaks_up=c["breaks_up"], score=c["volume_ratio"])
+                    for c in long_candidates}
     _write_candidate_state(runtime / "state_2h.json", now_2h, long_events, pending_buys, "pending_buys")
     short_candidates = detect_short_candidates(data, long_symbols, strategy_config)
     short_events = [dict(type="SHORT_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                     for c in short_candidates]
-    pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"])
+    pending_shorts = {c["symbol"]: dict(stop=c["stop"], leverage=c["leverage"],
+                                         breaks_down=c["breaks_down"], score=c["volume_ratio"])
                       for c in short_candidates}
     _write_candidate_state(runtime / "short_state_2h.json", now_2h, short_events, pending_shorts, "pending_shorts")
     print(f"2H tarama: {len(long_symbols)} sembol kontrol edildi, "
          f"{len(long_candidates)} AL_ADAYI, {len(short_candidates)} SHORT_ADAYI bulundu.", flush=True)
+
+
+# {runtime dir: {"4h": window, "2h": window}} last fully detected, per
+# process. Signals are evaluated on CLOSED candles only, so re-running a
+# window that already completed can find nothing new -- it only re-spent
+# ~100 kline requests and minutes of wall-clock every loop (22 Sep 2026),
+# which kept the loop too slow to retry entries often inside their 30-min
+# window. A window is marked only after its pass finishes, so a failed pass
+# (network error, rate limit) is simply retried on the next loop.
+_DETECTED_WINDOWS = {}
 
 
 def local_tick(runtime_dir):
@@ -253,21 +283,26 @@ def local_tick(runtime_dir):
     server_time = get("time")["serverTime"]
     now = server_time // FOUR_HOUR * FOUR_HOUR
     now_2h = server_time // TWO_HOUR * TWO_HOUR
-    data_dir = prepare_data(config, runtime_dir, now)
-    state_path = runtime_dir / "state-relaxed.json"
-    output = runtime_dir / "report"
-    try:
-        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
-    except ValueError as error:
-        if "new paper state" not in str(error):
-            raise
-        state_path.unlink(missing_ok=True)
-        tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
-    _print_4h_long_scan(data_dir, state_path, now)
-    write_short_state(config, data_dir, runtime_dir, now)
-    write_2h_signal_state(config, runtime_dir, now_2h)
-    shutil.rmtree(data_dir, ignore_errors=True)
-    shutil.rmtree(output, ignore_errors=True)
+    done = _DETECTED_WINDOWS.setdefault(str(runtime_dir.resolve()), {})
+    if done.get("4h") != now:
+        data_dir = prepare_data(config, runtime_dir, now)
+        state_path = runtime_dir / "state-relaxed.json"
+        output = runtime_dir / "report"
+        try:
+            tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+        except ValueError as error:
+            if "new paper state" not in str(error):
+                raise
+            state_path.unlink(missing_ok=True)
+            tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+        _print_4h_long_scan(data_dir, state_path, now)
+        write_short_state(config, data_dir, runtime_dir, now)
+        shutil.rmtree(data_dir, ignore_errors=True)
+        shutil.rmtree(output, ignore_errors=True)
+        done["4h"] = now
+    if done.get("2h") != now_2h:
+        write_2h_signal_state(config, runtime_dir, now_2h)
+        done["2h"] = now_2h
 
 
 def main():

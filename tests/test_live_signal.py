@@ -141,3 +141,34 @@ class IsolateShortCandidateTests(unittest.TestCase):
         result = pending_short_candidates(isolated, 1500, {"signal_confirmation_expiry_minutes": 10})
         self.assertEqual(result, [{"symbol": "ETHUSDT", "created_at": 1000,
                                    "close": 2500.0, "stop": 2600.0, "leverage": 5}])
+
+
+class StrongestFirstTests(unittest.TestCase):
+    """22 Sep 2026: auto_enter takes candidates in list order until margin
+    or position capacity runs out, so the list must be strongest first
+    (breakout count, then volume ratio), not alphabetical."""
+
+    def _saved(self, pending, key="pending_buys", kind="AL_ADAYI"):
+        return {"state": {key: pending, "events": [
+            {"type": kind, "time": 1000, "symbol": s, "close": 100} for s in pending]}}
+
+    def test_long_candidates_are_ordered_by_breaks_then_volume(self):
+        saved = self._saved({
+            "AAAUSDT": {"stop": 90, "breaks_up": 1, "score": 5.0},
+            "BBBUSDT": {"stop": 90, "breaks_up": 3, "score": 1.0},
+            "CCCUSDT": {"stop": 90, "breaks_up": 3, "score": 2.0}})
+        result = pending_candidates(saved, 2000, {"signal_confirmation_expiry_minutes": 10})
+        self.assertEqual([c["symbol"] for c in result], ["CCCUSDT", "BBBUSDT", "AAAUSDT"])
+
+    def test_short_candidates_are_ordered_by_strength(self):
+        saved = self._saved({
+            "AAAUSDT": {"stop": 110, "leverage": 3, "breaks_down": 1, "score": 1.0},
+            "BBBUSDT": {"stop": 110, "leverage": 3, "breaks_down": 2, "score": 1.0}},
+            key="pending_shorts", kind="SHORT_ADAYI")
+        result = pending_short_candidates(saved, 2000, {"signal_confirmation_expiry_minutes": 10})
+        self.assertEqual([c["symbol"] for c in result], ["BBBUSDT", "AAAUSDT"])
+
+    def test_equal_or_missing_strength_falls_back_to_symbol_order(self):
+        saved = self._saved({"BBBUSDT": {"stop": 90}, "AAAUSDT": {"stop": 90}})
+        result = pending_candidates(saved, 2000, {"signal_confirmation_expiry_minutes": 10})
+        self.assertEqual([c["symbol"] for c in result], ["AAAUSDT", "BBBUSDT"])

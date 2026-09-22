@@ -390,3 +390,45 @@ class WriteTwoHourSignalStateTests(unittest.TestCase):
             saved = json.loads((runtime / "state_2h.json").read_text(encoding="utf-8"))
         self.assertNotIn("ALTUSDT", saved["state"]["pending_buys"])
         self.assertIn("BETAUSDT", saved["state"]["pending_buys"])
+
+
+class LocalTickWindowGateTests(unittest.TestCase):
+    """22 Sep 2026: signals only use closed candles, so each 4H/2H window is
+    detected once; re-running it every loop cost minutes of fetching and
+    left too few entry attempts inside the 30-minute window."""
+
+    def _patches(self, server_time, fail_2h=False):
+        return (patch('crypto_v1.github_worker.get', return_value={'serverTime': server_time}),
+                patch('crypto_v1.github_worker.prepare_data'),
+                patch('crypto_v1.github_worker.tick'),
+                patch('crypto_v1.github_worker._print_4h_long_scan'),
+                patch('crypto_v1.github_worker.write_short_state'),
+                patch('crypto_v1.github_worker.write_2h_signal_state',
+                      side_effect=RuntimeError('network') if fail_2h else None))
+
+    def _call(self, runtime, server_time, fail_2h=False):
+        p = self._patches(server_time, fail_2h)
+        with p[0], p[1] as prep, p[2], p[3], p[4], p[5] as two:
+            try:
+                local_tick(runtime)
+            except RuntimeError:
+                pass
+        return prep.call_count, two.call_count
+
+    def test_same_window_is_detected_only_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = 800 * FOUR_HOUR
+            self.assertEqual(self._call(Path(tmp), now), (1, 1))
+            self.assertEqual(self._call(Path(tmp), now + 60_000), (0, 0))
+
+    def test_new_2h_window_reruns_only_the_2h_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = 800 * FOUR_HOUR
+            self._call(Path(tmp), now)
+            self.assertEqual(self._call(Path(tmp), now + TWO_HOUR), (0, 1))
+
+    def test_a_failed_pass_is_retried_on_the_next_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = 800 * FOUR_HOUR
+            self._call(Path(tmp), now, fail_2h=True)
+            self.assertEqual(self._call(Path(tmp), now), (0, 1))

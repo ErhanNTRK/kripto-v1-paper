@@ -43,6 +43,8 @@ def _detect(agg_data, symbols, config, entry_fn, breaks_key):
             "stop": stop,
             breaks_key: breaks,
             "leverage": leverage_for_signal(breaks),
+            # Ranking input only (github_worker.signal_score); never gates entry.
+            "volume_ratio": row["v"] / row["volume_avg"] if row.get("volume_avg") else 0,
         })
     return candidates
 

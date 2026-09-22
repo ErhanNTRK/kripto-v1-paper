@@ -1,5 +1,5 @@
 """Render Frankfurt health probe and authenticated Telegram command webhook."""
-import hmac, json, os, re, threading, time
+import collections, hmac, json, os, re, threading, time
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -157,6 +157,13 @@ class LiveApp:
         # /status serves so a rejected entry can be diagnosed without Render
         # log access and without spending any Binance weight.
         self.last_tick = None
+        # last_tick alone only ever showed the LATEST tick, and a candidate
+        # lives ~30 minutes: on 22 Sep 2026 every attempt had been rejected
+        # ("rounded plan exceeds risk budget") and overwritten by empty
+        # ticks long before anyone looked. /status now keeps the recent
+        # attempts themselves.
+        self.recent_entries = collections.deque(maxlen=30)
+        self._notified_skips = set()
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor, tag=tag)
         self.short_config = short_config
@@ -274,6 +281,7 @@ class LiveApp:
             update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
             result = self._attempt(candidate, "long",
                                    lambda: self._approve_long(update_id, isolated, tag=self.tag))
+            self._record(candidate, "long", result)
             results.append({"symbol": candidate["symbol"], "side": "long", "result": result})
             if result.get("status") == "failed" and _rate_limited():
                 break
@@ -287,12 +295,53 @@ class LiveApp:
             update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
             result = self._attempt(candidate, "short",
                                    lambda: self._approve_short(update_id, isolated, tag=self.tag))
+            self._record(candidate, "short", result)
             results.append({"symbol": candidate["symbol"], "side": "short", "result": result})
             if result.get("status") == "failed" and _rate_limited():
                 break
             if result.get("status") not in ("rejected", "failed"):
                 taken += 1
         return {"status": "auto_entry", "results": results}
+
+    # No Telegram line for these: already handled / between signals, or
+    # capacity simply used up (limits, margin) -- expected every window once
+    # the strongest candidates are in, so they are /status-only.
+    _QUIET_REJECTIONS = {"already_holding_symbol", "pending_signal_count", "signal_expired",
+                         "position_limit", "daily_buy_limit", "daily_loss_limit", "pilot_loss_limit",
+                         "order is below Binance minimums", "plan exceeds available margin"}
+    _REJECTION_TEXT = {
+        "entry_price_moved": "fiyat sinyal kapanisindan izin verilen kaymadan fazla uzaklasti",
+        "position_limit": "acik pozisyon limiti dolu",
+        "daily_buy_limit": "gunluk islem limiti dolu",
+        "daily_loss_limit": "gunluk zarar limiti doldu",
+        "pilot_loss_limit": "toplam zarar limiti doldu",
+        "stop_too_wide_for_safe_leverage": "stop, guvenli kaldirac icin fazla uzak",
+        "order is below Binance minimums": "kalan teminatla Binance minimum islem tutarina ulasilamiyor",
+        "rounded plan exceeds risk budget": "yuvarlama sonrasi risk butcesi asiliyor",
+        "plan exceeds available margin": "yeterli teminat yok",
+    }
+
+    def _record(self, candidate, side, result):
+        status = result.get("status")
+        reason = result.get("reason") or result.get("error")
+        self.recent_entries.append({"at": time.time(), "symbol": candidate["symbol"], "side": side,
+                                    "signal_time": candidate["created_at"], "status": status,
+                                    "reason": reason})
+        # One Telegram line per candidate (not per tick -- it is retried
+        # every loop until its window lapses), so "AL_ADAYI var ama ALDIM
+        # yok" is never again a silent mystery. "failed" already alerts
+        # from _attempt.
+        key = (side, candidate["symbol"], candidate["created_at"])
+        if status != "rejected" or reason in self._QUIET_REJECTIONS or key in self._notified_skips:
+            return
+        self._notified_skips.add(key)
+        label = f"[{self.tag}] " if self.tag else ""
+        text = self._REJECTION_TEXT.get(reason, reason)
+        try:
+            send_message(f"{label}GIRIS YAPILAMADI ({'LONG' if side == 'long' else 'SHORT'}): "
+                         f"{candidate['symbol']} | {text}. Sinyal suresi dolana kadar tekrar denenecek.")
+        except Exception as exc:
+            print(f"Telegram skip notice failed: {exc}", flush=True)
 
     def _attempt(self, candidate, side, approve):
         """One candidate's failure must never abort the whole tick's entry
@@ -538,6 +587,7 @@ def status_snapshot(apps=None, now=time.time):
             "last_message": _rate_limit_last_message,
         },
         "apps": {app.tag or "default": app.last_tick for app in apps},
+        "recent_entries": {app.tag or "default": list(getattr(app, "recent_entries", ())) for app in apps},
     }
 
 
@@ -591,7 +641,14 @@ def positions_snapshot(apps=None):
     return result
 
 
-def run_periodic_scans(apps, interval_seconds=300, sleep=time.sleep, max_iterations=None, detect=None):
+# 2 minutes, down from 5 (22 Sep 2026): with detection now running once
+# per candle window instead of every loop (github_worker.local_tick), a
+# loop is cheap, and a candidate gets ~12 entry attempts inside its
+# 30-minute window instead of 1-2. pilot_status stays cached for 90s.
+LOOP_SECONDS = 120
+
+
+def run_periodic_scans(apps, interval_seconds=LOOP_SECONDS, sleep=time.sleep, max_iterations=None, detect=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs
     have been observed to lag by hours rather than minutes. Runs only
     while this Render process is warm; a cold free-tier instance still

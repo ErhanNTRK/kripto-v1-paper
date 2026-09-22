@@ -32,6 +32,20 @@ def fetch_runtime_state_short(opener=urllib.request.urlopen, url=RUNTIME_STATE_S
     return _fetch(url, opener)
 
 
+def signal_strength(entry):
+    """Strongest-first ordering for auto_enter, which matters once capacity
+    (margin, open positions) runs out before candidates do: breakout count
+    first (1-3 Donchian windows broken), then volume versus its 20-bar
+    average ("score" -- what backtest.Engine already stores for 4H and
+    github_worker stores for 2H/shorts). User's 22 Sep 2026 request: take
+    the strongest few, not whichever sort alphabetically first."""
+    return (entry.get("breaks_up", entry.get("breaks_down", 0)), float(entry.get("score", 0)))
+
+
+def _strongest_first(latest, pending):
+    return [latest[s] for s in sorted(latest, key=lambda s: (tuple(-x for x in signal_strength(pending[s])), s))]
+
+
 def pending_candidates(saved, now_ms, config):
     state = saved.get("state", {})
     expiry = config["signal_confirmation_expiry_minutes"] * 60_000
@@ -58,7 +72,7 @@ def pending_candidates(saved, now_ms, config):
             if "breaks_up" in entry:
                 candidate["breaks_up"] = int(entry["breaks_up"])
             latest[event["symbol"]] = candidate
-    return [latest[s] for s in sorted(latest)]
+    return _strongest_first(latest, pending)
 
 
 def isolate_candidate(saved, symbol):
@@ -100,4 +114,4 @@ def pending_short_candidates(saved, now_ms, config):
                 "close": float(event["close"]), "stop": float(pending[event["symbol"]]["stop"]),
                 "leverage": int(pending[event["symbol"]]["leverage"]),
             }
-    return [latest[s] for s in sorted(latest)]
+    return _strongest_first(latest, pending)
