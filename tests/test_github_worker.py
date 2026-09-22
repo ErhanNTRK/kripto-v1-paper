@@ -26,10 +26,46 @@ class PrepareDataTests(unittest.TestCase):
         if existing_manifest is not None:
             (runtime / 'manifest.json').write_text(json.dumps(existing_manifest), encoding='utf-8')
         with patch('crypto_v1.github_worker.universe', return_value=['ETHUSDT']) as mock_universe, \
+             patch('crypto_v1.github_worker.futures_tradable_symbols', return_value={'ETHUSDT', 'SOLUSDT'}), \
              patch('crypto_v1.github_worker.candles', return_value=[]), \
              patch('crypto_v1.github_worker.validate', return_value=[]):
             prepare_data({}, runtime, now=0)
         return mock_universe, json.loads((runtime / 'manifest.json').read_text(encoding='utf-8'))
+
+    def test_a_cached_manifest_is_filtered_to_futures_tradable_symbols(self):
+        # 22 Sep 2026: universe() started filtering to Futures-tradable
+        # symbols, but a cached 4h manifest never calls universe() again,
+        # so the 4H detectors kept scanning Spot-only symbols (FETUSDT-
+        # style) that every live entry attempt rejects with -1121.
+        cached = {'symbols': ['SOLUSDT', 'FETUSDT'], 'timeframe': '4h', 'source': 'x'}
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            (runtime / 'manifest.json').write_text(json.dumps(cached), encoding='utf-8')
+            with patch('crypto_v1.github_worker.universe') as mock_universe, \
+                 patch('crypto_v1.github_worker.futures_tradable_symbols', return_value={'SOLUSDT'}), \
+                 patch('crypto_v1.github_worker.candles', return_value=[]) as mock_candles, \
+                 patch('crypto_v1.github_worker.validate', return_value=[]):
+                data_dir = prepare_data({}, runtime, now=0)
+            persisted = json.loads((runtime / 'manifest.json').read_text(encoding='utf-8'))
+            run_manifest = json.loads((data_dir / 'manifest.json').read_text(encoding='utf-8'))
+        mock_universe.assert_not_called()
+        self.assertEqual(persisted['symbols'], ['SOLUSDT'])
+        self.assertEqual(run_manifest['symbols'], ['SOLUSDT'])
+        fetched = {c.args[0] for c in mock_candles.call_args_list}
+        self.assertEqual(fetched, {'SOLUSDT', 'BTCUSDT'})
+
+    def test_a_failed_tradable_lookup_leaves_the_cached_manifest_alone(self):
+        cached = {'symbols': ['SOLUSDT', 'FETUSDT'], 'timeframe': '4h', 'source': 'x'}
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            (runtime / 'manifest.json').write_text(json.dumps(cached), encoding='utf-8')
+            with patch('crypto_v1.github_worker.universe'), \
+                 patch('crypto_v1.github_worker.futures_tradable_symbols', return_value=set()), \
+                 patch('crypto_v1.github_worker.candles', return_value=[]), \
+                 patch('crypto_v1.github_worker.validate', return_value=[]):
+                prepare_data({}, runtime, now=0)
+            persisted = json.loads((runtime / 'manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual(persisted['symbols'], ['SOLUSDT', 'FETUSDT'])
 
     def test_no_cache_fetches_a_fresh_4h_universe(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -62,6 +98,7 @@ class PrepareDataTests(unittest.TestCase):
         # state despite real market moves (18 Sep 2026), not by a test.
         now = 1_800_000_000_000
         with patch('crypto_v1.github_worker.universe', return_value=['ETHUSDT']), \
+             patch('crypto_v1.github_worker.futures_tradable_symbols', return_value={'ETHUSDT'}), \
              patch('crypto_v1.github_worker.candles', return_value=[]) as mock_candles, \
              patch('crypto_v1.github_worker.validate', return_value=[]):
             with tempfile.TemporaryDirectory() as tmp:

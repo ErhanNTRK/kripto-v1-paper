@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from .backtest import report
-from .data import candles, get, load, universe, validate
+from .data import candles, futures_tradable_symbols, get, load, universe, validate
 from .paper_trading import tick
 from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel
@@ -61,6 +61,21 @@ def prepare_data(config, runtime, now):
         manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data"}
         write_json(manifest_path, manifest)
     symbols = manifest["symbols"]
+    # A cached 4h manifest is deliberately never re-ranked (the paper
+    # state's fingerprint hashes this list), so a manifest written before
+    # universe() started filtering to Futures-tradable symbols (22 Sep
+    # 2026) still carried Spot-only symbols that no live entry can fill --
+    # the 4H long/short detectors and the paper engine kept flagging them.
+    # Same filter here; persisted so the fingerprint settles after one
+    # reset. An empty tradable set means the lookup itself failed, not
+    # that nothing is tradable -- leave the list alone rather than wipe it.
+    tradable = futures_tradable_symbols()
+    if tradable:
+        filtered = [s for s in symbols if s in tradable]
+        if filtered != symbols:
+            symbols = filtered
+            manifest = dict(manifest, symbols=symbols)
+            write_json(manifest_path, manifest)
     # The real floor here is the BTC EMA200 filter inside btc_up_ok/
     # btc_down_ok (indicators.features needs >=200 closes before ema200 is
     # non-None at all) -- NOT v5's own 40-bar Donchian lookback, which is
