@@ -111,6 +111,7 @@ class LocalTickTests(unittest.TestCase):
             with patch('crypto_v1.github_worker.get', return_value={'serverTime': 800 * FOUR_HOUR}), \
                  patch('crypto_v1.github_worker.prepare_data', return_value=runtime / 'data') as mock_prepare, \
                  patch('crypto_v1.github_worker.tick') as mock_tick, \
+                 patch('crypto_v1.github_worker._print_4h_long_scan'), \
                  patch('crypto_v1.github_worker.write_short_state') as mock_short, \
                  patch('crypto_v1.github_worker.write_2h_signal_state') as mock_2h:
                 local_tick(runtime)
@@ -130,6 +131,37 @@ class LocalTickTests(unittest.TestCase):
         # format_event gave no visual hint of that, so it looked identical
         # to a real fill and confused the user into expecting a real buy.
 
+    def test_prints_the_4h_long_scan_count_after_tick(self):
+        # Live-reported 22 Sep 2026: this path (the paper-engine-driven
+        # AL_ADAYI feed used for real 4H long entries) printed nothing at
+        # all, so right after startup the user saw only the SHORT_ADAYI
+        # line and concluded the system was "only searching for short, and
+        # only 4H" -- it was actually running, just invisible.
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            data_dir = runtime / 'data'
+            data_dir.mkdir()
+            (data_dir / 'manifest.json').write_text(
+                json.dumps({'symbols': ['ETHUSDT', 'SOLUSDT']}), encoding='utf-8')
+            state_path = runtime / 'state-relaxed.json'
+            now = 800 * FOUR_HOUR
+
+            def fake_tick(*args, **kwargs):
+                state_path.write_text(json.dumps({'state': {'events': [
+                    {'type': 'AL_ADAYI', 'time': now, 'symbol': 'ETHUSDT'},
+                    {'type': 'AL_ADAYI', 'time': now - FOUR_HOUR, 'symbol': 'SOLUSDT'},  # stale bar, not counted
+                ]}}), encoding='utf-8')
+
+            with patch('crypto_v1.github_worker.get', return_value={'serverTime': now}), \
+                 patch('crypto_v1.github_worker.prepare_data', return_value=data_dir), \
+                 patch('crypto_v1.github_worker.tick', side_effect=fake_tick), \
+                 patch('crypto_v1.github_worker.write_short_state'), \
+                 patch('crypto_v1.github_worker.write_2h_signal_state'), \
+                 patch('builtins.print') as mock_print:
+                local_tick(runtime)
+        printed = [c.args[0] for c in mock_print.call_args_list]
+        self.assertIn('4H long tarama: 2 sembol kontrol edildi, 1 AL_ADAYI bulundu.', printed)
+
     def test_retries_once_on_new_paper_state_required(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = Path(tmp)
@@ -138,6 +170,7 @@ class LocalTickTests(unittest.TestCase):
                  patch('crypto_v1.github_worker.prepare_data', return_value=runtime / 'data'), \
                  patch('crypto_v1.github_worker.tick',
                       side_effect=[ValueError('new paper state required'), None]) as mock_tick, \
+                 patch('crypto_v1.github_worker._print_4h_long_scan'), \
                  patch('crypto_v1.github_worker.write_short_state'), \
                  patch('crypto_v1.github_worker.write_2h_signal_state'):
                 local_tick(runtime)
