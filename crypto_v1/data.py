@@ -32,12 +32,54 @@ def get(path, params=None):
             time.sleep(2 ** attempt)
 
 
+FUTURES_BASE = 'https://fapi.binance.com'
+
+
+def futures_get(path, params=None):
+    if path != 'exchangeInfo':
+        raise ValueError('Only public futures market-data endpoints allowed')
+    url = FUTURES_BASE + '/fapi/v1/' + path + '?' + urllib.parse.urlencode(params or {})
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 418:
+                raise RuntimeError('Binance temporary IP ban; stop requests') from exc
+            if exc.code not in (429, 500, 502, 503, 504) or attempt == 4:
+                raise
+            time.sleep(max(float(exc.headers.get('Retry-After', 0)), 2 ** attempt))
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == 4:
+                raise
+            time.sleep(2 ** attempt)
+
+
+def futures_tradable_symbols():
+    info = futures_get('exchangeInfo')
+    return {s['symbol'] for s in info['symbols']
+            if s.get('quoteAsset') == 'USDT' and s.get('contractType') == 'PERPETUAL'
+            and s.get('status') == 'TRADING'}
+
+
 def universe(config):
     info = get('exchangeInfo')
     eligible = {s['symbol'] for s in info['symbols']
                 if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING'
                 and s.get('isSpotTradingAllowed', False)
                 and s['baseAsset'] not in config['excluded_bases']}
+    # Every live entry (long and short, both the 4H and 2H systems) executes
+    # on Binance Futures, never Spot -- leveraged long replaced unleveraged
+    # Spot for new entries on 21 Sep 2026. A Spot-only symbol (no USDT-M
+    # perpetual contract) passes every signal check, gets detected as a
+    # real candidate, and Binance then rejects every single entry attempt
+    # with -1121 "Invalid symbol" -- forever, since the same signal keeps
+    # re-qualifying each scan. Live-observed 22 Sep 2026: FETUSDT and
+    # MARSCOINUSDT (both Spot-only) were the ONLY two candidates the 2H
+    # system found all day, so ENTRIES_PER_TICK capacity was spent
+    # retrying two symbols that could never fill while any other real
+    # opportunity that day went untaken.
+    eligible &= futures_tradable_symbols()
     ranked = sorted((t for t in get('ticker/24hr') if t['symbol'] in eligible),
                     key=lambda t: (-float(t['quoteVolume']), t['symbol']))
     return [t['symbol'] for t in ranked[:config['top_n']]]
