@@ -45,7 +45,10 @@ $Py = Join-Path $Venv "Scripts\python.exe"
 
 function Ask-Secret($file, $prompt, [switch]$Optional) {
     $path = Join-Path $Secrets $file
-    if ((Test-Path $path) -and ((Get-Item $path).Length -gt 0)) {
+    # An optional secret deliberately left empty must not be asked again:
+    # the Read-Host blocked every unattended restart until someone pressed
+    # Enter (22 Sep 2026: the bot sat at this prompt through an entry window).
+    if ((Test-Path $path) -and (((Get-Item $path).Length -gt 0) -or $Optional)) {
         Write-Host "   $file : mevcut deger korunuyor (degistirmek icin silin: $path)"
         return
     }
