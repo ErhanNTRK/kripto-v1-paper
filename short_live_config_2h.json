@@ -9,10 +9,10 @@
   "trailing_atr": 2.0,
   "btc_filter": "very_loose",
   "telegram_buy_command": "AL",
-  "signal_confirmation_expiry_minutes": 10,
+  "signal_confirmation_expiry_minutes": 30,
   "require_exactly_one_pending_signal": true,
   "automatic_risk_exits": true,
   "profit_exit_confirmation_required": false,
-  "max_entry_drift_fraction": 0.005,
+  "max_entry_drift_fraction": 0.01,
   "live_fee_buffer_fraction": 0.001
 }
