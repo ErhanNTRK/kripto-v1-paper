@@ -32,8 +32,26 @@ class LiveShortControllerTests(unittest.TestCase):
         executor = Mock()
         result = approve_short(7, "SHORT", 501000, SAVED, C, {}, Market(), executor)
         self.assertEqual(result["status"], "preview")
-        self.assertEqual(result["plan"]["leverage"], 3)
+        # The signal's 3x is a ceiling (22 Sep 2026): with a 5% stop the
+        # price-based 20% liquidation buffer only admits 2x on the short
+        # side (see live_execution.safe_leverage).
+        self.assertEqual(result["plan"]["leverage"], 2)
         executor.assert_not_called()
+
+    def test_a_tight_stop_keeps_the_signals_full_tier(self):
+        tight = {"state": {"pending_shorts": {"SOLUSDT": {"stop": 102, "leverage": 3}},
+                           "events": SAVED["state"]["events"]}}
+        result = approve_short(7, "SHORT", 501000, tight, C, {}, Market(), Mock())
+        self.assertEqual(result["plan"]["leverage"], 3)
+
+    def test_a_stop_too_wide_for_any_safe_leverage_is_rejected_before_any_order(self):
+        wide = {"state": {"pending_shorts": {"SOLUSDT": {"stop": 130, "leverage": 3}},
+                          "events": SAVED["state"]["events"]}}
+        executor = Mock()
+        result = approve_short(7, "SHORT", 501000, wide, dict(C, live_trading_enabled=True),
+                               {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, Market(), executor)
+        self.assertEqual(result, {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"})
+        executor.market_open_short.assert_not_called()
 
     def test_stale_or_wrong_command_is_rejected(self):
         self.assertEqual(approve_short(7, "AL", 501000, SAVED, C, {}, Market(), Mock())["status"],
@@ -62,7 +80,7 @@ class LiveShortControllerTests(unittest.TestCase):
                                env, Market(), executor)
         self.assertEqual(result["status"], "opened_and_protected")
         executor.set_isolated_margin.assert_called_once_with("SOLUSDT")
-        executor.set_leverage.assert_called_once_with("SOLUSDT", 3)
+        executor.set_leverage.assert_called_once_with("SOLUSDT", 2)  # 5% stop -> 2x, see above
         executor.market_open_short.assert_called_once()
         executor.protective_stop_for_short.assert_called_once()
 
@@ -126,12 +144,30 @@ class ApproveLongLeveragedTests(unittest.TestCase):
         self.assertEqual(result["plan"]["leverage"], 2)
         executor.assert_not_called()
 
-    def test_no_explicit_leverage_falls_back_to_breaks_up_tiering(self):
+    def test_no_explicit_leverage_falls_back_to_breaks_up_tiering_as_a_ceiling(self):
         executor = Mock()
+        # Strong signal -> 5x tier, but a 5% stop only admits 4x under the
+        # liquidation buffer (22 Sep 2026: the 5x tier previously opened and
+        # was emergency-closed every time with real 5-9% ATR stops).
         strong = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_TIERED_STRONG, C_LONG, {}, Market(), executor)
-        self.assertEqual(strong["plan"]["leverage"], 5)
+        self.assertEqual(strong["plan"]["leverage"], 4)
         normal = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_TIERED_NORMAL, C_LONG, {}, Market(), executor)
         self.assertEqual(normal["plan"]["leverage"], 3)
+
+    def test_a_tight_stop_reaches_the_full_5x_tier(self):
+        tight = {"state": {"pending_buys": {"SOLUSDT": {"stop": 99, "breaks_up": 3}},
+                           "events": SAVED_LONG_TIERED_STRONG["state"]["events"]}}
+        result = approve_long_leveraged(7, "AL", 501000, tight, C_LONG, {}, Market(), Mock())
+        self.assertEqual(result["plan"]["leverage"], 5)
+
+    def test_a_stop_too_wide_for_any_safe_leverage_is_rejected_before_any_order(self):
+        wide = {"state": {"pending_buys": {"SOLUSDT": {"stop": 50, "breaks_up": 3}},
+                          "events": SAVED_LONG_TIERED_STRONG["state"]["events"]}}
+        executor = Mock()
+        result = approve_long_leveraged(7, "AL", 501000, wide, dict(C_LONG, live_trading_enabled=True),
+                                        {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, Market(), executor)
+        self.assertEqual(result, {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"})
+        executor.market_open_long.assert_not_called()
 
     def test_stale_or_wrong_command_is_rejected(self):
         self.assertEqual(approve_long_leveraged(7, "SHORT", 501000, SAVED_LONG_FIXED, C_LONG, {}, Market(),

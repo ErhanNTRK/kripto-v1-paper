@@ -89,10 +89,21 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
                   if str(o.get("clientOrderId", "")).startswith((_SHORT_STOP_PREFIX, _LONG_STOP_PREFIX))
                   and _belongs_to_tag(o.get("clientOrderId", ""), 5, tag)]
     held_symbols = {o["symbol"] for o in protective}
-    committed = sum((_decimal(
-        (short_by_suffix if str(o.get("clientOrderId", "")).startswith(_SHORT_STOP_PREFIX) else long_by_suffix)
-        .get(str(o.get("clientOrderId", ""))[5:], {}).get("cumQuote")
-    ) for o in protective), Decimal("0"))
+    # Capital a leveraged position actually ties up is its isolated MARGIN
+    # (notional / leverage), not the whole notional -- counting notional
+    # (as this did until 22 Sep 2026) let one ~70-90 USDT position "use up"
+    # a 34 USDT slice, so free_usdt hit 0 after a single open and the
+    # configured max_open_positions was unreachable. Per-symbol leverage
+    # comes from the account's own positions list; a symbol not found
+    # there falls back to the conservative notional count.
+    leverage_by_symbol = {p.get("symbol"): _decimal(p.get("leverage"))
+                          for p in account.get("positions", []) if _decimal(p.get("leverage")) > 0}
+    committed = Decimal("0")
+    for o in protective:
+        client_id = str(o.get("clientOrderId", ""))
+        by_suffix = short_by_suffix if client_id.startswith(_SHORT_STOP_PREFIX) else long_by_suffix
+        notional = _decimal(by_suffix.get(client_id[5:], {}).get("cumQuote"))
+        committed += notional / leverage_by_symbol.get(o.get("symbol"), Decimal("1"))
     pilot_capital = Decimal(str(config["pilot_capital_usdt"]))
     if tag:
         equity = pilot_capital + realized_pnl_all_time

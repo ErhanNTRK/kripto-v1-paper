@@ -155,8 +155,31 @@ class LeveragedLongPilotAccountingTests(unittest.TestCase):
         result = summarize_short_pilot({"availableBalance": "1000"}, open_orders, orders, C, 0, tag="4")
         self.assertEqual(result["open_positions"], 2)
         self.assertEqual(result["held_symbols"], {"SOLUSDT", "ADAUSDT"})
-        # free_usdt is capped at equity(pilot_capital=34) - committed(50+30=80) -> floored at 0.
+        # No positions list on the account -> leverage unknown -> the
+        # conservative notional count: equity(34) - committed(50+30=80) -> floored at 0.
         self.assertEqual(result["free_usdt"], Decimal("0"))
+
+    def test_committed_capital_is_the_margin_not_the_whole_notional(self):
+        # 22 Sep 2026: counting notional let ONE ~70-90 USDT position use
+        # up a 34 USDT slice, so free_usdt hit 0 after a single open and
+        # max_open_positions was unreachable. The account's own positions
+        # list carries each symbol's leverage.
+        open_orders = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fp41"},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq42"},
+        ]
+        orders = [
+            {"symbol": "SOLUSDT", "clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
+             "cumQuote": "50", "updateTime": 1},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fl42", "side": "BUY", "status": "FILLED",
+             "cumQuote": "30", "updateTime": 1},
+        ]
+        account = {"availableBalance": "1000",
+                   "positions": [{"symbol": "SOLUSDT", "leverage": "2"},
+                                 {"symbol": "ADAUSDT", "leverage": "3"}]}
+        result = summarize_short_pilot(account, open_orders, orders, dict(C, pilot_capital_usdt=100), 0, tag="4")
+        # committed = 50/2 + 30/3 = 35 -> free = 100 - 35
+        self.assertEqual(result["free_usdt"], Decimal("65"))
 
 
 class LivePositionsTests(unittest.TestCase):

@@ -122,6 +122,45 @@ def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rule
     }
 
 
+# Conservative stand-in for Binance's per-symbol tier-1 maintenance margin
+# rate (BTC/ETH ~0.4-0.5%, most alts 0.5-1%, low-caps up to ~2.5%). Only
+# used to PRE-compute a leverage the post-open check on Binance's real
+# liquidation price will accept; that real check still runs unchanged.
+ASSUMED_MAINTENANCE_MARGIN = Decimal("0.025")
+
+
+def estimated_liquidation_price(side, entry, leverage, maintenance_margin=ASSUMED_MAINTENANCE_MARGIN):
+    """Isolated-margin liquidation price, ignoring Binance's small per-tier
+    maintenance amount and fees: the position is liquidated when its
+    margin (notional/leverage +/- unrealized move) falls to
+    maintenance_margin * notional_at_liquidation."""
+    entry = Decimal(str(entry))
+    leverage = Decimal(str(leverage))
+    mmr = Decimal(str(maintenance_margin))
+    if side == "long":
+        return entry * (Decimal("1") - Decimal("1") / leverage) / (Decimal("1") - mmr)
+    return entry * (Decimal("1") + Decimal("1") / leverage) / (Decimal("1") + mmr)
+
+
+def safe_leverage(side, entry, stop, max_leverage, buffer_fraction=0.2,
+                  maintenance_margin=ASSUMED_MAINTENANCE_MARGIN, min_leverage=2):
+    """Largest integer leverage in [min_leverage, max_leverage] whose
+    estimated liquidation price still passes liquidation_is_safe for this
+    stop -- so the tier (3x/5x by signal strength) is a CEILING and the
+    real stop distance decides. Per the user's 22 Sep 2026 decision, after
+    the review showed the 5x tier could never pass the post-open check
+    with the ATR stops the signal actually produces (5-9% away; 5x needs
+    < ~3%): every strong signal opened, failed the check and was
+    emergency-closed for nothing. Returns None when even min_leverage is
+    unsafe (a very wide stop); 1x is excluded because Binance reports no
+    liquidation price for it and the post-open check treats 0 as unsafe."""
+    for leverage in range(int(max_leverage), int(min_leverage) - 1, -1):
+        liquidation = estimated_liquidation_price(side, entry, leverage, maintenance_margin)
+        if liquidation_is_safe(side, stop, liquidation, buffer_fraction):
+            return leverage
+    return None
+
+
 def liquidation_is_safe(side, stop_price, liquidation_price, buffer_fraction=0.2):
     """True only if the protective stop would unwind the position well
     before Binance's real liquidation engine could -- checked against the
