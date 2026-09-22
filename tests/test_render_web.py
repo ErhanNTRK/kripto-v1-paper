@@ -189,6 +189,29 @@ class LiveAppTelegramRoutingTests(unittest.TestCase):
         fetch.assert_not_called()
         send.assert_called_once()
 
+    def test_al_gathers_long_candidates_using_short_configs_expiry_not_selfs(self):
+        # 22 Sep 2026 fix: approve_long_leveraged always re-validates
+        # freshness against short_config; gathering here with a looser
+        # self.config (30 min, matching live_config.json's leftover value
+        # from the retired unleveraged-Spot path) let a candidate older
+        # than short_config's 10 min pass this gather and then be silently
+        # rejected inside approval as "pending_signal_count" -- live-
+        # reported as "AL adayi buluyor ama AL karari bulamiyor".
+        app = LiveApp({"signal_confirmation_expiry_minutes": 30}, {}, {"TELEGRAM_CHAT_ID": "123"},
+                      short_config={"signal_confirmation_expiry_minutes": 10}, short_strategy_config={})
+        stale = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95}},
+                           "events": [{"type": "AL_ADAYI",
+                                      "time": self.NOW_S * 1000 - 15 * 60_000,  # 15 min old
+                                      "symbol": "SOLUSDT", "close": 100}]}}
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=stale), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch("crypto_v1.render_web.send_message"), \
+             patch.object(LiveApp, "_approve_long") as long_mock:
+            result = app.telegram(self._payload())
+        long_mock.assert_not_called()
+        self.assertEqual(result, {"status": "rejected", "reason": "no_pending_signal"})
+
 
 class LiveAppAutoEntryTests(unittest.TestCase):
     """Entries no longer wait for a Telegram "AL" reply, per the user's 18
@@ -340,6 +363,41 @@ class LiveAppAutoEntryTests(unittest.TestCase):
              patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED):
             result = app.auto_enter()
         self.assertEqual(result, {"status": "auto_entry", "results": []})
+
+    def test_auto_enter_gathers_long_candidates_using_short_configs_expiry_not_selfs(self):
+        # 22 Sep 2026 fix: same mismatch as LiveAppTelegramRoutingTests'
+        # equivalent test, for the automatic path. A candidate older than
+        # short_config's expiry but younger than self.config's used to pass
+        # this gather and then be silently rejected inside approval every
+        # single tick as "pending_signal_count".
+        app = LiveApp({"signal_confirmation_expiry_minutes": 30}, {}, {"TELEGRAM_CHAT_ID": "123"},
+                      short_config={"signal_confirmation_expiry_minutes": 10}, short_strategy_config={})
+        stale = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95}},
+                           "events": [{"type": "AL_ADAYI",
+                                      "time": self.NOW_S * 1000 - 15 * 60_000,  # 15 min old
+                                      "symbol": "SOLUSDT", "close": 100}]}}
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=stale), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch.object(LiveApp, "_approve_long") as long_mock:
+            result = app.auto_enter()
+        long_mock.assert_not_called()
+        self.assertEqual(result, {"status": "auto_entry", "results": []})
+
+    def test_auto_enter_still_attempts_a_candidate_fresh_under_both_expiries(self):
+        # Guards the fix above from having simply broken long entries.
+        app = LiveApp({"signal_confirmation_expiry_minutes": 30}, {}, {"TELEGRAM_CHAT_ID": "123"},
+                      short_config={"signal_confirmation_expiry_minutes": 10}, short_strategy_config={})
+        fresh = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95}},
+                           "events": [{"type": "AL_ADAYI",
+                                      "time": self.NOW_S * 1000 - 60_000,  # 1 min old
+                                      "symbol": "SOLUSDT", "close": 100}]}}
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=fresh), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
+             patch.object(LiveApp, "_approve_long", return_value={"status": "ok"}) as long_mock:
+            app.auto_enter()
+        long_mock.assert_called_once()
 
     def test_tick_calls_auto_enter_then_scan_and_survives_entry_errors(self):
         app = self._app()

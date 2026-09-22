@@ -244,7 +244,17 @@ class LiveApp:
         now_ms = int(time.time() * 1000)
         saved_long = fetch_runtime_state(url=self.state_url)
         saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
-        long_pending = pending_candidates(saved_long, now_ms, self.config)
+        # short_config's expiry, not self.config's (22 Sep 2026 fix): every
+        # real long entry now goes through approve_long_leveraged, which
+        # re-validates freshness against short_config's own
+        # signal_confirmation_expiry_minutes (10, vs live_config.json's
+        # leftover 30 from the retired unleveraged-Spot entry path). A
+        # candidate 10-30 minutes old used to pass THIS gather, get
+        # attempted, and then be silently rejected as "pending_signal_count"
+        # by the inner re-check -- live-reported as "AL adayi buluyor ama
+        # AL karari bulamiyor". Gathering with the same config the approval
+        # will actually re-check keeps the two in sync.
+        long_pending = pending_candidates(saved_long, now_ms, self.short_config)
         short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
                          if self.futures_executor else [])
         results = []
@@ -342,7 +352,10 @@ class LiveApp:
         now_ms = int(time.time() * 1000)
         saved_long = fetch_runtime_state(url=self.state_url)
         saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
-        long_pending = pending_candidates(saved_long, now_ms, self.config)
+        # short_config's expiry, matching auto_enter (see its comment):
+        # approve_long_leveraged always re-validates against short_config,
+        # never self.config.
+        long_pending = pending_candidates(saved_long, now_ms, self.short_config)
         short_pending = (pending_short_candidates(saved_short, now_ms, self.short_config)
                         if self.futures_executor else [])
         if not long_pending and not short_pending:
