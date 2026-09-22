@@ -102,7 +102,10 @@ def _fill_pnl(entry, order, side):
     if not order:
         return None
     qty = Decimal(str(order.get("executedQty", "0")))
-    quote = Decimal(str(order.get("cummulativeQuoteQty", "0")))
+    # Spot reports the fill's quote total as cummulativeQuoteQty; Futures
+    # (/fapi) calls the same thing cumQuote -- reading only the Spot name
+    # meant every futures close reported no PNL at all.
+    quote = Decimal(str(order.get("cummulativeQuoteQty") or order.get("cumQuote") or "0"))
     if qty <= 0 or quote <= 0:
         return None
     entry_value = qty * Decimal(str(entry))
@@ -346,15 +349,22 @@ class LiveApp:
             send_message("AL yapilmadi: su an bekleyen bir sinyal yok.")
             return {"status": "rejected", "reason": "no_pending_signal"}
         base_id = parsed["update_id"] * 1000
+        # Same tag prefix auto_enter uses: live_positions()/pilot_status()
+        # attribute an order to a system by the digit right after the 5-char
+        # prefix (_belongs_to_tag), so an untagged Telegram-triggered order
+        # belonged to neither app and its position was invisible to every
+        # exit scan -- only the exchange-native stop still covered it.
+        def order_id(i):
+            return int(f"{self.tag}{base_id + i}") if self.tag else base_id + i
         results = []
         for i, candidate in enumerate(long_pending):
             isolated = isolate_candidate(saved_long, candidate["symbol"])
             results.append({"symbol": candidate["symbol"], "side": "long",
-                            "result": self._approve_long(base_id + i, isolated, tag=self.tag)})
+                            "result": self._approve_long(order_id(i), isolated, tag=self.tag)})
         for i, candidate in enumerate(short_pending, start=len(long_pending)):
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
             results.append({"symbol": candidate["symbol"], "side": "short",
-                            "result": self._approve_short(base_id + i, isolated, tag=self.tag)})
+                            "result": self._approve_short(order_id(i), isolated, tag=self.tag)})
         return {"status": "batch", "results": results}
 
     def scan(self):
@@ -368,12 +378,23 @@ class LiveApp:
         live_positions()/analysis() itself is failing, at which point
         there is nothing further to safely check on that side anyway."""
         results = []
+        # The trend-exit check MUST run under the same btc_filter mode that
+        # opened the position (config_v5_long.json: "very_loose"). Passing
+        # the bare ShortWindowLongModel.sell (called as sell_fn(feature,
+        # btc), config=None) silently fell back to long_exit's "strict"
+        # default -- the exact mismatch research_v5.long_exit's own comment
+        # warns about: with BTC merely above EMA20 (a valid very_loose
+        # entry) but not in a full EMA20>50>200 stack, the strict check
+        # fails on the very first scan after entry and the position is
+        # force-closed 5 minutes after it opened. Found in the 22 Sep 2026
+        # code review before any leveraged long had gone through this path.
+        spot_sell = lambda f, b: ShortWindowLongModel.sell(f, b, self.market.strategy_config)
         try:
             for position in self.market.live_positions():
                 feature, btc, high = self.market.analysis(position, ShortWindowLongModel.features, self.interval)
                 reason = exit_decision(position, feature, btc, high,
                                        {**self.config, **{"trailing_atr": self.market.strategy_config["trailing_atr"]}},
-                                       sell_fn=ShortWindowLongModel.sell)
+                                       sell_fn=spot_sell)
                 if not reason: continue
                 if not execution_enabled(self.config, self.environment):
                     results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
@@ -400,6 +421,7 @@ class LiveApp:
                 # short_live_config.json has no such key at all, and
                 # exit_decision's own default is True/capped, which would
                 # silently diverge from what was actually validated).
+                futures_sell = lambda f, b: ShortWindowLongModel.sell(f, b, self.futures_market.strategy_config)
                 for position in self.futures_market.live_positions():
                     if position["side"] == "short":
                         feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
@@ -410,7 +432,7 @@ class LiveApp:
                                                {**self.short_config,
                                                 "trailing_atr": self.futures_market.strategy_config["trailing_atr"],
                                                 "cap_at_target": False},
-                                               sell_fn=ShortWindowLongModel.sell)
+                                               sell_fn=futures_sell)
                     if not reason: continue
                     if not execution_enabled(self.short_config, self.environment):
                         results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
@@ -549,7 +571,9 @@ def positions_snapshot(apps=None):
         if app.futures_market:
             for position in app.futures_market.live_positions():
                 price = app.futures_market.price(position["symbol"])
-                futures.append(_position_view(position, price, "short"))
+                # Futures holds leveraged longs too (21 Sep 2026); a long
+                # reported as "short" here showed every sign flipped.
+                futures.append(_position_view(position, price, position.get("side", "short")))
         result[app.tag or "default"] = {"spot": spot, "futures": futures}
     return result
 
