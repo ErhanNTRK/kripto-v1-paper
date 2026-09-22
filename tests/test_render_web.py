@@ -144,6 +144,21 @@ class LiveAppTelegramRoutingTests(unittest.TestCase):
             seen.add(events[0]["symbol"])
         self.assertEqual(seen, {"SOLUSDT", "ETHUSDT"})
 
+    def test_a_manual_al_tags_its_order_ids_like_auto_entry_does(self):
+        # live_positions()/pilot_status() attribute an order to a system by
+        # the digit right after the 5-char prefix; an untagged manual-AL
+        # order belonged to neither app and escaped every exit scan.
+        app = LiveApp(self.CONFIG, {}, {"TELEGRAM_CHAT_ID": "123"},
+                      short_config=self.CONFIG, short_strategy_config={}, tag="2")
+        with self._frozen_clock(), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.LONG_SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.SHORT_SAVED), \
+             patch.object(LiveApp, "_approve_long", return_value={"status": "ok"}) as long_mock, \
+             patch.object(LiveApp, "_approve_short", return_value={"status": "ok"}) as short_mock:
+            app.telegram(self._payload())
+        ids = [c.args[0] for c in long_mock.call_args_list] + [c.args[0] for c in short_mock.call_args_list]
+        self.assertEqual(ids, [21000, 21001, 21002])
+
     def test_al_processes_long_and_short_candidates_together(self):
         app = self._app()
         with self._frozen_clock(), \
@@ -412,6 +427,61 @@ class ScanResilienceTests(unittest.TestCase):
         passed_config = exit_decision_mock.call_args.args[4]
         self.assertIs(passed_config["cap_at_target"], False)
 
+    # BTC merely above EMA20 (a valid very_loose entry) but NOT in a full
+    # EMA20>50>200 stack: btc_up_ok passes for "very_loose", fails for
+    # "strict". Price is above long_exit and above entry, no trailing
+    # trigger (high < entry + risk) -- so the ONLY thing that could force
+    # an exit is the btc filter running in the wrong mode.
+    LOOSE_ONLY_BTC = {"c": 100, "ema20": 99, "ema50": 101, "ema200": 90}
+    HELD_FEATURE = {"c": 101, "atr": 1, "long_exit": 98}
+    VERY_LOOSE_STRATEGY = {"trailing_atr": 2.0, "btc_filter": "very_loose"}
+
+    def _app_with_strategy(self):
+        # Spot reads cap_at_target from its own live_config.json (false there);
+        # the futures long path forces it False itself.
+        return LiveApp(dict(self.CONFIG, cap_at_target=False), self.VERY_LOOSE_STRATEGY,
+                       {"TELEGRAM_CHAT_ID": "123"},
+                       short_config=self.CONFIG, short_strategy_config=self.VERY_LOOSE_STRATEGY)
+
+    def test_leveraged_long_exit_uses_the_entry_btc_filter_mode_not_strict(self):
+        # Found in the 22 Sep 2026 review, before any leveraged long had
+        # gone through this path: exit_decision was given the bare
+        # ShortWindowLongModel.sell, which it calls as sell_fn(feature,
+        # btc) -- config=None -> long_exit's "strict" default -> the
+        # position opened under very_loose would be force-closed on the
+        # first scan after entry (research_v5.long_exit's own warning).
+        app = self._app_with_strategy()
+        app.market.live_positions = MagicMock(return_value=[])
+        app.futures_market.live_positions = MagicMock(return_value=[
+            {"symbol": "ADAUSDT", "side": "long", "entry": 100, "stop_price": 95,
+             "quantity": "1", "stop_client_id": "kv1fq4x", "open_time": 0}])
+        app.futures_market.analysis = MagicMock(return_value=(self.HELD_FEATURE, self.LOOSE_ONLY_BTC, 100))
+        result = app.scan()
+        self.assertEqual(result["results"], [])
+
+    def test_spot_long_exit_uses_the_entry_btc_filter_mode_not_strict(self):
+        app = self._app_with_strategy()
+        app.futures_market.live_positions = MagicMock(return_value=[])
+        app.market.live_positions = MagicMock(return_value=[
+            {"symbol": "ADAUSDT", "entry": 100, "stop_price": 95,
+             "quantity": "1", "stop_client_id": "kv1s4x", "buy_time": 0}])
+        app.market.analysis = MagicMock(return_value=(self.HELD_FEATURE, self.LOOSE_ONLY_BTC, 100))
+        result = app.scan()
+        self.assertEqual(result["results"], [])
+
+    def test_leveraged_long_still_exits_when_the_very_loose_filter_itself_fails(self):
+        # Guards the fix above from having simply disabled the trend exit.
+        app = self._app_with_strategy()
+        app.market.live_positions = MagicMock(return_value=[])
+        app.futures_market.live_positions = MagicMock(return_value=[
+            {"symbol": "ADAUSDT", "side": "long", "entry": 100, "stop_price": 95,
+             "quantity": "1", "stop_client_id": "kv1fq4x", "open_time": 0}])
+        btc_below_ema20 = dict(self.LOOSE_ONLY_BTC, c=98)
+        app.futures_market.analysis = MagicMock(return_value=(self.HELD_FEATURE, btc_below_ema20, 100))
+        result = app.scan()
+        self.assertEqual(result["results"][0]["status"], "preview_exit")
+        self.assertEqual(result["results"][0]["reason"], "profit_signal")
+
 
 class RateLimitCircuitBreakerTests(unittest.TestCase):
     """A real Binance -1003 (too many requests) must stop this process from
@@ -540,6 +610,12 @@ class FillPnlTests(unittest.TestCase):
         order = {"executedQty": "2", "cummulativeQuoteQty": "150"}
         self.assertEqual(_fill_pnl(entry="100", order=order, side="short"), 50)
 
+    def test_futures_fill_reports_its_quote_total_as_cumquote(self):
+        # /fapi order responses use cumQuote, not Spot's cummulativeQuoteQty;
+        # reading only the Spot name meant no futures close ever showed PNL.
+        self.assertEqual(_fill_pnl(entry="100", order={"executedQty": "2", "cumQuote": "250"}, side="long"), 50)
+        self.assertEqual(_fill_pnl(entry="100", order={"executedQty": "2", "cumQuote": "150"}, side="short"), 50)
+
     def test_no_order_or_empty_fill_yields_no_pnl(self):
         self.assertIsNone(_fill_pnl(entry="100", order=None, side="long"))
         self.assertIsNone(_fill_pnl(entry="100", order={"executedQty": "0", "cummulativeQuoteQty": "0"}, side="long"))
@@ -642,6 +718,21 @@ class TickConcurrencyAndStatusTests(unittest.TestCase):
         self.assertEqual(position["side"], "short")
         self.assertEqual(Decimal(position["unrealized_pnl_usdt"]), Decimal("40"))
         self.assertEqual(position["unrealized_pnl_pct"], "5.00")
+
+    def test_positions_snapshot_keeps_a_leveraged_futures_long_as_a_long(self):
+        # Every futures position was hardcoded "short" (from before the
+        # leveraged long existed): a long up 10% showed as a short down 10%.
+        app = self._app("4")
+        app.market = MagicMock(live_positions=MagicMock(return_value=[]))
+        app.futures_market = MagicMock()
+        app.futures_market.live_positions.return_value = [
+            {"symbol": "ADAUSDT", "side": "long", "entry": Decimal("100"), "stop_price": Decimal("95"),
+             "quantity": "1", "stop_client_id": "kv1fq4x", "open_time": 0}]
+        app.futures_market.price.return_value = Decimal("110")
+        position = render_web.positions_snapshot([app])["4"]["futures"][0]
+        self.assertEqual(position["side"], "long")
+        self.assertEqual(Decimal(position["unrealized_pnl_usdt"]), Decimal("10"))
+        self.assertEqual(position["distance_to_stop_pct"], "13.64")
 
     def test_an_ip_ban_pauses_until_binances_own_ban_clock_not_just_the_cooldown(self):
         # HTTP 418's msg carries the exact end of the ban (epoch ms). A first
