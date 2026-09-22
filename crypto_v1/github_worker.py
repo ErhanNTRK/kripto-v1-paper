@@ -116,6 +116,22 @@ def _write_candidate_state(path, now, events, pending, pending_key):
     write_json(path, dict(state={"events": events, pending_key: pending, "window": now}))
 
 
+def _print_4h_long_scan(data_dir, state_path, now):
+    """Visible progress for the 4H long (AL_ADAYI) side, matching
+    write_short_state/write_2h_signal_state's own print lines -- this path
+    (the paper-engine-driven AL_ADAYI feed used for real 4H long entries)
+    printed nothing at all, silently sandwiched between "Binance connected"
+    and the next line. Live-reported 22 Sep 2026 as "sanki sadece short
+    ariyor ve sadece 4H icin ariyor gibi" -- it was actually running fine,
+    just invisible, right before write_short_state's own line printed."""
+    manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    saved_state = json.loads(state_path.read_text(encoding="utf-8"))["state"]
+    found = sum(1 for e in saved_state.get("events", [])
+               if e.get("type") == "AL_ADAYI" and e.get("time") == now)
+    print(f"4H long tarama: {len(manifest['symbols'])} sembol kontrol edildi, {found} AL_ADAYI bulundu.",
+         flush=True)
+
+
 def write_short_state(short_config, data_dir, runtime, now):
     """Detect live short candidates from the same freshly-fetched 4h
     universe the long paper tick just used, and publish them the same way
@@ -232,6 +248,7 @@ def local_tick(runtime_dir):
             raise
         state_path.unlink(missing_ok=True)
         tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+    _print_4h_long_scan(data_dir, state_path, now)
     write_short_state(config, data_dir, runtime_dir, now)
     write_2h_signal_state(config, runtime_dir, now_2h)
     shutil.rmtree(data_dir, ignore_errors=True)
@@ -278,6 +295,7 @@ def main():
             raise
         state_path.unlink(missing_ok=True)
         tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
+    _print_4h_long_scan(data_dir, state_path, now)
     write_short_state(config, data_dir, runtime, now)
     write_2h_signal_state(config, runtime, now_2h)
     database = runtime / "telegram.sqlite"
