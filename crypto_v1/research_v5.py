@@ -129,6 +129,24 @@ def long_entry(row, btc, config):
         # front of us.
         if row["c"] > row["range_high"]:
             return None
+    # Confirmation filters, all off by default (23 Sep 2026): a Donchian
+    # break says a high was taken out, not whether volume, momentum or the
+    # coin's own trend agree. Each is measured separately before any is
+    # deployed -- see the walk-forward comparison in ARASTIRMA.md.
+    volume_multiple = config.get("entry_volume_multiple")
+    if volume_multiple and row.get("volume_avg"):
+        if row["v"] < float(volume_multiple) * row["volume_avg"]:
+            return None
+    rsi_min, rsi_max = config.get("entry_rsi_min"), config.get("entry_rsi_max")
+    if (rsi_min or rsi_max) and row.get("rsi") is not None:
+        if rsi_min and row["rsi"] < float(rsi_min):
+            return None
+        if rsi_max and row["rsi"] > float(rsi_max):
+            return None
+    if config.get("require_coin_trend"):
+        ema20, ema50 = row.get("ema20"), row.get("ema50")
+        if not ema20 or not ema50 or ema20 <= ema50 or row["c"] <= ema20:
+            return None
     stop = row["c"] - config["atr_multiplier"] * row["atr"]
     if stop <= 0 or 2 * (row["c"] - stop) / row["c"] < COST_HURDLE:
         return None
