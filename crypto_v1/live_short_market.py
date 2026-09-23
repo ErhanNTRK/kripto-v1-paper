@@ -119,9 +119,22 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     # so BOTH systems treat them as held and as committed capital: the
     # conservative direction (never double up, never over-commit the shared
     # wallet), even though it can block a symbol the other system opened.
+    # ...but a position whose protective stop carries the OTHER system's
+    # tag is that system's, not this one's: counting it here too left the
+    # 4H side (holding 1) seeing 5 of its 6 slots used by the 2H side's
+    # positions on 23 Sep 2026 evening. Only positions no system's stop
+    # claims still count for both.
+    other_systems = ({o["symbol"] for o in open_orders
+                      if str(o.get("clientOrderId", "")).startswith((_SHORT_STOP_PREFIX, _LONG_STOP_PREFIX))}
+                     - {o["symbol"] for o in protective})
     account_positions = {p["symbol"]: p for p in account.get("positions", [])
-                         if abs(_decimal(p.get("positionAmt"))) > 0}
-    held_symbols = {o["symbol"] for o in protective} | set(account_positions)
+                         if abs(_decimal(p.get("positionAmt"))) > 0 and p["symbol"] not in other_systems}
+    own_symbols = {o["symbol"] for o in protective} | set(account_positions)
+    # The duplicate guard still looks at EVERY open position, whoever owns
+    # it: in one-way mode a second buy of a symbol the other system holds
+    # would merge into its position and tangle both systems' stops.
+    held_symbols = own_symbols | {p["symbol"] for p in account.get("positions", [])
+                                  if abs(_decimal(p.get("positionAmt"))) > 0}
     # Capital a leveraged position actually ties up is its isolated MARGIN
     # (notional / leverage), not the whole notional -- counting notional
     # (as this did until 22 Sep 2026) let one ~70-90 USDT position "use up"
@@ -165,7 +178,7 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     pilot_drawdown = max(Decimal("0"), pilot_capital - equity)
     opens_today = {o["clientOrderId"] for o in short_opens + long_opens
                    if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}
-    return {"open_positions": len(held_symbols), "held_symbols": held_symbols,
+    return {"open_positions": len(own_symbols), "held_symbols": held_symbols,
             "opens_today": len(opens_today),
             "realized_loss_today": realized_loss_today, "pilot_drawdown": pilot_drawdown,
             "free_usdt": free_usdt, "equity": equity}

@@ -603,3 +603,37 @@ class CapitalFractionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PositionOwnershipTests(unittest.TestCase):
+    """23 Sep 2026: the 4H side (holding 1 position) counted the 2H side's 4
+    positions as its own and saw 5 of its 6 slots used. A position whose
+    stop belongs to the other system counts only there; a position no
+    system's stop claims still counts for both."""
+
+    def _summary(self, tag, open_orders, positions):
+        account = {"availableBalance": "100", "totalMarginBalance": "160", "positions": positions}
+        return summarize_short_pilot(account, open_orders, [], dict(C, pilot_capital_usdt=78,
+                                                                     pilot_capital_fraction=0.5), 0, tag=tag)
+
+    POSITIONS = [{"symbol": "SAGAUSDT", "positionAmt": "595", "leverage": "2", "positionInitialMargin": "15"},
+                 {"symbol": "ZROUSDT", "positionAmt": "3.4", "leverage": "3", "positionInitialMargin": "1.7"},
+                 {"symbol": "ORPHANUSDT", "positionAmt": "10", "leverage": "2", "positionInitialMargin": "3"}]
+    STOPS = [{"symbol": "SAGAUSDT", "clientOrderId": "kv1fq41234"},
+             {"symbol": "ZROUSDT", "clientOrderId": "kv1fq25678"}]
+
+    def test_each_system_counts_its_own_plus_unclaimed_toward_its_limit(self):
+        four = self._summary("4", self.STOPS, self.POSITIONS)
+        two = self._summary("2", self.STOPS, self.POSITIONS)
+        self.assertEqual(four["open_positions"], 2)   # SAGA + the unclaimed one
+        self.assertEqual(two["open_positions"], 2)    # ZRO + the unclaimed one
+
+    def test_but_no_system_may_buy_a_symbol_the_other_already_holds(self):
+        four = self._summary("4", self.STOPS, self.POSITIONS)
+        self.assertEqual(four["held_symbols"], {"SAGAUSDT", "ZROUSDT", "ORPHANUSDT"})
+
+    def test_the_other_system_s_margin_is_not_this_system_s_commitment(self):
+        four = self._summary("4", self.STOPS, self.POSITIONS)
+        # 80 slice; own: SAGA via its stop (no fills in this fixture -> 0) + orphan 3.
+        self.assertEqual(four["free_usdt"], Decimal("77.0"))
+
