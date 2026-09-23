@@ -1028,3 +1028,36 @@ class ConsoleLogTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "bot.log.1").exists())
             self.assertFalse(path.exists())
 
+
+class WatchdogTests(unittest.TestCase):
+    """23 Sep 2026: the loop hung 6+ minutes on one silent Binance socket.
+    The watchdog dumps every thread's stack and exits so the launcher
+    restarts the bot."""
+
+    def test_a_stalled_loop_dumps_and_exits(self):
+        import crypto_v1.render_web as rw
+        events = []
+        rw.LOOP_PROGRESS["at"] = 0
+        rw.watch_loop(limit=60, now=lambda: 1000, sleep=lambda s: None,
+                      dump=lambda: events.append("dump"), exit_process=lambda: events.append("exit"))
+        self.assertEqual(events, ["dump", "exit"])
+
+    def test_a_progressing_loop_is_left_alone(self):
+        import crypto_v1.render_web as rw
+        calls = {"n": 0}
+        def sleep(_):
+            calls["n"] += 1
+            if calls["n"] > 3:
+                raise StopIteration
+        rw.LOOP_PROGRESS["at"] = 990
+        with self.assertRaises(StopIteration):
+            rw.watch_loop(limit=60, now=lambda: 1000, sleep=sleep,
+                          dump=lambda: self.fail("dumped"), exit_process=lambda: self.fail("exited"))
+
+    def test_the_loop_records_progress(self):
+        import crypto_v1.render_web as rw
+        rw.LOOP_PROGRESS["at"] = 0
+        app = MagicMock()
+        rw.run_periodic_scans([app], interval_seconds=1, sleep=lambda s: None, max_iterations=1)
+        self.assertGreater(rw.LOOP_PROGRESS["at"], 0)
+

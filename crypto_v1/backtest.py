@@ -43,6 +43,26 @@ class Engine:
         if s['losses'] >= c['max_consecutive_losses']:
             s['halted'] = True
 
+    def partial_close(self, symbol, price, t, fraction):
+        """Take `fraction` of a position off at `price` and keep the rest
+        running (research option partial_take_r, 23 Sep 2026). Booked as its
+        own trade with its own share of the initial risk, so R-multiples and
+        profit factor stay comparable with whole-position exits."""
+        s, c = self.s, self.c
+        p = s['positions'][symbol]
+        qty = p['qty'] * fraction
+        fill = price * (1 - c['slippage'])
+        received = qty * fill * (1 - c['fee'])
+        pnl = received - qty * p['entry'] * (1 + c['fee'])
+        risk = p['initial_risk'] * fraction
+        s['cash'] += received
+        p['qty'] -= qty
+        p['initial_risk'] -= risk
+        p['partial_done'] = True
+        s['trades'].append(dict(symbol=symbol, entry_time=p['entry_time'], exit_time=t, entry=p['entry'],
+                                exit=fill, qty=qty, pnl=pnl, risk=risk, r_multiple=pnl / risk if risk else 0,
+                                reason='partial_take'))
+
     def step(self, t, bars):
         s, c = self.s, self.c
         if s['last_t'] is not None and t <= s['last_t']:
@@ -102,6 +122,9 @@ class Engine:
                 self.close(symbol, min(f['o'], p['stop']), t, 'stop')
             elif c.get('cap_at_target', True) and f['h'] >= p['target']:
                 self.close(symbol, p['target'], t, 'target_2R')
+            elif c.get('partial_take_r') and not p.get('partial_done')                     and f['h'] >= p['entry'] + c['partial_take_r'] * p['unit_risk']:
+                self.partial_close(symbol, p['entry'] + c['partial_take_r'] * p['unit_risk'], t,
+                                   float(c.get('partial_take_fraction', 0.5)))
         s['marks'].update({symbol: f['c'] for symbol, f in bars.items()})
         if self.equity() <= s['day_equity'] * (1-c['daily_loss_fraction']):
             s['halted'] = True

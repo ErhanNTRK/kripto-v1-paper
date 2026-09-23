@@ -134,4 +134,14 @@ Write-Host "==> Bot basliyor. Bu pencere ACIK kaldigi surece bot calisir; kapati
 Write-Host "    Durum: http://127.0.0.1:10000/status   Saglik: http://127.0.0.1:10000/health"
 Write-Host ""
 Set-Location $Src
-& $Py -m crypto_v1.render_web
+# Restart the bot whenever it exits on its own -- a crash, or its watchdog
+# (render_web.watch_loop) ending a hung process (23 Sep 2026: the loop sat
+# 6+ minutes on one silent Binance connection). Closing this window, or
+# Ctrl+C, still stops everything.
+while ($true) {
+    & $Py -m crypto_v1.render_web
+    $code = $LASTEXITCODE
+    Write-Host ""
+    Write-Host "==> Bot durdu (cikis kodu $code). 15 saniye sonra yeniden baslatiliyor; durdurmak icin pencereyi kapatin." -ForegroundColor Yellow
+    Start-Sleep -Seconds 15
+}

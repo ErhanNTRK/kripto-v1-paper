@@ -15,6 +15,8 @@ This is a standalone simulator (not crypto_v1.backtest.Engine, which is
 long-only) so it can hold a short qty for a symbol without touching the
 already-validated long-only engine used by V1/V2 live trading.
 """
+from datetime import datetime, timezone
+
 from .indicators import features
 from .backtest import metrics
 from .research_v2 import aggregate, FOUR_HOUR
@@ -122,6 +124,15 @@ def long_entry(row, btc, config):
     if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
        or row.get("breaks_up", 0) < config.get("min_breaks", 2):
         return None
+    # Time-of-week filter (23 Sep 2026, research option from the user's
+    # Gemini notes): thin weekend / off-hours liquidity is easier to push
+    # around. Keyed on the signal bar's own UTC open time, off by default.
+    if config.get("skip_weekend_entries") or config.get("skip_entry_hours_utc"):
+        opened = datetime.fromtimestamp(row["t"] / 1000, timezone.utc)
+        if config.get("skip_weekend_entries") and opened.weekday() >= 5:
+            return None
+        if opened.hour in set(config.get("skip_entry_hours_utc") or ()):
+            return None
     # Market regime (23 Sep 2026): every losing walk-forward window was one
     # where BTC fell 20%+ and spent most of its time under its long average.
     # No new longs while BTC is below its regime_ma_days average. Unknown

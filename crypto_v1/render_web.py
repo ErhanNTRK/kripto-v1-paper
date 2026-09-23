@@ -791,18 +791,53 @@ def run_periodic_scans(apps, interval_seconds=LOOP_SECONDS, sleep=time.sleep, ma
         apps = [apps]
     iterations = 0
     while max_iterations is None or iterations < max_iterations:
+        LOOP_PROGRESS["at"] = time.time()
         if detect is not None:
             try:
                 detect()
             except Exception as exc:
                 print(f"Local candidate detection failed: {exc}", flush=True)
         for app in apps:
+            LOOP_PROGRESS["at"] = time.time()
             try:
                 app.tick()
             except Exception as exc:
                 print(f"Periodic tick failed: {exc}", flush=True)
         iterations += 1
+        LOOP_PROGRESS["at"] = time.time()
         sleep(interval_seconds)
+
+
+# Last time the periodic loop made progress. Live 23 Sep 2026 the loop sat
+# for 6+ minutes on one Binance connection that neither answered nor timed
+# out (no CPU, one ESTABLISHED socket): nothing was being entered, exited or
+# re-protected, and nobody would have known. See watch_loop.
+LOOP_PROGRESS = {"at": time.time()}
+WATCHDOG_SECONDS = 15 * 60  # a 2H detection pass can take ~7 min on a slow link
+
+
+def watch_loop(limit=WATCHDOG_SECONDS, check_every=30, now=time.time, sleep=time.sleep,
+               dump=None, exit_process=None):
+    """Exit the whole process when the periodic loop has made no progress
+    for `limit` seconds, after writing every thread's stack to the log (so
+    the next occurrence shows exactly which call hung). The launcher starts
+    the bot again; the exchange-resting stops never depended on this
+    process. A thread cannot be killed in Python, so exiting is the only
+    reliable way out of a hung socket."""
+    import faulthandler
+    dump = dump or (lambda: faulthandler.dump_traceback(file=sys.stderr, all_threads=True))
+    exit_process = exit_process or (lambda: os._exit(3))
+    while True:
+        sleep(check_every)
+        stalled = now() - LOOP_PROGRESS["at"]
+        if stalled > limit:
+            print(f"WATCHDOG: periodic loop stalled for {int(stalled)} s; dumping threads and exiting "
+                  "so the launcher restarts the bot.", flush=True)
+            try:
+                dump()
+            finally:
+                exit_process()
+            return
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -942,6 +977,7 @@ def main():
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ))
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
+    threading.Thread(target=watch_loop, daemon=True).start()
     threading.Thread(target=run_periodic_scans, args=(APPS,),
                      kwargs={"detect": lambda: local_tick(runtime_dir)}, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
