@@ -100,15 +100,24 @@ def prepare_data(config, runtime, now):
     data_dir = runtime / "data"
     manifest_path = runtime / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
-    if manifest is None or manifest.get("timeframe") != "4h":
-        # No cache yet, or a stale pre-V2 cache (15m, top-50 V1 universe) left
-        # over from before the V1->V2 switch -- must not be silently reused.
+    # Re-ranked once a day (23 Sep 2026). It used to be ranked once and then
+    # kept forever to hold the paper state's fingerprint steady, so the 4H
+    # side scanned a frozen 22 Sep list: ACEUSDT, in today's top 50, fired a
+    # signal the 4H system never saw, while the 2H side (ranked every pass)
+    # did. A new list changes the fingerprint and local_tick starts a fresh
+    # paper state -- harmless, that state only feeds candidate detection.
+    # A manifest without ranked_at predates this and is refreshed too.
+    stale = (manifest is None or manifest.get("timeframe") != "4h"
+             or now - int(manifest.get("ranked_at", -86_400_000)) >= 86_400_000)
+    if stale:
+        # Also covers a pre-V2 cache (15m, top-50 V1 universe) left over
+        # from before the V1->V2 switch -- must not be silently reused.
         symbols = universe(config)
-        manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data"}
+        manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data",
+                    "ranked_at": now}
         write_json(manifest_path, manifest)
     symbols = manifest["symbols"]
-    # A cached 4h manifest is deliberately never re-ranked (the paper
-    # state's fingerprint hashes this list), so a manifest written before
+    # Between daily re-ranks the cached list is reused as-is, so a manifest written before
     # universe() started filtering to Futures-tradable symbols (22 Sep
     # 2026) still carried Spot-only symbols that no live entry can fill --
     # the 4H long/short detectors and the paper engine kept flagging them.

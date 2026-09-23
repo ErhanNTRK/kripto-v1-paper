@@ -37,7 +37,7 @@ class PrepareDataTests(unittest.TestCase):
         # symbols, but a cached 4h manifest never calls universe() again,
         # so the 4H detectors kept scanning Spot-only symbols (FETUSDT-
         # style) that every live entry attempt rejects with -1121.
-        cached = {'symbols': ['SOLUSDT', 'FETUSDT'], 'timeframe': '4h', 'source': 'x'}
+        cached = {'symbols': ['SOLUSDT', 'FETUSDT'], 'timeframe': '4h', 'source': 'x', 'ranked_at': 0}
         with tempfile.TemporaryDirectory() as tmp:
             runtime = Path(tmp)
             (runtime / 'manifest.json').write_text(json.dumps(cached), encoding='utf-8')
@@ -55,7 +55,7 @@ class PrepareDataTests(unittest.TestCase):
         self.assertEqual(fetched, {'SOLUSDT', 'BTCUSDT'})
 
     def test_a_failed_tradable_lookup_leaves_the_cached_manifest_alone(self):
-        cached = {'symbols': ['SOLUSDT', 'FETUSDT'], 'timeframe': '4h', 'source': 'x'}
+        cached = {'symbols': ['SOLUSDT', 'FETUSDT'], 'timeframe': '4h', 'source': 'x', 'ranked_at': 0}
         with tempfile.TemporaryDirectory() as tmp:
             runtime = Path(tmp)
             (runtime / 'manifest.json').write_text(json.dumps(cached), encoding='utf-8')
@@ -84,11 +84,32 @@ class PrepareDataTests(unittest.TestCase):
         self.assertEqual(manifest['symbols'], ['ETHUSDT'])
 
     def test_matching_4h_cache_is_reused_without_a_fresh_fetch(self):
-        cached = {'symbols': ['SOLUSDT'], 'timeframe': '4h', 'source': 'x'}
+        cached = {'symbols': ['SOLUSDT'], 'timeframe': '4h', 'source': 'x', 'ranked_at': 0}
         with tempfile.TemporaryDirectory() as tmp:
             mock_universe, manifest = self._run(Path(tmp), existing_manifest=cached)
         mock_universe.assert_not_called()
         self.assertEqual(manifest['symbols'], ['SOLUSDT'])
+
+    def test_a_day_old_manifest_is_re_ranked(self):
+        # 23 Sep 2026: the 4H list had been frozen since 22 Sep, so a coin
+        # new to the top 50 (ACEUSDT) was never scanned by the 4H side.
+        cached = {'symbols': ['SOLUSDT'], 'timeframe': '4h', 'source': 'x', 'ranked_at': 0}
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            (runtime / 'manifest.json').write_text(json.dumps(cached), encoding='utf-8')
+            with patch('crypto_v1.github_worker.universe', return_value=['ETHUSDT']) as mock_universe,                  patch('crypto_v1.github_worker.futures_tradable_symbols', return_value={'ETHUSDT'}),                  patch('crypto_v1.github_worker.candles', return_value=[]),                  patch('crypto_v1.github_worker.validate', return_value=[]):
+                prepare_data({}, runtime, now=86_400_000)
+            persisted = json.loads((runtime / 'manifest.json').read_text(encoding='utf-8'))
+        mock_universe.assert_called_once()
+        self.assertEqual(persisted['symbols'], ['ETHUSDT'])
+        self.assertEqual(persisted['ranked_at'], 86_400_000)
+
+    def test_a_manifest_from_before_daily_ranking_is_refreshed(self):
+        legacy = {'symbols': ['SOLUSDT'], 'timeframe': '4h', 'source': 'x'}
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_universe, manifest = self._run(Path(tmp), existing_manifest=legacy)
+        mock_universe.assert_called_once()
+        self.assertEqual(manifest['symbols'], ['ETHUSDT'])
 
     def test_fetch_window_is_at_least_200_bars_for_ema200_to_ever_populate(self):
         # Regression: a 30-day (180-bar) window meant indicators.features'
