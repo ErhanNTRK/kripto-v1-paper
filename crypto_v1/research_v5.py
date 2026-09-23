@@ -84,6 +84,20 @@ def symmetric_features(rows, config):
         mid = windows[1]
         row["long_exit"] = min(x["l"] for x in rows[i - mid:i]) if i >= mid else None
         row["short_exit"] = max(x["h"] for x in rows[i - mid:i]) if i >= mid else None
+        # Context for the "do not buy a first-time vertical move" filters in
+        # long_entry (23 Sep 2026, user's observation on NIL/SAGA). Computed
+        # only when a filter actually asks for it -- each is a window scan
+        # over every bar of every symbol.
+        longest = windows[-1]
+        if config.get("max_extension_atr"):
+            row["break_level"] = max(x["h"] for x in rows[i - longest:i]) if i >= longest else None
+        if config.get("max_runup_fraction"):
+            span = int(config.get("runup_bars", 10))
+            row["runup"] = (row["c"] / rows[i - span]["c"] - 1) if i >= span and rows[i - span]["c"] else None
+        if config.get("skip_first_time_high"):
+            span = int(config.get("first_time_high_bars", 200))
+            row["range_high"] = max(x["h"] for x in rows[i - span:i]) if i >= span else None
+            row["has_history"] = i >= span
     return out
 
 
@@ -96,6 +110,25 @@ def long_entry(row, btc, config):
     if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
        or row.get("breaks_up", 0) < config.get("min_breaks", 2):
         return None
+    # Optional "quality of the breakout" filters, all off by default so the
+    # live signal is unchanged until one is validated. They exist because a
+    # Donchian break says only THAT a high was taken out, never how violent
+    # the move getting there was -- live 23 Sep 2026: NIL and SAGA both
+    # qualified on a first-ever vertical run and went straight into loss.
+    extension = config.get("max_extension_atr")
+    if extension and row.get("break_level") is not None:
+        # How far ABOVE the level it broke are we already buying?
+        if row["c"] - row["break_level"] > float(extension) * row["atr"]:
+            return None
+    runup = config.get("max_runup_fraction")
+    if runup and row.get("runup") is not None and row["runup"] > float(runup):
+        return None
+    if config.get("skip_first_time_high") and row.get("range_high") is not None:
+        # Never traded this high before in the lookback: no earlier holder
+        # has had a chance to take profit, and every one of them is now in
+        # front of us.
+        if row["c"] > row["range_high"]:
+            return None
     stop = row["c"] - config["atr_multiplier"] * row["atr"]
     if stop <= 0 or 2 * (row["c"] - stop) / row["c"] < COST_HURDLE:
         return None

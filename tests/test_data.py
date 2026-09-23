@@ -66,3 +66,33 @@ class UniverseTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FuturesListingAgeTests(unittest.TestCase):
+    """min_listing_age_days (23 Sep 2026): a contract listed only months ago
+    has no earlier range to break out of, so the signal fires on a first-time
+    vertical move (NIL, SAGA, MUBARAK live). Binance's onboardDate decides."""
+
+    INFO = {"serverTime": 1_000_000_000_000, "symbols": [
+        {"symbol": "OLDUSDT", "quoteAsset": "USDT", "contractType": "PERPETUAL",
+         "status": "TRADING", "onboardDate": 1_000_000_000_000 - 400 * 86_400_000},
+        {"symbol": "NEWUSDT", "quoteAsset": "USDT", "contractType": "PERPETUAL",
+         "status": "TRADING", "onboardDate": 1_000_000_000_000 - 30 * 86_400_000},
+        {"symbol": "NODATEUSDT", "quoteAsset": "USDT", "contractType": "PERPETUAL",
+         "status": "TRADING"},
+    ]}
+
+    def test_without_a_floor_every_trading_contract_is_returned(self):
+        with patch('crypto_v1.data.futures_get', return_value=self.INFO):
+            self.assertEqual(futures_tradable_symbols(),
+                             {"OLDUSDT", "NEWUSDT", "NODATEUSDT"})
+
+    def test_a_recent_listing_is_dropped(self):
+        with patch('crypto_v1.data.futures_get', return_value=self.INFO):
+            symbols = futures_tradable_symbols(360)
+        self.assertIn("OLDUSDT", symbols)
+        self.assertNotIn("NEWUSDT", symbols)
+
+    def test_a_contract_without_an_onboard_date_is_kept(self):
+        with patch('crypto_v1.data.futures_get', return_value=self.INFO):
+            self.assertIn("NODATEUSDT", futures_tradable_symbols(360))

@@ -55,11 +55,22 @@ def futures_get(path, params=None):
             time.sleep(2 ** attempt)
 
 
-def futures_tradable_symbols():
+def futures_tradable_symbols(min_age_days=0, now_ms=None):
+    """min_age_days drops contracts listed too recently (23 Sep 2026, user's
+    call after NIL/SAGA): a symbol whose whole price history is a few months
+    of its first big move has no earlier range to break out OF, so the
+    signal fires on what is really just a first-time vertical move, into
+    holders who have never had a chance to take profit before. Binance's own
+    onboardDate is the source; a contract without one is kept (the field is
+    missing, not zero-aged)."""
     info = futures_get('exchangeInfo')
+    now_ms = now_ms if now_ms is not None else info.get('serverTime') or int(time.time() * 1000)
+    cutoff = now_ms - int(min_age_days) * 86_400_000
     return {s['symbol'] for s in info['symbols']
             if s.get('quoteAsset') == 'USDT' and s.get('contractType') == 'PERPETUAL'
-            and s.get('status') == 'TRADING'}
+            and s.get('status') == 'TRADING'
+            and (not min_age_days or int(s.get('onboardDate') or 0) <= cutoff
+                 or not s.get('onboardDate'))}
 
 
 def universe(config):
@@ -79,7 +90,7 @@ def universe(config):
     # system found all day, so ENTRIES_PER_TICK capacity was spent
     # retrying two symbols that could never fill while any other real
     # opportunity that day went untaken.
-    eligible &= futures_tradable_symbols()
+    eligible &= futures_tradable_symbols(config.get('min_listing_age_days', 0))
     ranked = sorted((t for t in get('ticker/24hr') if t['symbol'] in eligible),
                     key=lambda t: (-float(t['quoteVolume']), t['symbol']))
     return [t['symbol'] for t in ranked[:config['top_n']]]
