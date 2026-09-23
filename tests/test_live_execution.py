@@ -203,10 +203,11 @@ class MinimumNotionalFloorTests(unittest.TestCase):
              "min_qty": Decimal("0.1"), "min_notional": Decimal("5")}
 
     def test_below_minimum_is_rounded_up_within_the_ceiling(self):
-        # 0.27 risk at a 6% stop = 4.5 USDT notional; rounded up to 5 USDT (~0.30 loss).
+        # 0.27 risk at a 6% stop = 4.5 USDT notional; rounded up to the 5 USDT
+        # minimum plus 3% headroom -> 5.2 at a 0.1 step (~0.31 loss).
         plan = leveraged_order_plan("long", Decimal("1.0"), Decimal("0.94"), Decimal("36"),
                                     Decimal("0.27"), 4, self.RULES, max_risk_usdt=Decimal("0.54"))
-        self.assertEqual(Decimal(plan["quantity"]), Decimal("5.0"))
+        self.assertEqual(Decimal(plan["quantity"]), Decimal("5.2"))
         self.assertLessEqual(Decimal(plan["planned_loss_usdt"]), Decimal("0.54"))
 
     def test_skipped_when_the_minimum_would_exceed_the_ceiling(self):
@@ -219,4 +220,23 @@ class MinimumNotionalFloorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             leveraged_order_plan("long", Decimal("1.0"), Decimal("0.94"), Decimal("36"),
                                  Decimal("0.27"), 4, self.RULES)
+
+
+class MinimumNotionalHeadroomTests(unittest.TestCase):
+    """-4164 live (ACEUSDT, 23 Sep 2026): an order sized to exactly the 5
+    USDT minimum at the mark price fell under it at Binance's execution
+    price. Orders keep 3% headroom over the minimum."""
+    RULES = {"step_size": Decimal("0.01"), "tick_size": Decimal("0.0001"),
+             "min_qty": Decimal("0.01"), "min_notional": Decimal("5")}
+
+    def test_a_floored_order_clears_the_minimum_with_headroom(self):
+        plan = leveraged_order_plan("long", Decimal("0.1817"), Decimal("0.1665"), Decimal("36"),
+                                    Decimal("0.27"), 4, self.RULES, max_risk_usdt=Decimal("0.54"))
+        self.assertGreaterEqual(Decimal(plan["quantity"]) * Decimal("0.1817"), Decimal("5.15"))
+
+    def test_an_order_just_over_the_bare_minimum_is_raised_too(self):
+        # Risk-sized to ~5.05 USDT: over 5, but inside the headroom band.
+        plan = leveraged_order_plan("long", Decimal("1.0"), Decimal("0.94"), Decimal("36"),
+                                    Decimal("0.303"), 4, self.RULES, max_risk_usdt=Decimal("0.54"))
+        self.assertGreaterEqual(Decimal(plan["quantity"]), Decimal("5.15"))
 

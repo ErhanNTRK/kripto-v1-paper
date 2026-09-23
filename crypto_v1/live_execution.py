@@ -74,6 +74,13 @@ def futures_symbol_rules(exchange_symbol):
     }
 
 
+# Headroom over Binance's minimum order value. The plan is sized at the
+# mark price, but Binance checks the MARKET order against its own price at
+# execution; an order sized to exactly 5.0x USDT was rejected live with
+# -4164 (ACEUSDT, 23 Sep 2026 21:22) when that price came in a hair lower.
+MIN_NOTIONAL_HEADROOM = Decimal("1.03")
+
+
 def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rules, max_risk_usdt=None):
     """Size a leveraged Futures position by the same fixed-dollar-risk method
     as Spot's protective_order_plan, with an added margin cap: the position
@@ -105,7 +112,8 @@ def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rule
     # above entry) -- never rounds toward a tighter, accidentally-worse stop.
     stop_price = _down(stop, rules["tick_size"]) if side == "long" else _up(stop, rules["tick_size"])
     budget = risk_usdt
-    if qty < rules["min_qty"] or qty * entry < rules["min_notional"]:
+    min_value = rules["min_notional"] * MIN_NOTIONAL_HEADROOM
+    if qty < rules["min_qty"] or qty * entry < min_value:
         # max_risk_usdt (23 Sep 2026): a small slice at 0.75% risk sizes
         # most wide-stop trades under Binance's 5 USDT minimum, so they would
         # all be skipped. Round UP to the exchange minimum instead -- but
@@ -114,7 +122,7 @@ def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rule
         if max_risk_usdt is None:
             raise ValueError("order is below Binance minimums")
         max_risk_usdt = Decimal(str(max_risk_usdt))
-        floor_qty = _up(max(rules["min_qty"], rules["min_notional"] / entry), rules["step_size"])
+        floor_qty = _up(max(rules["min_qty"], min_value / entry), rules["step_size"])
         if floor_qty * abs(entry - stop_price) > max_risk_usdt                 or floor_qty * entry / leverage > free_usdt * Decimal("0.9"):
             raise ValueError("order is below Binance minimums")
         qty, budget = floor_qty, max_risk_usdt
