@@ -75,6 +75,7 @@ class LiveShortControllerTests(unittest.TestCase):
         executor.market_open_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "-0.068",
                                                  "liquidationPrice": "150"}]
+        executor.position_risk.side_effect = [[], executor.position_risk.return_value]
         executor.protective_stop_for_short.return_value = {"status": "NEW"}
         env = {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
         result = approve_short(7, "SHORT", 501000, SAVED, dict(C, live_trading_enabled=True),
@@ -92,6 +93,7 @@ class LiveShortControllerTests(unittest.TestCase):
         # liquidation at 106 is inside the required 20% buffer beyond the 105 stop.
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "-0.068",
                                                  "liquidationPrice": "106"}]
+        executor.position_risk.side_effect = [[], executor.position_risk.return_value]
         executor.market_close_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         env = {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
         result = approve_short(7, "SHORT", 501000, SAVED, dict(C, live_trading_enabled=True),
@@ -108,6 +110,7 @@ class LiveShortControllerTests(unittest.TestCase):
         executor.market_open_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "-0.068",
                                                  "liquidationPrice": "150"}]
+        executor.position_risk.side_effect = [[], executor.position_risk.return_value]
         executor.protective_stop_for_short.side_effect = OrderRejected(-1013)
         executor.market_close_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         result = approve_short(9, "SHORT", 501000, SAVED, dict(C, live_trading_enabled=True),
@@ -191,6 +194,7 @@ class ApproveLongLeveragedTests(unittest.TestCase):
         executor.market_open_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "0.068",
                                                  "liquidationPrice": "50"}]
+        executor.position_risk.side_effect = [[], executor.position_risk.return_value]
         executor.protective_stop_for_long.return_value = {"status": "NEW"}
         env = {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
         result = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, dict(C_LONG, live_trading_enabled=True),
@@ -208,6 +212,7 @@ class ApproveLongLeveragedTests(unittest.TestCase):
         # liquidation at 94 is inside the required 20% buffer below the 95 stop.
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "0.068",
                                                  "liquidationPrice": "94"}]
+        executor.position_risk.side_effect = [[], executor.position_risk.return_value]
         executor.market_close_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         env = {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
         result = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, dict(C_LONG, live_trading_enabled=True),
@@ -224,6 +229,7 @@ class ApproveLongLeveragedTests(unittest.TestCase):
         executor.market_open_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "0.068",
                                                  "liquidationPrice": "50"}]
+        executor.position_risk.side_effect = [[], executor.position_risk.return_value]
         executor.protective_stop_for_long.side_effect = OrderRejected(-1013)
         executor.market_close_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         result = approve_long_leveraged(9, "AL", 501000, SAVED_LONG_FIXED, dict(C_LONG, live_trading_enabled=True),
@@ -264,4 +270,29 @@ class SettleFillTests(unittest.TestCase):
         order = _settle_fill(executor, "X", "id", {"status": "NEW"}, attempts=3, sleep=lambda s: None)
         self.assertEqual(order["status"], "NEW")
         self.assertEqual(executor.query.call_count, 3)
+
+
+class AlreadyOpenGuardTests(unittest.TestCase):
+    """23 Sep 2026 23:02: the 2H side went for NILUSDT seconds after the 4H
+    side bought it, reading pilot data cached before that buy. A fresh
+    per-symbol position check now runs right before every order."""
+
+    def test_an_existing_position_blocks_a_second_buy(self):
+        from crypto_v1.live_short_controller import _already_open
+        executor = MagicMock()
+        executor.position_risk.return_value = [{"symbol": "NILUSDT", "positionAmt": "52.7"}]
+        self.assertTrue(_already_open(executor, None, "NILUSDT"))
+
+    def test_a_flat_symbol_is_free(self):
+        from crypto_v1.live_short_controller import _already_open
+        executor = MagicMock()
+        executor.position_risk.return_value = [{"symbol": "NILUSDT", "positionAmt": "0"}]
+        self.assertFalse(_already_open(executor, None, "NILUSDT"))
+
+    def test_a_fill_drops_the_shared_pilot_cache(self):
+        from crypto_v1.live_short_controller import _opened
+        from crypto_v1.live_short_market import BinanceFuturesMarket
+        BinanceFuturesMarket._raw_pilot_cache = (0, {}, [], [])
+        _opened(BinanceFuturesMarket.__new__(BinanceFuturesMarket))
+        self.assertIsNone(BinanceFuturesMarket._raw_pilot_cache)
 

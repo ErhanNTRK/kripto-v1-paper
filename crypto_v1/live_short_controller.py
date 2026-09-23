@@ -34,6 +34,28 @@ def _settle_fill(executor, symbol, client_id, order, attempts=5, sleep=time.slee
     return order
 
 
+def _already_open(executor, market, symbol):
+    """Fresh, per-symbol check straight before any order. held_symbols comes
+    from pilot data cached up to 90s and shared by the 4H and 2H systems;
+    live 23 Sep 2026 23:02 the 4H side bought NILUSDT and the 2H side,
+    still reading the pre-buy cache, went for the same symbol seconds later
+    -- only a leverage change Binance happened to refuse (-4067) stopped a
+    second buy that would have merged into the first position (one-way
+    mode) and tangled both systems' stops."""
+    for entry in executor.position_risk(symbol):
+        if entry.get("symbol") == symbol and abs(float(entry.get("positionAmt", "0"))) > 0:
+            return True
+    return False
+
+
+def _opened(market):
+    # A fill changes positions, margin and held_symbols for BOTH systems:
+    # drop the shared pilot cache so the next decision sees it.
+    invalidate = getattr(market, "invalidate_pilot_cache", None)
+    if invalidate:
+        invalidate()
+
+
 def _position_for(symbol, position_risk):
     for entry in position_risk:
         if entry.get("symbol") == symbol and abs(float(entry.get("positionAmt", "0"))) > 0:
@@ -74,12 +96,15 @@ def approve_short(update_id, command, now_ms, saved, config, environment, market
     if not execution_enabled(config, environment):
         return {"status": "preview", "reason": "real_orders_disabled", "plan": plan}
     symbol = signal["symbol"]
+    if _already_open(executor, market, symbol):
+        return {"status": "rejected", "reason": "already_holding_symbol"}
     executor.set_isolated_margin(symbol)
     executor.set_leverage(symbol, plan["leverage"])
     open_id = f"kv1fs{int(update_id)}"
     opened = _known_or_place(executor, symbol, open_id,
                              lambda: executor.market_open_short(symbol, plan["quantity"], open_id))
     opened = _settle_fill(executor, symbol, open_id, opened)
+    _opened(market)
     filled_qty = Decimal(str(opened.get("executedQty", "0")))
     if opened.get("status") != "FILLED" or filled_qty <= 0:
         raise RuntimeError("short open was not fully filled; operator review required")
@@ -157,12 +182,15 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
     if not execution_enabled(config, environment):
         return {"status": "preview", "reason": "real_orders_disabled", "plan": plan}
     symbol = signal["symbol"]
+    if _already_open(executor, market, symbol):
+        return {"status": "rejected", "reason": "already_holding_symbol"}
     executor.set_isolated_margin(symbol)
     executor.set_leverage(symbol, plan["leverage"])
     open_id = f"kv1fl{int(update_id)}"
     opened = _known_or_place(executor, symbol, open_id,
                              lambda: executor.market_open_long(symbol, plan["quantity"], open_id))
     opened = _settle_fill(executor, symbol, open_id, opened)
+    _opened(market)
     filled_qty = Decimal(str(opened.get("executedQty", "0")))
     if opened.get("status") != "FILLED" or filled_qty <= 0:
         raise RuntimeError("long open was not fully filled; operator review required")

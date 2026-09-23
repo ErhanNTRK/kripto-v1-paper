@@ -252,6 +252,13 @@ class BinanceFuturesMarket:
             BinanceFuturesMarket._raw_pilot_cache = (now, account, open_orders, orders)
             return account, open_orders, orders
 
+    @classmethod
+    def invalidate_pilot_cache(cls):
+        """Called after every fill (live_short_controller._opened), so the
+        other system's next decision sees the new position at once."""
+        with cls._raw_pilot_lock:
+            cls._raw_pilot_cache = None
+
     def pilot_status(self):
         account, open_orders, orders = self._raw_pilot_data()
         start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0,
