@@ -29,6 +29,24 @@ if ($alive) {
     exit 0
 }
 
+# A click inside a classic console window puts it in QuickEdit selection
+# mode, which BLOCKS every write to it until a key is pressed -- and a bot
+# thread that prints then stops in place. Suspected cause of the 23 Sep
+# 2026 16:21 stall. Turn QuickEdit off for this window only.
+try {
+    Add-Type -Namespace Kripto -Name ConsoleMode -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int handle);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+'@
+    $stdin = [Kripto.ConsoleMode]::GetStdHandle(-10)
+    $mode = [uint32]0
+    if ([Kripto.ConsoleMode]::GetConsoleMode($stdin, [ref]$mode)) {
+        # clear ENABLE_QUICK_EDIT_MODE (0x40); ENABLE_EXTENDED_FLAGS (0x80) makes it stick
+        [void][Kripto.ConsoleMode]::SetConsoleMode($stdin, (($mode -band 0xFFFFFFBF) -bor 0x80))
+    }
+} catch {}
+
 $Base = Join-Path $env:USERPROFILE "kripto"
 $Src = Join-Path $Base "src"
 $Secrets = Join-Path $Base "secrets"

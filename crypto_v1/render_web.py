@@ -825,14 +825,26 @@ def watch_loop(limit=WATCHDOG_SECONDS, check_every=30, now=time.time, sleep=time
     process. A thread cannot be killed in Python, so exiting is the only
     reliable way out of a hung socket."""
     import faulthandler
-    dump = dump or (lambda: faulthandler.dump_traceback(file=sys.stderr, all_threads=True))
+    log_path = Path(os.environ.get("CRYPTO_STORAGE", "runtime")) / "bot.log"
+    def dump_to_log():
+        # Straight to the file: sys.stderr may be the very console that is
+        # frozen, which is exactly how the 23 Sep 16:21 stall went unlogged.
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write(time.strftime("%Y-%m-%d %H:%M:%S") + " WATCHDOG thread dump:\n")
+            log.flush()
+            faulthandler.dump_traceback(file=log, all_threads=True)
+    dump = dump or dump_to_log
     exit_process = exit_process or (lambda: os._exit(3))
     while True:
         sleep(check_every)
         stalled = now() - LOOP_PROGRESS["at"]
         if stalled > limit:
-            print(f"WATCHDOG: periodic loop stalled for {int(stalled)} s; dumping threads and exiting "
-                  "so the launcher restarts the bot.", flush=True)
+            try:
+                with open(Path(os.environ.get("CRYPTO_STORAGE", "runtime")) / "bot.log", "a", encoding="utf-8") as log:
+                    log.write(time.strftime("%Y-%m-%d %H:%M:%S") + f" WATCHDOG: periodic loop stalled for "
+                              f"{int(stalled)} s; dumping threads and exiting so the launcher restarts the bot.\n")
+            except OSError:
+                pass
             try:
                 dump()
             finally:
@@ -897,7 +909,10 @@ class ConsoleLog:
             self.path.replace(self.path.with_suffix(".log.1"))
 
     def write(self, text):
-        self.stream.write(text)
+        # File FIRST, console second (23 Sep 2026): a Windows console in
+        # selection ("QuickEdit") mode blocks every write until someone
+        # presses a key, and with the console first nothing reached the log
+        # either -- not even the watchdog's own message.
         with self.lock:
             self.pending += text
             *lines, self.pending = self.pending.split("\n")
@@ -908,6 +923,7 @@ class ConsoleLog:
                         log.writelines(f"{stamp} {line}\n" for line in lines if line.strip())
                 except OSError:
                     pass  # logging must never take the bot down
+        self.stream.write(text)
         return len(text)
 
     def flush(self):
