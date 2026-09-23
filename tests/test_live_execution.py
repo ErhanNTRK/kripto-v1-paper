@@ -193,3 +193,30 @@ class LiquidationIsSafeTests(unittest.TestCase):
 
     def test_zero_liquidation_price_is_never_safe(self):
         self.assertFalse(liquidation_is_safe("long", stop_price="19", liquidation_price="0"))
+
+
+class MinimumNotionalFloorTests(unittest.TestCase):
+    """max_risk_usdt (23 Sep 2026): a trade sized under Binance's minimum is
+    rounded up to it only while the loss at the stop stays within the hard
+    ceiling; otherwise it is still skipped."""
+    RULES = {"step_size": Decimal("0.1"), "tick_size": Decimal("0.0001"),
+             "min_qty": Decimal("0.1"), "min_notional": Decimal("5")}
+
+    def test_below_minimum_is_rounded_up_within_the_ceiling(self):
+        # 0.27 risk at a 6% stop = 4.5 USDT notional; rounded up to 5 USDT (~0.30 loss).
+        plan = leveraged_order_plan("long", Decimal("1.0"), Decimal("0.94"), Decimal("36"),
+                                    Decimal("0.27"), 4, self.RULES, max_risk_usdt=Decimal("0.54"))
+        self.assertEqual(Decimal(plan["quantity"]), Decimal("5.0"))
+        self.assertLessEqual(Decimal(plan["planned_loss_usdt"]), Decimal("0.54"))
+
+    def test_skipped_when_the_minimum_would_exceed_the_ceiling(self):
+        # 15% stop: 5 USDT minimum loses 0.75 > 0.54 ceiling.
+        with self.assertRaises(ValueError):
+            leveraged_order_plan("long", Decimal("1.0"), Decimal("0.85"), Decimal("36"),
+                                 Decimal("0.27"), 4, self.RULES, max_risk_usdt=Decimal("0.54"))
+
+    def test_without_a_ceiling_the_old_skip_applies(self):
+        with self.assertRaises(ValueError):
+            leveraged_order_plan("long", Decimal("1.0"), Decimal("0.94"), Decimal("36"),
+                                 Decimal("0.27"), 4, self.RULES)
+

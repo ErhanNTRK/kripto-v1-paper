@@ -18,5 +18,6 @@
   "live_fee_buffer_fraction": 0.001,
   "risk_per_trade_fraction": 0.0075,
   "daily_loss_limit_fraction": 0.1,
-  "pilot_loss_limit_fraction": 0.4
+  "pilot_loss_limit_fraction": 0.4,
+  "max_risk_per_trade_fraction": 0.015
 }

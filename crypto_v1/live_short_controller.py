@@ -12,7 +12,7 @@ from decimal import Decimal
 from .binance_trade import OrderRejected, OrderStateUnknown
 from .live_controller import _known_or_place
 from .live_execution import execution_enabled, leveraged_order_plan, liquidation_is_safe, safe_leverage
-from .live_limits import confirmed_signal, may_open, trade_risk_usdt
+from .live_limits import confirmed_signal, may_open, max_trade_risk_usdt, trade_risk_usdt
 from .live_signal import pending_candidates, pending_short_candidates
 from .short_signal import leverage_for_signal
 
@@ -68,7 +68,8 @@ def approve_short(update_id, command, now_ms, saved, config, environment, market
         return {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"}
     rules = market.rules(signal["symbol"])
     plan = leveraged_order_plan("short", price, stop, status["free_usdt"],
-                                trade_risk_usdt(config, status.get("equity")), leverage, rules)
+                                trade_risk_usdt(config, status.get("equity")), leverage, rules,
+                                max_risk_usdt=max_trade_risk_usdt(config, status.get("equity")))
     plan.update(symbol=signal["symbol"], entry_price=format(price, "f"))
     if not execution_enabled(config, environment):
         return {"status": "preview", "reason": "real_orders_disabled", "plan": plan}
@@ -150,7 +151,8 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
         return {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"}
     rules = market.rules(signal["symbol"])
     plan = leveraged_order_plan("long", price, stop, status["free_usdt"],
-                                trade_risk_usdt(config, status.get("equity")), leverage, rules)
+                                trade_risk_usdt(config, status.get("equity")), leverage, rules,
+                                max_risk_usdt=max_trade_risk_usdt(config, status.get("equity")))
     plan.update(symbol=signal["symbol"], entry_price=format(price, "f"))
     if not execution_enabled(config, environment):
         return {"status": "preview", "reason": "real_orders_disabled", "plan": plan}

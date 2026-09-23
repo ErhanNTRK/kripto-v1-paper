@@ -15,6 +15,16 @@ def trade_risk_usdt(config, equity):
     return Decimal(str(config["risk_per_trade_usdt"]))
 
 
+def max_trade_risk_usdt(config, equity):
+    """Hard ceiling a trade may be rounded UP to when its 0.75% size falls
+    under Binance's minimum order (see live_execution.leveraged_order_plan).
+    None -- no rounding up, the trade is skipped -- when not configured."""
+    fraction = config.get("max_risk_per_trade_fraction")
+    if fraction and equity and Decimal(str(equity)) > 0:
+        return Decimal(str(equity)) * Decimal(str(fraction))
+    return None
+
+
 def loss_limits(config, equity):
     """(daily, pilot) loss limits in USDT. The *_fraction forms scale with
     the system: daily as a share of current equity, pilot drawdown as a

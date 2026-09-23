@@ -74,7 +74,7 @@ def futures_symbol_rules(exchange_symbol):
     }
 
 
-def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rules):
+def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rules, max_risk_usdt=None):
     """Size a leveraged Futures position by the same fixed-dollar-risk method
     as Spot's protective_order_plan, with an added margin cap: the position
     may never demand more than the allocated free capital, even at the
@@ -104,10 +104,22 @@ def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rule
     # stop sits below entry) mirrored for a short stop (_up, since it sits
     # above entry) -- never rounds toward a tighter, accidentally-worse stop.
     stop_price = _down(stop, rules["tick_size"]) if side == "long" else _up(stop, rules["tick_size"])
+    budget = risk_usdt
     if qty < rules["min_qty"] or qty * entry < rules["min_notional"]:
-        raise ValueError("order is below Binance minimums")
+        # max_risk_usdt (23 Sep 2026): a small slice at 0.75% risk sizes
+        # most wide-stop trades under Binance's 5 USDT minimum, so they would
+        # all be skipped. Round UP to the exchange minimum instead -- but
+        # only while the resulting loss at the stop stays within this hard
+        # ceiling and the margin fits; past it the trade is still skipped.
+        if max_risk_usdt is None:
+            raise ValueError("order is below Binance minimums")
+        max_risk_usdt = Decimal(str(max_risk_usdt))
+        floor_qty = _up(max(rules["min_qty"], rules["min_notional"] / entry), rules["step_size"])
+        if floor_qty * abs(entry - stop_price) > max_risk_usdt                 or floor_qty * entry / leverage > free_usdt * Decimal("0.9"):
+            raise ValueError("order is below Binance minimums")
+        qty, budget = floor_qty, max_risk_usdt
     planned_loss = qty * abs(entry - stop_price)
-    if planned_loss > risk_usdt * Decimal("1.05"):
+    if planned_loss > budget * Decimal("1.05"):
         raise ValueError("rounded plan exceeds risk budget")
     margin_usdt = (qty * entry) / leverage
     if margin_usdt > free_usdt:
