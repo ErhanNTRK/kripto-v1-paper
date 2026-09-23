@@ -2,7 +2,7 @@ import unittest
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from crypto_v1.live_short_market import BinanceFuturesMarket, summarize_short_pilot
+from crypto_v1.live_short_market import BinanceFuturesMarket, summarize_short_pilot, symbol_code
 
 
 C = {"pilot_capital_usdt": 34, "live_fee_buffer_fraction": 0.001}
@@ -281,8 +281,8 @@ class TaggedSubSystemTests(unittest.TestCase):
         self.assertGreater(tag2["equity"], Decimal("17"))
 
     def test_free_usdt_is_capped_by_this_tags_own_remaining_allocation(self):
-        orders = [{"clientOrderId": "kv1fs41", "side": "SELL", "status": "FILLED",
-                   "cumQuote": "12", "updateTime": 1}]
+        orders = [{"symbol": "SOLUSDT", "clientOrderId": "kv1fs41", "side": "SELL",
+                   "status": "FILLED", "cumQuote": "12", "updateTime": 1}]
         open_orders = [{"symbol": "SOLUSDT", "clientOrderId": "kv1fp41"}]
         account = {"availableBalance": "1000", "totalMarginBalance": "1000"}
         result = summarize_short_pilot(account, open_orders, orders, self.CONFIG, 0, tag="4")
@@ -498,7 +498,7 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         self.assertTrue(position["unprotected"])
         self.assertIsNone(position["stop_price"])
         # Pairs with its opening order's suffix, so P&L accounting still matches.
-        self.assertEqual(position["stop_client_id"], "kv1fq41790107200000")
+        self.assertEqual(position["stop_client_id"], "kv1fq4" + symbol_code("BCHUSDT") + "1790107200000")
 
     def test_leaves_the_other_system_s_position_alone(self):
         market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "336"}],
@@ -521,12 +521,53 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         position = market.unprotected_positions()[0]
         self.assertEqual(position["side"], "short")
         self.assertEqual(position["quantity"], "3")
-        self.assertEqual(position["stop_client_id"], "kv1fp41790107200000")
+        self.assertEqual(position["stop_client_id"], "kv1fp4" + symbol_code("SOLUSDT") + "1790107200000")
 
     def test_a_flat_symbol_is_not_adopted(self):
         market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0", "entryPrice": "336"}],
                               [self.OPEN_4H])
         self.assertEqual(market.unprotected_positions(), [])
+
+
+class SymbolCodeTests(unittest.TestCase):
+    """Client ids were tag + signal time only, and candidates of the same
+    candle share that time (BCH, LTC and MARSCOIN all opened as
+    kv1fl21790107200000 on 22 Sep 2026): the first symbol's stop answered
+    for all of them, so only one position was ever protected."""
+
+    def test_symbols_get_distinct_codes(self):
+        self.assertNotEqual(symbol_code("BCHUSDT"), symbol_code("LTCUSDT"))
+        self.assertNotEqual(symbol_code("BCHUSDT"), symbol_code("MARSCOINUSDT"))
+
+    def test_the_code_is_stable_and_four_digits(self):
+        self.assertEqual(symbol_code("BCHUSDT"), symbol_code("BCHUSDT"))
+        self.assertEqual(len(symbol_code("BCHUSDT")), 4)
+        self.assertTrue(symbol_code("BCHUSDT").isdigit())
+
+
+class AdoptedStopPairingTests(unittest.TestCase):
+    """An adopted position's stop carries a symbol code its older opening
+    order does not; realized P&L must still pair the two."""
+
+    def test_a_close_with_an_unmatched_suffix_pairs_by_symbol(self):
+        orders = [
+            {"symbol": "DASHUSDT", "clientOrderId": "kv1fl21790100000000", "side": "BUY",
+             "status": "FILLED", "cumQuote": "110", "time": 5000, "updateTime": 5000},
+            {"symbol": "DASHUSDT", "clientOrderId": "kv1fq2" + symbol_code("DASHUSDT") + "1790100000000",
+             "side": "SELL", "status": "FILLED", "cumQuote": "100", "time": 6000, "updateTime": 6000},
+        ]
+        result = summarize_short_pilot({}, [], orders, C, day_start_ms=0)
+        self.assertGreater(result["realized_loss_today"], Decimal("9.9"))
+
+    def test_another_symbol_s_close_is_not_paired_across_symbols(self):
+        orders = [
+            {"symbol": "DASHUSDT", "clientOrderId": "kv1fl21790100000000", "side": "BUY",
+             "status": "FILLED", "cumQuote": "110", "time": 5000, "updateTime": 5000},
+            {"symbol": "LTCUSDT", "clientOrderId": "kv1fq21790100000000", "side": "SELL",
+             "status": "FILLED", "cumQuote": "100", "time": 6000, "updateTime": 6000},
+        ]
+        result = summarize_short_pilot({}, [], orders, C, day_start_ms=0)
+        self.assertEqual(result["realized_loss_today"], Decimal("0"))
 
 
 if __name__ == '__main__':

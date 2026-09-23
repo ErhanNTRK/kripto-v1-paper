@@ -182,10 +182,24 @@ class FuturesExecutor:
         return self.request("GET", {"symbol": symbol, "origClientOrderId": client_id})
 
     def cancel(self, symbol, client_id):
-        if str(client_id).startswith(ALGO_STOP_PREFIXES):
-            return normalize_algo_order(
-                self.request("DELETE", {"clientAlgoId": client_id}, path="/fapi/v1/algoOrder"))
-        return self.request("DELETE", {"symbol": symbol, "origClientOrderId": client_id})
+        if not str(client_id).startswith(ALGO_STOP_PREFIXES):
+            return self.request("DELETE", {"symbol": symbol, "origClientOrderId": client_id})
+        canceled = normalize_algo_order(
+            self.request("DELETE", {"clientAlgoId": client_id}, path="/fapi/v1/algoOrder"))
+        if canceled["status"] in {"CANCELED", "EXPIRED", "FILLED"}:
+            return canceled
+        # The delete response does not always carry a final algoStatus, and
+        # the exit monitors refuse to close a position whose stop is not
+        # provably gone. Live 23 Sep 2026: the stop WAS cancelled, this read
+        # as unconfirmed, the exit aborted -- and the position was left both
+        # open and unprotected. Ask what actually happened before deciding.
+        try:
+            settled = self.query(symbol, client_id)
+        except OrderRejected as error:
+            if error.code != -2013:  # Binance: order does not exist -> it is gone.
+                raise
+            return {**canceled, "status": "CANCELED"}
+        return settled
 
     def open_orders(self):
         """Plain resting orders plus the algo service's own -- our protective

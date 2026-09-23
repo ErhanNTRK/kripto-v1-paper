@@ -12,7 +12,7 @@ from .live_execution import _down, _up, execution_enabled
 from .live_market import BinanceMarket
 from .live_monitor import execute_exit, exit_decision
 from .live_short_controller import approve_long_leveraged, approve_short
-from .live_short_market import BinanceFuturesMarket
+from .live_short_market import BinanceFuturesMarket, symbol_code
 from .live_short_monitor import execute_long_futures_exit, execute_short_exit, short_exit_decision
 from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_SHORT, fetch_runtime_state,
                           fetch_runtime_state_short, isolate_candidate,
@@ -279,7 +279,7 @@ class LiveApp:
             if taken >= self.ENTRIES_PER_TICK:
                 break
             isolated = isolate_candidate(saved_long, candidate["symbol"])
-            update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
+            update_id = self._order_id(candidate)
             result = self._attempt(candidate, "long",
                                    lambda: self._approve_long(update_id, isolated, tag=self.tag))
             self._record(candidate, "long", result)
@@ -293,7 +293,7 @@ class LiveApp:
             if taken >= self.ENTRIES_PER_TICK:
                 break
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
-            update_id = int(f"{self.tag}{candidate['created_at']}") if self.tag else int(candidate["created_at"])
+            update_id = self._order_id(candidate)
             result = self._attempt(candidate, "short",
                                    lambda: self._approve_short(update_id, isolated, tag=self.tag))
             self._record(candidate, "short", result)
@@ -343,6 +343,15 @@ class LiveApp:
                          f"{candidate['symbol']} | {text}. Sinyal suresi dolana kadar tekrar denenecek.")
         except Exception as exc:
             print(f"Telegram skip notice failed: {exc}", flush=True)
+
+    def _order_id(self, candidate):
+        """tag + per-symbol code + the candidate's own signal time. The
+        symbol code is what keeps two candidates of the SAME candle apart:
+        without it (until 23 Sep 2026) they shared one client id, so the
+        second symbol's protective stop was answered by the first's -- and
+        only one of them ever got protected."""
+        parts = f"{symbol_code(candidate['symbol'])}{candidate['created_at']}"
+        return int(f"{self.tag}{parts}") if self.tag else int(parts)
 
     def _attempt(self, candidate, side, approve):
         """One candidate's failure must never abort the whole tick's entry

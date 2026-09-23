@@ -5,6 +5,7 @@ per-asset balance list) and short-specific order pairing (open=SELL,
 close=BUY reduceOnly)."""
 import threading
 import time
+import zlib
 from datetime import datetime, timezone
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,16 @@ from .live_execution import futures_symbol_rules
 
 def _decimal(value):
     return Decimal(str(value or "0"))
+
+
+def symbol_code(symbol):
+    """Four digits that make a client order id unique per SYMBOL. Until 23
+    Sep 2026 an id was tag + signal time only, and every candidate of the
+    same candle shares that time: BCH, LTC and MARSCOIN opened at 23:00 all
+    carried kv1fl21790107200000, so the protective stop of the first one
+    answered for all three (only BCH ever got a stop) and cancelling one
+    cancelled another's."""
+    return f"{zlib.crc32(str(symbol).encode()) % 10000:04d}"
 
 
 def _belongs_to_tag(client_id, prefix_len, tag):
@@ -44,14 +55,25 @@ def _side_pilot_summary(live_orders, open_side, open_prefix, close_side, close_p
             and str(o.get("clientOrderId", "")).startswith(open_prefix)]
     closes = [o for o in live_orders if o.get("side") == close_side and o.get("status") == "FILLED"
              and str(o.get("clientOrderId", "")).startswith(close_prefixes)]
-    opens_by_suffix = {str(o.get("clientOrderId", ""))[5:]: o for o in opens}
+    # Keyed by SYMBOL and suffix: ids carried no symbol before 23 Sep 2026,
+    # so one suffix can belong to several symbols' orders and pairing by
+    # suffix alone mixed up whole positions' P&L.
+    opens_by_suffix = {(o.get("symbol"), str(o.get("clientOrderId", ""))[5:]): o for o in opens}
     realized_loss_today = Decimal("0")
     realized_pnl = Decimal("0")
     for close in closes:
         suffix = str(close.get("clientOrderId", ""))[5:]
-        open_order = opens_by_suffix.get(suffix)
+        symbol = close.get("symbol")
+        open_order = opens_by_suffix.get((symbol, suffix))
         if not open_order:
-            continue
+            # An adopted position's stop carries a symbol code its (older)
+            # opening order does not, so fall back to this symbol's most
+            # recent open before the close.
+            candidates = [o for key, o in opens_by_suffix.items() if key[0] == symbol
+                          and int(o.get("time", o.get("updateTime", 0))) <= int(close.get("time", close.get("updateTime", 0)))]
+            if not candidates:
+                continue
+            open_order = max(candidates, key=lambda o: int(o.get("time", o.get("updateTime", 0))))
         # Whichever of the pair is the SELL leg is what was received;
         # the BUY leg is what was paid -- true regardless of which one
         # is the "open" (short: open=SELL; long: open=BUY).
@@ -112,7 +134,7 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     for o in protective:
         client_id = str(o.get("clientOrderId", ""))
         by_suffix = short_by_suffix if client_id.startswith(_SHORT_STOP_PREFIX) else long_by_suffix
-        notional = _decimal(by_suffix.get(client_id[5:], {}).get("cumQuote"))
+        notional = _decimal(by_suffix.get((o.get("symbol"), client_id[5:]), {}).get("cumQuote"))
         committed += notional / leverage_by_symbol.get(o.get("symbol"), Decimal("1"))
     for symbol, position in account_positions.items():
         if symbol in {o.get("symbol") for o in protective}:
@@ -270,11 +292,16 @@ class BinanceFuturesMarket:
             client_id = str(opened["clientOrderId"])
             side = "long" if amount > 0 else "short"
             stop_prefix = _LONG_STOP_PREFIX if side == "long" else _SHORT_STOP_PREFIX
+            # Per-symbol id even when the opening order predates symbol_code
+            # (its suffix may be shared with another symbol's position).
+            suffix = client_id[5:]
+            if not suffix.startswith(str(self.tag) + symbol_code(position["symbol"])):
+                suffix = str(self.tag) + symbol_code(position["symbol"]) + suffix[len(str(self.tag)):]
             positions.append({"symbol": position["symbol"], "side": side,
                               "entry": _decimal(position.get("entryPrice")),
                               "stop_price": None, "unprotected": True,
                               "quantity": format(abs(amount), "f"),
-                              "stop_client_id": stop_prefix + client_id[5:],
+                              "stop_client_id": stop_prefix + suffix,
                               "open_time": int(opened.get("time") or opened.get("updateTime") or 0)})
         return positions
 

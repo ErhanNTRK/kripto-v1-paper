@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import crypto_v1.render_web as render_web
 from crypto_v1.binance_trade import OrderRejected
 from crypto_v1.live_execution import LIVE_PHRASE
+from crypto_v1.live_short_market import symbol_code
 from crypto_v1.render_web import LiveApp, _fill_pnl, telegram_command, run_periodic_scans
 
 class ApproveLongWiringTests(unittest.TestCase):
@@ -265,7 +266,9 @@ class LiveAppAutoEntryTests(unittest.TestCase):
         self.assertEqual(short_mock.call_count, 1)
         self.assertEqual(result["status"], "auto_entry")
         # Keyed by the candidate's OWN timestamp, not a Telegram update_id.
-        self.assertEqual(long_mock.call_args.args[0], self.NOW_S * 1000 - 1000)
+        # tag + per-symbol code + signal time (23 Sep 2026): one id per symbol.
+        self.assertEqual(long_mock.call_args.args[0],
+                         int(symbol_code("SOLUSDT") + str(self.NOW_S * 1000 - 1000)))
 
     def test_auto_enter_caps_long_entries_at_entries_per_tick(self):
         app = self._app()
