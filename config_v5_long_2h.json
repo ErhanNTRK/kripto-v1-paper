@@ -47,5 +47,6 @@
     20,
     40,
     80
-  ]
+  ],
+  "entry_mode": "breakout+momentum"
 }

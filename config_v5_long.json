@@ -42,5 +42,6 @@
   "skip_first_time_high": true,
   "first_time_high_bars": 200,
   "max_extension_atr": 1.0,
-  "regime_ma_days": 200
+  "regime_ma_days": 200,
+  "entry_mode": "breakout+momentum"
 }
