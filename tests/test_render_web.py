@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 import crypto_v1.render_web as render_web
 from crypto_v1.binance_trade import OrderRejected
+from crypto_v1.live_execution import LIVE_PHRASE
 from crypto_v1.render_web import LiveApp, _fill_pnl, telegram_command, run_periodic_scans
 
 class ApproveLongWiringTests(unittest.TestCase):
@@ -852,3 +853,65 @@ class EntryHistoryTests(unittest.TestCase):
     def test_capacity_rejection_stays_quiet(self):
         send = self._run(self._app(), {"status": "rejected", "reason": "position_limit"})
         send.assert_not_called()
+
+
+class ProtectUnprotectedPositionTests(unittest.TestCase):
+    """22 Sep 2026: six real positions sat with no protective stop after
+    every placement failed. A position adopted by live_positions gets its
+    stop placed here, at the level the strategy would hold it at now."""
+    LIVE = {"TELEGRAM_CHAT_ID": "123", "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "telegram_buy_command": "AL",
+              "live_trading_enabled": True}
+
+    def _app(self, price, environment=None):
+        app = LiveApp(self.CONFIG, {}, environment or self.LIVE,
+                      short_config=self.CONFIG, short_strategy_config={}, tag="4")
+        app.futures_market = MagicMock()
+        app.futures_market.strategy_config = {"atr_multiplier": 2.0}
+        app.futures_market.rules.return_value = {"tick_size": Decimal("0.01")}
+        app.futures_market.price.return_value = Decimal(str(price))
+        app.futures_executor = MagicMock()
+        # _known_or_place asks Binance first; -2013 is "no such order yet".
+        app.futures_executor.query.side_effect = OrderRejected(-2013, "Order does not exist.")
+        return app
+
+    def _position(self, side="long"):
+        return {"symbol": "BCHUSDT", "side": side, "quantity": "0.261",
+                "entry": Decimal("336"), "stop_price": None, "unprotected": True,
+                "stop_client_id": ("kv1fq" if side == "long" else "kv1fp") + "41790107200000"}
+
+    def test_places_the_stop_an_atr_multiple_below_for_a_long(self):
+        app = self._app(price=355)
+        position = self._position()
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._protect(position, {"c": 350.0, "atr": 10.0})
+        self.assertEqual(result["status"], "protected")
+        # 350 - 2 * 10, rounded down to the tick.
+        self.assertEqual(position["stop_price"], Decimal("330.00"))
+        app.futures_executor.protective_stop_for_long.assert_called_once_with(
+            "BCHUSDT", "0.261", "330.00", "kv1fq41790107200000")
+
+    def test_a_short_stop_sits_above_and_uses_the_short_placer(self):
+        app = self._app(price=90)
+        position = self._position("short")
+        with patch("crypto_v1.render_web.send_message"):
+            app._protect(position, {"c": 100.0, "atr": 5.0})
+        self.assertEqual(position["stop_price"], Decimal("110.00"))
+        app.futures_executor.protective_stop_for_short.assert_called_once()
+        app.futures_executor.protective_stop_for_long.assert_not_called()
+
+    def test_an_already_breached_stop_is_not_placed_but_still_set(self):
+        # Price has fallen past where the stop belongs: resting it would
+        # trigger instantly. The exit check closes the position this tick.
+        app = self._app(price=320)
+        position = self._position()
+        result = app._protect(position, {"c": 350.0, "atr": 10.0})
+        self.assertEqual(result["reason"], "stop_already_breached")
+        self.assertEqual(position["stop_price"], Decimal("330.00"))
+        app.futures_executor.protective_stop_for_long.assert_not_called()
+
+    def test_nothing_is_placed_while_real_orders_are_disabled(self):
+        app = self._app(price=355, environment={"TELEGRAM_CHAT_ID": "123"})
+        result = app._protect(self._position(), {"c": 350.0, "atr": 10.0})
+        self.assertEqual(result["reason"], "real_orders_disabled")
+        app.futures_executor.protective_stop_for_long.assert_not_called()

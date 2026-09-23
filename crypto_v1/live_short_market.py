@@ -88,7 +88,17 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     protective = [o for o in open_orders
                   if str(o.get("clientOrderId", "")).startswith((_SHORT_STOP_PREFIX, _LONG_STOP_PREFIX))
                   and _belongs_to_tag(o.get("clientOrderId", ""), 5, tag)]
-    held_symbols = {o["symbol"] for o in protective}
+    # Real positions on the exchange count too, not just the ones we can
+    # see by their protective stop. On 22 Sep 2026 every stop failed to
+    # place (Binance -4120), so held_symbols was empty while six real
+    # positions were open -- and the same symbol got bought a second time
+    # because may_open saw nothing held. Positions are not tag-attributable,
+    # so BOTH systems treat them as held and as committed capital: the
+    # conservative direction (never double up, never over-commit the shared
+    # wallet), even though it can block a symbol the other system opened.
+    account_positions = {p["symbol"]: p for p in account.get("positions", [])
+                         if abs(_decimal(p.get("positionAmt"))) > 0}
+    held_symbols = {o["symbol"] for o in protective} | set(account_positions)
     # Capital a leveraged position actually ties up is its isolated MARGIN
     # (notional / leverage), not the whole notional -- counting notional
     # (as this did until 22 Sep 2026) let one ~70-90 USDT position "use up"
@@ -104,6 +114,13 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
         by_suffix = short_by_suffix if client_id.startswith(_SHORT_STOP_PREFIX) else long_by_suffix
         notional = _decimal(by_suffix.get(client_id[5:], {}).get("cumQuote"))
         committed += notional / leverage_by_symbol.get(o.get("symbol"), Decimal("1"))
+    for symbol, position in account_positions.items():
+        if symbol in {o.get("symbol") for o in protective}:
+            continue  # already counted above, via its protective stop
+        margin = _decimal(position.get("positionInitialMargin")) or _decimal(position.get("initialMargin"))
+        if margin <= 0:
+            margin = abs(_decimal(position.get("notional"))) / leverage_by_symbol.get(symbol, Decimal("1"))
+        committed += margin
     pilot_capital = Decimal(str(config["pilot_capital_usdt"]))
     if tag:
         equity = pilot_capital + realized_pnl_all_time
@@ -176,6 +193,12 @@ class BinanceFuturesMarket:
             open_orders = self.executor.open_orders()
             symbols = set(universe(self.strategy_config))
             symbols.update(o["symbol"] for o in open_orders)
+            # A position whose symbol has dropped out of the re-ranked
+            # universe still needs its own order history -- that is how an
+            # unprotected position is attributed to a system (see
+            # unprotected_positions) and how its close is paired for P&L.
+            symbols.update(p["symbol"] for p in account.get("positions", [])
+                           if abs(_decimal(p.get("positionAmt"))) > 0)
             with ThreadPoolExecutor(max_workers=5) as pool:
                 batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
             orders = [order for batch in batches for order in batch]
@@ -214,6 +237,45 @@ class BinanceFuturesMarket:
                               "stop_price": Decimal(str(stop["stopPrice"])),
                               "quantity": stop["origQty"], "stop_client_id": stop_id,
                               "open_time": int(open_order.get("time", open_order.get("updateTime", 0)))})
+        positions.extend(self.unprotected_positions({p["symbol"] for p in positions}))
+        return positions
+
+    def unprotected_positions(self, protected_symbols=()):
+        """Real Futures positions this system opened that have NO protective
+        stop resting on Binance. Until 22 Sep 2026 such a position was
+        simply invisible (live_positions only ever saw a position through
+        its stop order), so when every stop placement started failing with
+        -4120 six real positions went unmanaged and unprotected overnight.
+        Attribution is by the opening order's own tag, so the 4H and 2H
+        systems never both adopt the same position; a position with no
+        opening order of ours (opened by hand, or older than the order
+        history window) is deliberately left alone."""
+        account, _, orders = self._raw_pilot_data()
+        opens = {}
+        for order in orders:
+            client_id = str(order.get("clientOrderId", ""))
+            if order.get("status") != "FILLED" or not client_id.startswith((_LONG_OPEN_PREFIX, _SHORT_OPEN_PREFIX)):
+                continue
+            seen = opens.get(order["symbol"])
+            if seen is None or int(order.get("time", 0)) >= int(seen.get("time", 0)):
+                opens[order["symbol"]] = order
+        positions = []
+        for position in account.get("positions", []):
+            amount = _decimal(position.get("positionAmt"))
+            if amount == 0 or position["symbol"] in set(protected_symbols):
+                continue
+            opened = opens.get(position["symbol"])
+            if opened is None or not _belongs_to_tag(opened["clientOrderId"], 5, self.tag):
+                continue
+            client_id = str(opened["clientOrderId"])
+            side = "long" if amount > 0 else "short"
+            stop_prefix = _LONG_STOP_PREFIX if side == "long" else _SHORT_STOP_PREFIX
+            positions.append({"symbol": position["symbol"], "side": side,
+                              "entry": _decimal(position.get("entryPrice")),
+                              "stop_price": None, "unprotected": True,
+                              "quantity": format(abs(amount), "f"),
+                              "stop_client_id": stop_prefix + client_id[5:],
+                              "open_time": int(opened.get("time") or opened.get("updateTime") or 0)})
         return positions
 
     def analysis(self, position, feature_fn, interval=INTERVAL):

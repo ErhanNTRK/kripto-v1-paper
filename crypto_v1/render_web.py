@@ -7,7 +7,8 @@ from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
 from .github_worker import local_tick
-from .live_execution import execution_enabled
+from .live_controller import _known_or_place
+from .live_execution import _down, _up, execution_enabled
 from .live_market import BinanceMarket
 from .live_monitor import execute_exit, exit_decision
 from .live_short_controller import approve_long_leveraged, approve_short
@@ -487,9 +488,13 @@ class LiveApp:
                 for position in self.futures_market.live_positions():
                     if position["side"] == "short":
                         feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
-                        reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
                     else:
                         feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
+                    if position.get("unprotected"):
+                        results.append(self._protect(position, feature))
+                    if position["side"] == "short":
+                        reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
+                    else:
                         reason = exit_decision(position, feature, btc, extreme,
                                                {**self.short_config,
                                                 "trailing_atr": self.futures_market.strategy_config["trailing_atr"],
@@ -513,6 +518,45 @@ class LiveApp:
                 results.append({"status": "scan_failed", "side": "futures", "error": str(exc)})
                 _note_if_rate_limited(exc)
         return {"status": "scanned", "results": results}
+
+    def _protect(self, position, feature):
+        """Place the missing protective stop on a position that has none
+        (live_short_market.unprotected_positions). Needed because a stop can
+        fail to rest while the position itself is real: every one did on 22
+        Sep 2026 (Binance -4120), and a crash between the open and its stop
+        does the same. The level is where the strategy would hold it right
+        now -- the same ATR distance a fresh entry would use -- so the
+        position is protected even while this process is not running.
+
+        Sets stop_price either way, so an already-breached stop still gives
+        the exit check something to act on (it closes the position this same
+        tick) instead of leaving it with no reference price at all."""
+        symbol, side = position["symbol"], position["side"]
+        atr = Decimal(str(feature["atr"]))
+        close = Decimal(str(feature["c"]))
+        multiplier = Decimal(str(self.futures_market.strategy_config["atr_multiplier"]))
+        rules = self.futures_market.rules(symbol)
+        stop = (_down(close - multiplier * atr, rules["tick_size"]) if side == "long"
+                else _up(close + multiplier * atr, rules["tick_size"]))
+        position["stop_price"] = stop
+        price = Decimal(str(self.futures_market.price(symbol)))
+        breached = stop >= price if side == "long" else stop <= price
+        if breached:
+            return {"status": "protect_skipped", "symbol": symbol, "reason": "stop_already_breached"}
+        if not execution_enabled(self.short_config, self.environment):
+            return {"status": "protect_skipped", "symbol": symbol, "reason": "real_orders_disabled"}
+        stop_id = position["stop_client_id"]
+        place = (self.futures_executor.protective_stop_for_long if side == "long"
+                 else self.futures_executor.protective_stop_for_short)
+        order = _known_or_place(self.futures_executor, symbol, stop_id,
+                                lambda: place(symbol, position["quantity"], format(stop, "f"), stop_id))
+        label = f"[{self.tag}] " if self.tag else ""
+        try:
+            send_message(f"{label}KORUMA EKLENDI: {symbol} ({side}) | stop {format(stop, 'f')} | "
+                         "korumasiz kalan pozisyona koruyucu emir kuruldu.")
+        except Exception as exc:
+            print(f"Telegram protect notice failed: {exc}", flush=True)
+        return {"status": "protected", "symbol": symbol, "stop_price": format(stop, "f"), "order": order}
 
     def tick(self):
         """One full cycle: try to auto-enter any pending signal, then scan

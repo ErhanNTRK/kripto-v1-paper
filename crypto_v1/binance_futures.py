@@ -24,6 +24,15 @@ ALLOWED = {
     ("DELETE", "/fapi/v1/order"),
     ("GET", "/fapi/v1/openOrders"),
     ("GET", "/fapi/v1/allOrders"),
+    # Conditional orders (our protective stops) moved to the Algo service
+    # on 2025-12-09: /fapi/v1/order now rejects STOP_MARKET with -4120
+    # "Please use the Algo Order API endpoints instead". Live consequence
+    # (22 Sep 2026): every entry filled and then failed to place its stop,
+    # leaving real positions unprotected.
+    ("POST", "/fapi/v1/algoOrder"),
+    ("GET", "/fapi/v1/algoOrder"),
+    ("DELETE", "/fapi/v1/algoOrder"),
+    ("GET", "/fapi/v1/openAlgoOrders"),
     ("POST", "/fapi/v1/leverage"),
     ("POST", "/fapi/v1/marginType"),
     ("GET", "/fapi/v2/account"),
@@ -71,6 +80,27 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
         raise RuntimeError("Binance Futures order query failed") from None
 
 
+# Our protective-stop client ids (short kv1fp, long kv1fq). Everything
+# else we send is a plain MARKET order on /fapi/v1/order.
+ALGO_STOP_PREFIXES = ("kv1fp", "kv1fq")
+
+_ALGO_STATUS = {"TRIGGERED": "FILLED", "FILLED": "FILLED", "FINISHED": "FILLED",
+                "CANCELLED": "CANCELED", "CANCELED": "CANCELED", "EXPIRED": "EXPIRED"}
+
+
+def normalize_algo_order(order):
+    """Present an algo order in the plain-order shape the rest of the code
+    already reads (clientOrderId/stopPrice/origQty/status), so live_positions,
+    summarize_short_pilot and the exit monitors work unchanged."""
+    status = str(order.get("algoStatus", "")).upper()
+    return {**order,
+            "clientOrderId": order.get("clientAlgoId", ""),
+            "stopPrice": order.get("triggerPrice", "0"),
+            "origQty": order.get("quantity", "0"),
+            "type": order.get("orderType", "STOP_MARKET"),
+            "status": _ALGO_STATUS.get(status, "NEW")}
+
+
 class FuturesExecutor:
     def __init__(self, config, environment, opener=urllib.request.urlopen):
         self.config = config
@@ -114,18 +144,23 @@ class FuturesExecutor:
                                      "quantity": quantity, "newClientOrderId": client_id,
                                      "newOrderRespType": "FULL"})
 
+    def _algo_stop(self, symbol, side, quantity, stop_price, client_id):
+        # Algo service (see ALLOWED): conditional orders take triggerPrice
+        # and clientAlgoId where /fapi/v1/order took stopPrice and
+        # newClientOrderId. reduceOnly keeps it a pure position-closer.
+        return normalize_algo_order(self.request(
+            "POST", {"algoType": "CONDITIONAL", "symbol": symbol, "side": side,
+                     "type": "STOP_MARKET", "quantity": quantity,
+                     "triggerPrice": stop_price, "reduceOnly": "true",
+                     "clientAlgoId": client_id},
+            path="/fapi/v1/algoOrder"))
+
     def protective_stop_for_short(self, symbol, quantity, stop_price, client_id):
-        # STOP_MARKET BUY, reduceOnly: fires (buys back) if price rises to
-        # stop_price, closing the short. No limit leg -- Futures stop-market
-        # fills at the best available price once triggered.
-        return self.request("POST", {"symbol": symbol, "side": "BUY", "type": "STOP_MARKET",
-                                     "quantity": quantity, "stopPrice": stop_price,
-                                     "reduceOnly": "true", "newClientOrderId": client_id})
+        # Fires (buys back) if price rises to stop_price, closing the short.
+        return self._algo_stop(symbol, "BUY", quantity, stop_price, client_id)
 
     def protective_stop_for_long(self, symbol, quantity, stop_price, client_id):
-        return self.request("POST", {"symbol": symbol, "side": "SELL", "type": "STOP_MARKET",
-                                     "quantity": quantity, "stopPrice": stop_price,
-                                     "reduceOnly": "true", "newClientOrderId": client_id})
+        return self._algo_stop(symbol, "SELL", quantity, stop_price, client_id)
 
     def market_close_short(self, symbol, quantity, client_id):
         return self.request("POST", {"symbol": symbol, "side": "BUY", "type": "MARKET",
@@ -138,13 +173,27 @@ class FuturesExecutor:
                                      "newClientOrderId": client_id, "newOrderRespType": "FULL"})
 
     def query(self, symbol, client_id):
+        # A protective stop lives in the Algo service; everything else is a
+        # plain order. Routing by client-id prefix keeps _known_or_place and
+        # the exit monitors identical for both.
+        if str(client_id).startswith(ALGO_STOP_PREFIXES):
+            return normalize_algo_order(
+                self.request("GET", {"clientAlgoId": client_id}, path="/fapi/v1/algoOrder"))
         return self.request("GET", {"symbol": symbol, "origClientOrderId": client_id})
 
     def cancel(self, symbol, client_id):
+        if str(client_id).startswith(ALGO_STOP_PREFIXES):
+            return normalize_algo_order(
+                self.request("DELETE", {"clientAlgoId": client_id}, path="/fapi/v1/algoOrder"))
         return self.request("DELETE", {"symbol": symbol, "origClientOrderId": client_id})
 
     def open_orders(self):
-        return self.request("GET", {}, path="/fapi/v1/openOrders")
+        """Plain resting orders plus the algo service's own -- our protective
+        stops now live there, and held_symbols/committed/live_positions all
+        read this one list."""
+        plain = self.request("GET", {}, path="/fapi/v1/openOrders")
+        algo = self.request("GET", {}, path="/fapi/v1/openAlgoOrders")
+        return plain + [normalize_algo_order(o) for o in algo]
 
     def all_orders(self, symbol, start_time=None):
         params = {"symbol": symbol, "limit": 1000}

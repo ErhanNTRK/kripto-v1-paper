@@ -188,8 +188,12 @@ class LivePositionsTests(unittest.TestCase):
     each tagged with its own "side" so the caller applies the right exit
     logic and executor calls."""
 
-    def _market(self, executor):
-        return BinanceFuturesMarket(C, {}, {}, executor)
+    def _market(self, executor, unprotected=()):
+        market = BinanceFuturesMarket(C, {}, {}, executor)
+        # Adoption of stopless positions has its own tests below; these
+        # cover only what the protective stops themselves reveal.
+        market.unprotected_positions = lambda protected=(): list(unprotected)
+        return market
 
     def test_recognizes_a_short_stop(self):
         executor = MagicMock()
@@ -442,6 +446,87 @@ class PriceTests(unittest.TestCase):
         with patch("crypto_v1.live_short_market.futures_get", return_value={"markPrice": "0"}):
             with self.assertRaises(RuntimeError):
                 BinanceFuturesMarket(C, {}, {}, MagicMock()).price("BCHUSDT")
+
+
+class UnprotectedPositionTests(unittest.TestCase):
+    """22 Sep 2026: every protective stop failed to place (Binance -4120),
+    so a real open position was invisible to may_open and the same symbol
+    was bought again. Exchange positions now count as held and committed."""
+
+    def _summary(self, positions, open_orders=()):
+        account = {"availableBalance": "100", "totalMarginBalance": "100", "positions": positions}
+        return summarize_short_pilot(account, list(open_orders), [], dict(C, pilot_capital_usdt=100), 0, tag="4")
+
+    def test_a_position_without_a_stop_still_counts_as_held(self):
+        result = self._summary([{"symbol": "BCHUSDT", "positionAmt": "0.26", "leverage": "4",
+                                 "positionInitialMargin": "21"}])
+        self.assertEqual(result["held_symbols"], {"BCHUSDT"})
+        self.assertEqual(result["open_positions"], 1)
+        self.assertEqual(result["free_usdt"], Decimal("79"))  # 100 - 21 margin
+
+    def test_a_short_position_counts_too(self):
+        result = self._summary([{"symbol": "SOLUSDT", "positionAmt": "-3", "leverage": "3",
+                                 "positionInitialMargin": "10"}])
+        self.assertEqual(result["held_symbols"], {"SOLUSDT"})
+
+    def test_a_flat_symbol_is_not_held(self):
+        result = self._summary([{"symbol": "ADAUSDT", "positionAmt": "0", "leverage": "4"}])
+        self.assertEqual(result["held_symbols"], set())
+        self.assertEqual(result["free_usdt"], Decimal("100"))
+
+
+class UnprotectedPositionAdoptionTests(unittest.TestCase):
+    """A position whose protective stop never got placed (Binance -4120, 22
+    Sep 2026) was invisible to the exit loop. It is now adopted by the
+    system whose opening order it carries."""
+
+    def _market(self, positions, orders, tag="4"):
+        market = BinanceFuturesMarket(C, {}, {}, MagicMock(), tag=tag)
+        market._raw_pilot_data = lambda: ({"positions": positions}, [], orders)
+        return market
+
+    OPEN_4H = {"symbol": "BCHUSDT", "clientOrderId": "kv1fl41790107200000",
+               "status": "FILLED", "side": "BUY", "time": 1790107200000}
+
+    def test_adopts_a_long_opened_by_this_system(self):
+        market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "336"}],
+                              [self.OPEN_4H])
+        position = market.unprotected_positions()[0]
+        self.assertEqual(position["side"], "long")
+        self.assertEqual(position["quantity"], "0.261")
+        self.assertEqual(position["entry"], Decimal("336"))
+        self.assertTrue(position["unprotected"])
+        self.assertIsNone(position["stop_price"])
+        # Pairs with its opening order's suffix, so P&L accounting still matches.
+        self.assertEqual(position["stop_client_id"], "kv1fq41790107200000")
+
+    def test_leaves_the_other_system_s_position_alone(self):
+        market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "336"}],
+                              [self.OPEN_4H], tag="2")
+        self.assertEqual(market.unprotected_positions(), [])
+
+    def test_leaves_a_hand_opened_position_alone(self):
+        market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "336"}], [])
+        self.assertEqual(market.unprotected_positions(), [])
+
+    def test_skips_a_position_that_already_has_a_stop(self):
+        market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "336"}],
+                              [self.OPEN_4H])
+        self.assertEqual(market.unprotected_positions({"BCHUSDT"}), [])
+
+    def test_a_short_is_adopted_with_its_own_prefixes(self):
+        opened = {"symbol": "SOLUSDT", "clientOrderId": "kv1fs41790107200000",
+                  "status": "FILLED", "side": "SELL", "time": 1790107200000}
+        market = self._market([{"symbol": "SOLUSDT", "positionAmt": "-3", "entryPrice": "100"}], [opened])
+        position = market.unprotected_positions()[0]
+        self.assertEqual(position["side"], "short")
+        self.assertEqual(position["quantity"], "3")
+        self.assertEqual(position["stop_client_id"], "kv1fp41790107200000")
+
+    def test_a_flat_symbol_is_not_adopted(self):
+        market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0", "entryPrice": "336"}],
+                              [self.OPEN_4H])
+        self.assertEqual(market.unprotected_positions(), [])
 
 
 if __name__ == '__main__':
