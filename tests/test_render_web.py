@@ -918,3 +918,81 @@ class ProtectUnprotectedPositionTests(unittest.TestCase):
         result = app._protect(self._position(), {"c": 350.0, "atr": 10.0})
         self.assertEqual(result["reason"], "real_orders_disabled")
         app.futures_executor.protective_stop_for_long.assert_not_called()
+
+
+class RatchetTests(unittest.TestCase):
+    """23 Sep 2026: trailing existed only as a market-close decision taken by
+    the scan loop, so while the process was down the exchange still held the
+    ORIGINAL entry stop and gave back every bit of open profit. The resting
+    stop now follows the trade."""
+    LIVE = {"TELEGRAM_CHAT_ID": "123", "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "telegram_buy_command": "AL",
+              "live_trading_enabled": True}
+
+    def _app(self, price):
+        app = LiveApp(self.CONFIG, {}, self.LIVE, short_config=self.CONFIG,
+                      short_strategy_config={}, tag="4")
+        app.futures_market = MagicMock()
+        app.futures_market.strategy_config = {"trailing_atr": 2.0}
+        app.futures_market.rules.return_value = {"tick_size": Decimal("0.01")}
+        app.futures_market.price.return_value = Decimal(str(price))
+        app.futures_executor = MagicMock()
+        return app
+
+    def _position(self, side="long", stop="90"):
+        return {"symbol": "BCHUSDT", "side": side, "quantity": "0.261",
+                "entry": Decimal("100"), "stop_price": Decimal(stop),
+                "stop_client_id": "kv1fq41234"}
+
+    def test_moves_the_stop_up_once_the_trade_is_1r_ahead(self):
+        app = self._app(price=118)
+        position = self._position()
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._ratchet(position, {"atr": 2.0}, extreme=120)
+        # best 120 - 2 * 2 ATR = 116, up from 90.
+        self.assertEqual(result["to"], "116.00")
+        self.assertEqual(position["stop_price"], Decimal("116.00"))
+        app.futures_executor.cancel.assert_called_once_with("BCHUSDT", "kv1fq41234")
+        symbol, quantity, stop, new_id = app.futures_executor.protective_stop_for_long.call_args.args
+        self.assertEqual(stop, "116.00")
+        # A fresh id: the old one belongs to the just-cancelled order.
+        self.assertTrue(new_id.startswith("kv1fq41234t"))
+        self.assertEqual(position["stop_client_id"], new_id)
+
+    def test_does_nothing_before_the_trade_is_1r_ahead(self):
+        app = self._app(price=105)
+        self.assertIsNone(app._ratchet(self._position(), {"atr": 2.0}, extreme=105))
+        app.futures_executor.cancel.assert_not_called()
+
+    def test_never_loosens_an_already_higher_stop(self):
+        app = self._app(price=118)
+        position = self._position(stop="117")
+        self.assertIsNone(app._ratchet(position, {"atr": 2.0}, extreme=120))
+        self.assertEqual(position["stop_price"], Decimal("117"))
+        app.futures_executor.cancel.assert_not_called()
+
+    def test_ignores_an_improvement_too_small_to_be_worth_an_order(self):
+        app = self._app(price=118)
+        position = self._position(stop="115.9")  # new level 116.00 is +0.09%
+        self.assertIsNone(app._ratchet(position, {"atr": 2.0}, extreme=120))
+        app.futures_executor.cancel.assert_not_called()
+
+    def test_does_not_rest_a_stop_above_the_current_price(self):
+        app = self._app(price=115)  # price fell back below the new level
+        self.assertIsNone(app._ratchet(self._position(), {"atr": 2.0}, extreme=120))
+        app.futures_executor.cancel.assert_not_called()
+
+    def test_a_short_ratchets_downward(self):
+        app = self._app(price=82)
+        position = self._position("short", stop="110")
+        position["entry"] = Decimal("100")
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._ratchet(position, {"atr": 2.0}, extreme=80)
+        # best 80 + 2 * 2 ATR = 84, down from 110.
+        self.assertEqual(result["to"], "84.00")
+        app.futures_executor.protective_stop_for_short.assert_called_once()
+
+    def test_an_adopted_position_is_left_to_the_protect_pass(self):
+        app = self._app(price=118)
+        position = dict(self._position(), unprotected=True, stop_price=None)
+        self.assertIsNone(app._ratchet(position, {"atr": 2.0}, extreme=120))

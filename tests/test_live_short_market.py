@@ -570,5 +570,36 @@ class AdoptedStopPairingTests(unittest.TestCase):
         self.assertEqual(result["realized_loss_today"], Decimal("0"))
 
 
+class CapitalFractionTests(unittest.TestCase):
+    """pilot_capital_fraction (23 Sep 2026): each system's allocation is a
+    share of the real wallet, so profit raises it automatically -- including
+    profit booked by closing a position by hand, which the old
+    capital-plus-own-realized-P&L never counted."""
+
+    CONFIG = dict(C, pilot_capital_usdt=34.55, pilot_capital_fraction=0.5)
+
+    def _summary(self, wallet, free=None, config=None):
+        account = {"availableBalance": str(free if free is not None else wallet),
+                   "totalMarginBalance": str(wallet)}
+        return summarize_short_pilot(account, [], [], config or self.CONFIG, 0, tag="4")
+
+    def test_allocation_grows_with_the_wallet(self):
+        self.assertEqual(self._summary(69.1)["equity"], Decimal("34.55"))
+        self.assertEqual(self._summary(80)["equity"], Decimal("40.0"))
+
+    def test_free_capital_is_still_capped_by_the_real_balance(self):
+        result = self._summary(80, free=5)
+        self.assertEqual(result["free_usdt"], Decimal("5"))
+
+    def test_loss_limit_is_still_measured_from_the_configured_baseline(self):
+        # Wallet halved: this system's half is 20 against a 34.55 baseline.
+        self.assertEqual(self._summary(40)["pilot_drawdown"], Decimal("14.55"))
+        self.assertEqual(self._summary(80)["pilot_drawdown"], Decimal("0"))
+
+    def test_without_the_fraction_the_old_fixed_capital_is_used(self):
+        config = dict(C, pilot_capital_usdt=34.55)
+        self.assertEqual(self._summary(80, config=config)["equity"], Decimal("34.55"))
+
+
 if __name__ == '__main__':
     unittest.main()

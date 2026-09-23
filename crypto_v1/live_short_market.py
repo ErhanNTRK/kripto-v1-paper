@@ -145,7 +145,18 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
             margin = abs(_decimal(position.get("notional"))) / leverage_by_symbol.get(symbol, Decimal("1"))
         committed += margin
     pilot_capital = Decimal(str(config["pilot_capital_usdt"]))
-    if tag:
+    # pilot_capital_fraction (23 Sep 2026, user's request): this system's
+    # slice of the REAL wallet rather than a number frozen in the config, so
+    # profits raise the allocation by themselves and losses lower it. It
+    # also counts profit this system did not book itself -- a position
+    # closed by hand has no kv1f close order, so the old
+    # capital + own realized P&L never saw that money at all.
+    # pilot_capital_usdt stays the baseline the loss limit is measured from.
+    fraction = Decimal(str(config.get("pilot_capital_fraction") or "0"))
+    if tag and fraction > 0:
+        equity = account_equity * fraction
+        free_usdt = max(Decimal("0"), min(account_free_usdt, equity - committed))
+    elif tag:
         equity = pilot_capital + realized_pnl_all_time
         free_usdt = max(Decimal("0"), min(account_free_usdt, equity - committed))
     else:

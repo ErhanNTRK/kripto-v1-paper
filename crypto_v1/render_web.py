@@ -501,6 +501,10 @@ class LiveApp:
                         feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
                     if position.get("unprotected"):
                         results.append(self._protect(position, feature))
+                    else:
+                        moved = self._ratchet(position, feature, extreme)
+                        if moved:
+                            results.append(moved)
                     if position["side"] == "short":
                         reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
                     else:
@@ -566,6 +570,63 @@ class LiveApp:
         except Exception as exc:
             print(f"Telegram protect notice failed: {exc}", flush=True)
         return {"status": "protected", "symbol": symbol, "stop_price": format(stop, "f"), "order": order}
+
+    # A resting stop is only moved when the new level is at least this much
+    # better, so ordinary noise does not cancel/replace an order every tick.
+    RATCHET_MIN_IMPROVEMENT = Decimal("0.003")
+
+    def _ratchet(self, position, feature, extreme):
+        """Move the RESTING protective stop in the profitable direction as
+        the trade works, mirroring exactly the trailing level exit_decision
+        already uses (best price since entry -/+ trailing_atr * ATR, armed
+        only once the trade is 1R in front). Until 23 Sep 2026 that trailing
+        logic existed only as a market-close decision taken by this loop, so
+        it protected nothing while this process was down -- the exchange
+        still held the ORIGINAL stop from entry. The ratchet never loosens a
+        stop: it only moves toward profit, and never past the current price.
+
+        Cancel-then-place leaves a brief window with no resting stop. If the
+        placement fails the position is left with none, which the next tick's
+        adoption pass (_protect) puts back."""
+        stop_id = position.get("stop_client_id")
+        if not stop_id or position.get("stop_price") is None:
+            return None
+        side = position["side"]
+        entry, stop = Decimal(str(position["entry"])), Decimal(str(position["stop_price"]))
+        atr = Decimal(str(feature["atr"]))
+        best = Decimal(str(extreme))
+        distance = Decimal(str(self.futures_market.strategy_config["trailing_atr"])) * atr
+        risk = entry - stop if side == "long" else stop - entry
+        if risk <= 0 or atr <= 0:
+            return None
+        armed = best >= entry + risk if side == "long" else best <= entry - risk
+        if not armed:
+            return None
+        rules = self.futures_market.rules(position["symbol"])
+        moved = (_down(best - distance, rules["tick_size"]) if side == "long"
+                 else _up(best + distance, rules["tick_size"]))
+        threshold = stop * (Decimal("1") + self.RATCHET_MIN_IMPROVEMENT) if side == "long"             else stop * (Decimal("1") - self.RATCHET_MIN_IMPROVEMENT)
+        if (moved <= threshold) if side == "long" else (moved >= threshold):
+            return None
+        price = Decimal(str(self.futures_market.price(position["symbol"])))
+        if (moved >= price) if side == "long" else (moved <= price):
+            return None  # already breached: the exit check closes it instead
+        if not execution_enabled(self.short_config, self.environment):
+            return None
+        self.futures_executor.cancel(position["symbol"], stop_id)
+        new_id = f"{stop_id}t{int(time.time())}"
+        place = (self.futures_executor.protective_stop_for_long if side == "long"
+                 else self.futures_executor.protective_stop_for_short)
+        order = place(position["symbol"], position["quantity"], format(moved, "f"), new_id)
+        position["stop_price"], position["stop_client_id"] = moved, new_id
+        label = f"[{self.tag}] " if self.tag else ""
+        try:
+            send_message(f"{label}STOP YUKSELTILDI: {position['symbol']} ({side}) | "
+                         f"{format(stop, 'f')} -> {format(moved, 'f')}")
+        except Exception as exc:
+            print(f"Telegram ratchet notice failed: {exc}", flush=True)
+        return {"status": "stop_moved", "symbol": position["symbol"],
+                "from": format(stop, "f"), "to": format(moved, "f"), "order": order}
 
     def tick(self):
         """One full cycle: try to auto-enter any pending signal, then scan

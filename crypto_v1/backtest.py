@@ -1,6 +1,7 @@
 import csv
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from .data import INTERVAL
 from .indicators import features
@@ -64,12 +65,29 @@ class Engine:
                 self.close(symbol, bars[symbol]['o'], t, 'daily_loss')
         # Rank simultaneous candidates by volume anomaly, then symbol; cash is shared.
         candidates = sorted(s['pending_buys'].items(), key=lambda x: (-x[1]['score'], x[0]))
+        # entry_pullback_atr (default 0 = the original behavior: take the next
+        # bar's open, i.e. buy the breakout itself). Above 0, the entry is a
+        # LIMIT that ATR-fraction below the signal bar's close, good for
+        # entry_pullback_bars bars -- "wait for the retest" instead of
+        # chasing. A candidate that never pulls back is simply skipped.
+        pullback = Decimal(str(c.get('entry_pullback_atr', 0) or 0))
+        keep = {}
         for symbol, candidate in candidates:
             if s['halted'] or len(s['positions']) >= c['max_positions']:
                 break
             if symbol in s['positions'] or symbol not in bars:
                 continue
-            entry = bars[symbol]['o'] * (1 + c['slippage'])
+            bar = bars[symbol]
+            if pullback > 0:
+                limit = candidate.get('limit')
+                if limit is None or t > candidate.get('expires_at', t):
+                    continue
+                if bar['l'] > limit:
+                    keep[symbol] = candidate  # no retest yet; still waiting
+                    continue
+                entry = min(bar['o'], limit) * (1 + c['slippage'])
+            else:
+                entry = bar['o'] * (1 + c['slippage'])
             p = size_position(self.equity(), s['cash'], entry, candidate['stop'], c)
             if p:
                 p['entry_time'] = t
@@ -77,7 +95,7 @@ class Engine:
                 s['positions'][symbol] = p
                 s['events'].append(dict(type='AL', time=t, symbol=symbol, price=entry,
                                         stop=p['stop'], target=p['target'], risk=p['initial_risk'], simulated=True))
-        s['pending_buys'] = {}
+        s['pending_buys'] = keep
         for symbol, p in list(s['positions'].items()):
             f = bars[symbol]
             if f['l'] <= p['stop']:
@@ -111,8 +129,16 @@ class Engine:
                     # backtest -> short_signal -> research_v5 -> backtest,
                     # a circular import (research_v5 imports metrics from
                     # here). The live controller does that lookup instead.
-                    s['pending_buys'][symbol] = dict(stop=stop(f, c), score=f.get('signal_score', f['v']/f['volume_avg']),
-                                                     breaks_up=f.get('breaks_up', 0))
+                    waiting = s['pending_buys'].get(symbol, {})
+                    entry_plan = dict(stop=stop(f, c), score=f.get('signal_score', f['v']/f['volume_avg']),
+                                      breaks_up=f.get('breaks_up', 0))
+                    if c.get('entry_pullback_atr', 0):
+                        # A fresh signal restarts the window at the new level.
+                        entry_plan['limit'] = f['c'] - c['entry_pullback_atr'] * f['atr']
+                        entry_plan['expires_at'] = t + int(c.get('entry_pullback_bars', 2)) * self.interval
+                    elif waiting:
+                        entry_plan = waiting
+                    s['pending_buys'][symbol] = entry_plan
                     s['events'].append(dict(type='AL_ADAYI', time=t+self.interval, symbol=symbol,
                                             close=f['c'], simulated=True))
         s['last_t'] = t
