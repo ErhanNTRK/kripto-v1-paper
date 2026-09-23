@@ -261,3 +261,41 @@ class EvaluateTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RegimeFilterTests(unittest.TestCase):
+    """regime_ma_days (23 Sep 2026): no new longs while BTC is under its
+    long average. Over 3 years of 4h data it turned the Oct 2025 - Mar 2026
+    crash window (BTC -44%) from -7.33% into +2.13%."""
+
+    def _rows(self, closes, step=4 * 3600 * 1000):
+        return [dict(t=i * step, o=c, h=c * 1.01, l=c * 0.99, c=c, v=100.0) for i, c in enumerate(closes)]
+
+    def _config(self, **extra):
+        return dict(atr_multiplier=2.0, breakout_bars=20, support_bars=10, min_breaks=1,
+                    btc_filter="off", **extra)
+
+    def test_the_regime_line_is_a_days_based_average(self):
+        from crypto_v1.research_v5 import symmetric_features
+        rows = symmetric_features(self._rows([float(i) for i in range(1, 13)]), self._config(regime_ma_days=1))
+        # 1 day of 4h bars = 6 bars: the last six closes are 7..12.
+        self.assertAlmostEqual(rows[-1]["regime_ma"], sum(range(7, 13)) / 6)
+        self.assertIsNone(rows[4]["regime_ma"])
+
+    def test_no_long_while_btc_is_under_its_regime_line(self):
+        from crypto_v1.research_v5 import long_entry
+        row = {"c": 100.0, "atr": 1.0, "breaks_up": 3}
+        config = self._config(regime_ma_days=200)
+        self.assertIsNone(long_entry(row, {"c": 90.0, "regime_ma": 100.0}, config))
+        self.assertIsNotNone(long_entry(row, {"c": 110.0, "regime_ma": 100.0}, config))
+
+    def test_an_unknown_regime_line_fails_closed(self):
+        from crypto_v1.research_v5 import long_entry
+        row = {"c": 100.0, "atr": 1.0, "breaks_up": 3}
+        self.assertIsNone(long_entry(row, {"c": 110.0, "regime_ma": None}, self._config(regime_ma_days=200)))
+
+    def test_without_the_setting_nothing_changes(self):
+        from crypto_v1.research_v5 import long_entry
+        row = {"c": 100.0, "atr": 1.0, "breaks_up": 3}
+        self.assertIsNotNone(long_entry(row, {"c": 90.0}, self._config()))
+

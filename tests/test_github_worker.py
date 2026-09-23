@@ -432,3 +432,26 @@ class LocalTickWindowGateTests(unittest.TestCase):
             now = 800 * FOUR_HOUR
             self._call(Path(tmp), now, fail_2h=True)
             self.assertEqual(self._call(Path(tmp), now), (0, 1))
+
+
+class BtcHistoryStartTests(unittest.TestCase):
+    """With the regime filter on, BTC must be fetched far enough back for
+    its 200-day line; the filter fails closed, so a 45-day fetch would have
+    silently blocked every long."""
+
+    def test_regime_filter_extends_only_btc(self):
+        from crypto_v1.github_worker import btc_history_start
+        now, start = 1_000 * 86_400_000, 955 * 86_400_000
+        self.assertEqual(btc_history_start({}, now, start), start)
+        self.assertEqual(btc_history_start({"regime_ma_days": 200}, now, start), now - 220 * 86_400_000)
+
+    def test_fetch_all_uses_the_longer_start_for_btc_only(self):
+        from crypto_v1.github_worker import fetch_all
+        seen = {}
+        def fake(symbol, start, end, interval):
+            seen[symbol] = start
+            return []
+        with patch('crypto_v1.github_worker.candles', side_effect=fake),              patch('crypto_v1.github_worker.validate', side_effect=lambda rows, interval: rows):
+            fetch_all(["ETHUSDT", "BTCUSDT"], 500, 1000, FOUR_HOUR, btc_start=100)
+        self.assertEqual(seen, {"ETHUSDT": 500, "BTCUSDT": 100})
+

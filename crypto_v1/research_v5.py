@@ -71,6 +71,18 @@ def symmetric_features(rows, config):
     # register more often without touching the BTC direction filter.
     windows = tuple(config.get("donchian_windows", WINDOWS))
     out = features(rows, config)
+    # regime_ma_days: a simple moving average over that many DAYS of closes
+    # (bar count derived from the rows' own spacing, so 2h and 4h agree),
+    # read off BTC's row by long_entry as the market-regime line.
+    regime_days = config.get("regime_ma_days")
+    if regime_days and len(rows) > 1:
+        period = max(1, int(regime_days * 86_400_000 // (rows[1]["t"] - rows[0]["t"])))
+        running = 0.0
+        for i, row in enumerate(out):
+            running += rows[i]["c"]
+            if i >= period:
+                running -= rows[i - period]["c"]
+            row["regime_ma"] = running / period if i + 1 >= period else None
     for i, row in enumerate(out):
         up = down = 0
         for period in windows:
@@ -110,6 +122,13 @@ def long_entry(row, btc, config):
     if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
        or row.get("breaks_up", 0) < config.get("min_breaks", 2):
         return None
+    # Market regime (23 Sep 2026): every losing walk-forward window was one
+    # where BTC fell 20%+ and spent most of its time under its long average.
+    # No new longs while BTC is below its regime_ma_days average. Unknown
+    # (not enough history yet) blocks too: fail closed, never open blind.
+    if config.get("regime_ma_days"):
+        if not btc.get("regime_ma") or btc["c"] < btc["regime_ma"]:
+            return None
     # Optional "quality of the breakout" filters, all off by default so the
     # live signal is unchanged until one is validated. They exist because a
     # Donchian break says only THAT a high was taken out, never how violent

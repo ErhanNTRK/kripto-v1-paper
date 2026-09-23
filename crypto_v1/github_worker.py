@@ -30,10 +30,22 @@ TWO_HOUR_LONG_LEVERAGE = 4
 FETCH_WORKERS = 8
 
 
-def fetch_all(symbols, start, end, interval):
+def btc_history_start(config, now, default_start):
+    """BTC needs a longer history than the altcoins whenever the regime
+    filter is on: research_v5's regime line is a regime_ma_days average,
+    and long_entry fails CLOSED while that line is unknown. With the old
+    45-day fetch a 200-day filter would have silently blocked every long."""
+    days = config.get("regime_ma_days")
+    if not days:
+        return default_start
+    return min(default_start, now - (int(days) + 20) * 24 * 60 * 60 * 1000)
+
+
+def fetch_all(symbols, start, end, interval, btc_start=None):
     symbols = sorted(set(symbols))
+    starts = {s: (btc_start if s == "BTCUSDT" and btc_start is not None else start) for s in symbols}
     with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
-        rows = list(pool.map(lambda s: validate(candles(s, start, end, interval), interval), symbols))
+        rows = list(pool.map(lambda s: validate(candles(s, starts[s], end, interval), interval), symbols))
     return dict(zip(symbols, rows))
 
 
@@ -108,7 +120,9 @@ def prepare_data(config, runtime, now):
     # paper state despite real market moves (18 Sep 2026).
     start = now - 45 * 24 * 60 * 60 * 1000
     data_dir.mkdir(parents=True, exist_ok=True)
-    for symbol, rows in fetch_all(symbols + ["BTCUSDT"], start, now, FOUR_HOUR).items():
+    fetched = fetch_all(symbols + ["BTCUSDT"], start, now, FOUR_HOUR,
+                        btc_start=btc_history_start(config, now, start))
+    for symbol, rows in fetched.items():
         write_json(data_dir / f"{symbol}.json", rows)
     run_manifest = dict(manifest, start=start, end=now, captured_at=now)
     write_json(data_dir / "manifest.json", run_manifest)
@@ -213,7 +227,8 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     # BTC EMA200 floor) -- at 2H bars this is a much wider margin (~540
     # bars vs the ~200 needed), which is fine, just extra cache-warm data.
     start = now_2h - 45 * 24 * 60 * 60 * 1000
-    data = fetch_all(symbols + ["BTCUSDT"], start, now_2h, TWO_HOUR)
+    data = fetch_all(symbols + ["BTCUSDT"], start, now_2h, TWO_HOUR,
+                     btc_start=btc_history_start(strategy_config, now_2h, start))
     long_candidates = detect_long_candidates(data, long_symbols, strategy_config)
     long_events = [dict(type="AL_ADAYI", time=now_2h, symbol=c["symbol"], close=c["close"])
                    for c in long_candidates]

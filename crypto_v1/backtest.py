@@ -130,7 +130,10 @@ class Engine:
                     # a circular import (research_v5 imports metrics from
                     # here). The live controller does that lookup instead.
                     waiting = s['pending_buys'].get(symbol, {})
-                    entry_plan = dict(stop=stop(f, c), score=f.get('signal_score', f['v']/f['volume_avg']),
+                    # volume_avg is None for a symbol's first 20 bars (a coin
+                    # listed mid-test); rank it last instead of crashing.
+                    volume_ratio = f['v'] / f['volume_avg'] if f.get('volume_avg') else 0
+                    entry_plan = dict(stop=stop(f, c), score=f.get('signal_score', volume_ratio),
                                       breaks_up=f.get('breaks_up', 0))
                     if c.get('entry_pullback_atr', 0):
                         # A fresh signal restarts the window at the new level.
