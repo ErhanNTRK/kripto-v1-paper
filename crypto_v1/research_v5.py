@@ -112,6 +112,15 @@ def symmetric_features(rows, config):
             span = int(config.get("first_time_high_bars", 200))
             row["range_high"] = max(x["h"] for x in rows[i - span:i]) if i >= span else None
             row["has_history"] = i >= span
+        if "momentum" in str(config.get("entry_mode", "")) and len(rows) > 1:
+            # Pre-move context for is_momentum_setup, in calendar time so 2h
+            # and 4h bars measure the same thing: the last 48h's range and
+            # the last 24h's return.
+            per_day = max(1, int(86_400_000 // (rows[1]["t"] - rows[0]["t"])))
+            if i >= 2 * per_day:
+                recent = rows[i - 2 * per_day + 1:i + 1]
+                row["range48"] = (max(x["h"] for x in recent) - min(x["l"] for x in recent)) / row["c"]
+                row["ret24"] = row["c"] / rows[i - per_day]["c"] - 1
     return out
 
 
@@ -129,6 +138,20 @@ def is_trend_pullback(row, config):
     return ema20 > ema50 and row["c"] > ema50 and row["l"] <= touch and row["c"] > ema20
 
 
+def is_momentum_setup(row, config):
+    """Third entry pattern (23 Sep 2026, the user's pre-pump study): what
+    preceded >=20% daily rises in three years of data was NOT a quiet
+    squeeze (that halved the odds) but a coin already moving -- a wide 48h
+    range, a positive last 24h, above EMA50 above EMA200. Those bars were
+    followed by a >=20% rise ~5-10x as often as a random bar, holding in
+    both the fit period and the held-out last year."""
+    if row.get("range48") is None or not row.get("ema50") or not row.get("ema200"):
+        return False
+    return (row["range48"] >= float(config.get("momentum_min_range48", 0.154))
+            and row["ret24"] >= float(config.get("momentum_min_ret24", 0.033))
+            and row["c"] > row["ema50"] > row["ema200"])
+
+
 def long_entry(row, btc, config):
     # min_breaks (default 2, of the 3 windows in WINDOWS) is user-tunable:
     # lowering it to 1 trades signal quality for frequency, per the user's
@@ -137,12 +160,21 @@ def long_entry(row, btc, config):
     # walk-forward/frequency comparison that justified the live value.
     # entry_mode: "breakout" (default, the validated live signal),
     # "pullback" (is_trend_pullback only) or "both".
+    # "momentum" (is_momentum_setup) and "breakout+momentum" join them.
     mode = config.get("entry_mode", "breakout")
     breakout = row.get("breaks_up", 0) >= config.get("min_breaks", 2)
-    signal = {"breakout": breakout,
-              "pullback": mode != "breakout" and is_trend_pullback(row, config)}
-    fired = signal["breakout"] if mode == "breakout" else \
-        signal["pullback"] if mode == "pullback" else (signal["breakout"] or signal["pullback"])
+    if mode == "breakout":
+        fired = breakout
+    elif mode == "pullback":
+        fired = is_trend_pullback(row, config)
+    elif mode == "both":
+        fired = breakout or is_trend_pullback(row, config)
+    elif mode == "momentum":
+        fired = is_momentum_setup(row, config)
+    elif mode == "breakout+momentum":
+        fired = breakout or is_momentum_setup(row, config)
+    else:
+        raise ValueError(f"unknown entry_mode {mode!r}")
     if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") or not fired:
         return None
     # Time-of-week filter (23 Sep 2026, research option from the user's

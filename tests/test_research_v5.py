@@ -350,3 +350,39 @@ class TrendPullbackTests(unittest.TestCase):
         self.assertIsNotNone(long_entry(pullback_only, self.BTC, both))
         self.assertIsNotNone(long_entry(breakout_only, self.BTC, both))
 
+
+class MomentumSetupTests(unittest.TestCase):
+    """entry_mode "momentum" (23 Sep 2026, pre-pump study): a coin already
+    moving -- wide 48h range, positive 24h, EMA50 above EMA200."""
+
+    def _row(self, **kw):
+        row = {"c": 110.0, "ema50": 100.0, "ema200": 90.0, "range48": 0.2, "ret24": 0.05, "atr": 3.0}
+        row.update(kw)
+        return row
+
+    def test_a_moving_uptrending_coin_qualifies(self):
+        from crypto_v1.research_v5 import is_momentum_setup
+        self.assertTrue(is_momentum_setup(self._row(), {}))
+
+    def test_each_condition_is_required(self):
+        from crypto_v1.research_v5 import is_momentum_setup
+        self.assertFalse(is_momentum_setup(self._row(range48=0.10), {}))
+        self.assertFalse(is_momentum_setup(self._row(ret24=0.01), {}))
+        self.assertFalse(is_momentum_setup(self._row(ema50=80.0), {}))
+        self.assertFalse(is_momentum_setup(self._row(range48=None), {}))
+
+    def test_features_are_computed_in_calendar_time(self):
+        from crypto_v1.research_v5 import symmetric_features
+        step = 4 * 3600 * 1000
+        rows = [dict(t=i * step, o=100.0, h=101.0 + i, l=99.0 + i, c=100.0 + i, v=10.0) for i in range(30)]
+        out = symmetric_features(rows, {"atr_multiplier": 2.0, "breakout_bars": 20, "support_bars": 10,
+                                        "entry_mode": "momentum"})
+        # 4h bars: 24h = 6 bars back, 48h range = last 12 bars.
+        self.assertAlmostEqual(out[-1]["ret24"], 129.0 / 123.0 - 1)
+        self.assertAlmostEqual(out[-1]["range48"], (130.0 - 117.0) / 129.0)
+
+    def test_unknown_mode_is_an_error(self):
+        from crypto_v1.research_v5 import long_entry
+        with self.assertRaises(ValueError):
+            long_entry({"breaks_up": 1, "atr": 1.0, "c": 1.0}, {}, {"entry_mode": "nonsense"})
+
