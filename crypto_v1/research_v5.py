@@ -115,14 +115,35 @@ def symmetric_features(rows, config):
     return out
 
 
+def is_trend_pullback(row, config):
+    """Second entry pattern (23 Sep 2026, user's request for activity in the
+    quiet hours a breakout system sits out): a coin already in an uptrend
+    (EMA20 above EMA50, close above EMA50) whose bar dipped to its EMA20 and
+    closed back above it -- buying the dip inside a trend rather than the
+    new high. pullback_touch_atr lets the low stop short of the EMA by that
+    many ATRs and still count as a touch."""
+    ema20, ema50, atr = row.get("ema20"), row.get("ema50"), row.get("atr")
+    if not ema20 or not ema50 or not atr:
+        return False
+    touch = ema20 + float(config.get("pullback_touch_atr", 0)) * atr
+    return ema20 > ema50 and row["c"] > ema50 and row["l"] <= touch and row["c"] > ema20
+
+
 def long_entry(row, btc, config):
     # min_breaks (default 2, of the 3 windows in WINDOWS) is user-tunable:
     # lowering it to 1 trades signal quality for frequency, per the user's
     # explicit 18 Sep 2026 request that the default (2) was too rare to be
     # a usable, active system -- see v5-loosened-frequency.yml for the
     # walk-forward/frequency comparison that justified the live value.
-    if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
-       or row.get("breaks_up", 0) < config.get("min_breaks", 2):
+    # entry_mode: "breakout" (default, the validated live signal),
+    # "pullback" (is_trend_pullback only) or "both".
+    mode = config.get("entry_mode", "breakout")
+    breakout = row.get("breaks_up", 0) >= config.get("min_breaks", 2)
+    signal = {"breakout": breakout,
+              "pullback": mode != "breakout" and is_trend_pullback(row, config)}
+    fired = signal["breakout"] if mode == "breakout" else \
+        signal["pullback"] if mode == "pullback" else (signal["breakout"] or signal["pullback"])
+    if not btc_up_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") or not fired:
         return None
     # Time-of-week filter (23 Sep 2026, research option from the user's
     # Gemini notes): thin weekend / off-hours liquidity is easier to push

@@ -313,3 +313,40 @@ class RegimeFilterTests(unittest.TestCase):
         self.assertIsNone(short_entry(row, {"c": 90.0}, self._config(disable_shorts=True)))
         self.assertIsNotNone(short_entry(row, {"c": 90.0}, self._config()))
 
+
+class TrendPullbackTests(unittest.TestCase):
+    """entry_mode (23 Sep 2026): a dip to EMA20 inside an uptrend as a
+    second entry pattern next to the Donchian breakout; off by default."""
+    BTC = {"c": 110.0, "ema20": 105.0, "ema50": 100.0, "ema200": 90.0}
+    CONFIG = {"atr_multiplier": 2.0, "min_breaks": 1, "btc_filter": "loose"}
+
+    def _row(self, **kw):
+        row = {"c": 101.0, "o": 99.5, "l": 99.0, "h": 101.5, "atr": 1.0,
+               "ema20": 100.0, "ema50": 95.0, "breaks_up": 0}
+        row.update(kw)
+        return row
+
+    def test_a_bounce_off_ema20_in_an_uptrend_is_a_pullback(self):
+        from crypto_v1.research_v5 import is_trend_pullback
+        self.assertTrue(is_trend_pullback(self._row(), {}))
+
+    def test_no_pullback_without_an_uptrend_or_without_the_touch(self):
+        from crypto_v1.research_v5 import is_trend_pullback
+        self.assertFalse(is_trend_pullback(self._row(ema20=94.0), {}))      # EMA20 under EMA50
+        self.assertFalse(is_trend_pullback(self._row(l=100.5), {}))         # never reached EMA20
+        self.assertFalse(is_trend_pullback(self._row(c=99.8), {}))          # closed below EMA20
+        self.assertTrue(is_trend_pullback(self._row(l=100.5), {"pullback_touch_atr": 0.6}))
+
+    def test_modes(self):
+        from crypto_v1.research_v5 import long_entry
+        pullback_only = self._row()
+        breakout_only = self._row(l=100.8, breaks_up=2)
+        self.assertIsNone(long_entry(pullback_only, self.BTC, self.CONFIG))  # default: breakout only
+        self.assertIsNotNone(long_entry(breakout_only, self.BTC, self.CONFIG))
+        pb = dict(self.CONFIG, entry_mode="pullback")
+        self.assertIsNotNone(long_entry(pullback_only, self.BTC, pb))
+        self.assertIsNone(long_entry(breakout_only, self.BTC, pb))
+        both = dict(self.CONFIG, entry_mode="both")
+        self.assertIsNotNone(long_entry(pullback_only, self.BTC, both))
+        self.assertIsNotNone(long_entry(breakout_only, self.BTC, both))
+
