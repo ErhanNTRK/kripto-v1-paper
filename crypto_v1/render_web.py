@@ -6,6 +6,7 @@ from pathlib import Path
 from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
+from . import ledger
 from .github_worker import local_tick
 from .live_controller import _known_or_place
 from .live_execution import _down, _up, execution_enabled
@@ -762,7 +763,8 @@ def positions_snapshot(apps=None):
 LOOP_SECONDS = 120
 
 
-def run_periodic_scans(apps, interval_seconds=LOOP_SECONDS, sleep=time.sleep, max_iterations=None, detect=None):
+def run_periodic_scans(apps, interval_seconds=LOOP_SECONDS, sleep=time.sleep, max_iterations=None, detect=None,
+                       housekeeping=None):
     """Independent of GitHub Actions' free-tier cron, whose scheduled runs
     have been observed to lag by hours rather than minutes. Runs only
     while this Render process is warm; a cold free-tier instance still
@@ -803,6 +805,13 @@ def run_periodic_scans(apps, interval_seconds=LOOP_SECONDS, sleep=time.sleep, ma
                 app.tick()
             except Exception as exc:
                 print(f"Periodic tick failed: {exc}", flush=True)
+        if housekeeping is not None:
+            # Non-trading chores (the trade ledger): never allowed to break
+            # or delay what the loop is for beyond one caught exception.
+            try:
+                housekeeping()
+            except Exception as exc:
+                print(f"Housekeeping failed: {exc}", flush=True)
         iterations += 1
         LOOP_PROGRESS["at"] = time.time()
         sleep(interval_seconds)
@@ -1005,8 +1014,17 @@ def main():
                   orders_enabled=execution_enabled(config, os.environ))
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
     threading.Thread(target=watch_loop, daemon=True).start()
+    # Trade ledger (user's request, 24 Sep 2026): every buy and sell with
+    # its USDT result, refreshed hourly into ~/kripto/islem-kayitlari.
+    ledger_state = {"at": 0.0}
+    def refresh_ledger():
+        if time.time() - ledger_state["at"] < 3600:
+            return
+        ledger_state["at"] = time.time()
+        ledger.refresh(APP.futures_executor)
     threading.Thread(target=run_periodic_scans, args=(APPS,),
-                     kwargs={"detect": lambda: local_tick(runtime_dir)}, daemon=True).start()
+                     kwargs={"detect": lambda: local_tick(runtime_dir), "housekeeping": refresh_ledger},
+                     daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
 
 if __name__ == "__main__": main()

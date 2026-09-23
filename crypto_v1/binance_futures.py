@@ -34,6 +34,9 @@ ALLOWED = {
     ("GET", "/fapi/v1/algoOrder"),
     ("DELETE", "/fapi/v1/algoOrder"),
     ("GET", "/fapi/v1/openAlgoOrders"),
+    # Read-only history for the trade ledger (crypto_v1.ledger).
+    ("GET", "/fapi/v1/userTrades"),
+    ("GET", "/fapi/v1/income"),
     ("POST", "/fapi/v1/leverage"),
     ("POST", "/fapi/v1/marginType"),
     ("GET", "/fapi/v2/account"),
@@ -235,6 +238,16 @@ class FuturesExecutor:
         if start_time is not None:
             params["startTime"] = int(start_time)
         return self.request("GET", params, path="/fapi/v1/allOrders")
+
+    def user_trades(self, symbol, start_time, end_time):
+        """Fills for one symbol; Binance serves at most a 7-day window."""
+        return self.request("GET", {"symbol": symbol, "startTime": int(start_time), "endTime": int(end_time),
+                                    "limit": 1000}, path="/fapi/v1/userTrades")
+
+    def income(self, start_time, end_time):
+        """Realized P&L, commission, funding and transfer events."""
+        return self.request("GET", {"startTime": int(start_time), "endTime": int(end_time), "limit": 1000},
+                            path="/fapi/v1/income")
 
     def account(self):
         return self.request("GET", {}, path="/fapi/v2/account")
