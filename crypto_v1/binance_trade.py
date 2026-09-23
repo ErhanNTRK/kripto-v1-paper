@@ -19,6 +19,12 @@ ALLOWED = {
     ("GET", "/api/v3/allOrders"),
 }
 
+# Binance rejects a signed request whose timestamp is older than this when
+# it arrives (-1021). 5 s was too tight for the PC's link: live 23 Sep 2026
+# a single slow request (clock was only ~40 ms off) aborted a whole futures
+# exit scan. 10 s still refuses a genuinely stale, replayed request.
+RECV_WINDOW_MS = 10000
+
 
 class OrderRejected(RuntimeError):
     """`message` is Binance's own "msg" text and `http_status` the HTTP code.
@@ -48,7 +54,7 @@ def signed_order_request(method, path, params, api_key, private_pem, clock=None,
         raise ValueError("order endpoint is not allow-listed")
     values = dict(params)
     values["timestamp"] = int((clock or time.time)() * 1000)
-    values["recvWindow"] = 5000
+    values["recvWindow"] = RECV_WINDOW_MS
     payload = urllib.parse.urlencode(values)
     key = load_pem_private_key(private_pem.encode("utf-8"), password=None)
     values["signature"] = base64.b64encode(key.sign(payload.encode("ascii"))).decode("ascii")

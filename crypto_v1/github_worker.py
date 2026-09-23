@@ -30,6 +30,18 @@ TWO_HOUR_LONG_LEVERAGE = 4
 FETCH_WORKERS = 8
 
 
+def load_2h_strategy(relax=True):
+    """The 2H system's own strategy file (23 Sep 2026). Until then 2H reused
+    config_v5_long.json verbatim, but every setting there is a BAR count
+    tuned on 4h bars, so on 2h bars it measured half the calendar time --
+    breakouts of barely 1.7 days, a trail half as wide. Over ~3 years of 2h
+    data that made the 2H long side lose in 3 of 6 windows; with the bar
+    counts doubled (Donchian 20/40/80, first-time-high over 400 bars) and a
+    6 ATR trail, the mean per window went from +4.5% to +14.3%."""
+    config = validate_config(json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8")))
+    return dict(config, daily_loss_fraction=0.05, max_consecutive_losses=100000) if relax else config
+
+
 def btc_history_start(config, now, default_start):
     """BTC needs a longer history than the altcoins whenever the regime
     filter is on: research_v5's regime line is a regime_ma_days average,
@@ -316,7 +328,7 @@ def local_tick(runtime_dir):
         shutil.rmtree(output, ignore_errors=True)
         done["4h"] = now
     if done.get("2h") != now_2h:
-        write_2h_signal_state(config, runtime_dir, now_2h)
+        write_2h_signal_state(load_2h_strategy(), runtime_dir, now_2h)
         done["2h"] = now_2h
 
 
@@ -362,7 +374,7 @@ def main():
         tick(config, data_dir, state_path, output, model=ShortWindowLongModel, interval=FOUR_HOUR)
     _print_4h_long_scan(data_dir, state_path, now)
     write_short_state(config, data_dir, runtime, now)
-    write_2h_signal_state(config, runtime, now_2h)
+    write_2h_signal_state(load_2h_strategy(), runtime, now_2h)
     database = runtime / "telegram.sqlite"
     deliver_once(
         "connection:" + chat_id,

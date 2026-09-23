@@ -996,3 +996,35 @@ class RatchetTests(unittest.TestCase):
         app = self._app(price=118)
         position = dict(self._position(), unprotected=True, stop_price=None)
         self.assertIsNone(app._ratchet(position, {"atr": 2.0}, extreme=120))
+
+
+class ConsoleLogTests(unittest.TestCase):
+    """Everything printed also lands, timestamped, in runtime/bot.log so the
+    console can be read without watching the window (23 Sep 2026)."""
+
+    def test_lines_are_mirrored_with_a_timestamp(self):
+        import io, tempfile
+        from pathlib import Path
+        from crypto_v1.render_web import ConsoleLog
+        with tempfile.TemporaryDirectory() as tmp:
+            screen = io.StringIO()
+            log = ConsoleLog(screen, Path(tmp) / "bot.log", clock=lambda: 0)
+            log.write("Futures exit scan failed: -1021\npartial")
+            self.assertEqual(screen.getvalue(), "Futures exit scan failed: -1021\npartial")
+            written = (Path(tmp) / "bot.log").read_text(encoding="utf-8")
+            self.assertIn("Futures exit scan failed: -1021", written)
+            self.assertNotIn("partial", written)  # held until its line ends
+            log.write(" line\n")
+            self.assertIn("partial line", (Path(tmp) / "bot.log").read_text(encoding="utf-8"))
+
+    def test_a_large_log_is_rotated_on_start(self):
+        import io, tempfile
+        from pathlib import Path
+        from crypto_v1.render_web import ConsoleLog
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bot.log"
+            path.write_text("x" * 100, encoding="utf-8")
+            ConsoleLog(io.StringIO(), path, max_bytes=10)
+            self.assertTrue((Path(tmp) / "bot.log.1").exists())
+            self.assertFalse(path.exists())
+

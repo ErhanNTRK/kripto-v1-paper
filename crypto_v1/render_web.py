@@ -1,5 +1,5 @@
 """Render Frankfurt health probe and authenticated Telegram command webhook."""
-import collections, hmac, json, os, re, threading, time
+import collections, hmac, json, os, re, sys, threading, time
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -846,8 +846,47 @@ class Handler(BaseHTTPRequestHandler):
         except Exception: self._json(500, {"status": "failed_closed"})
     def log_message(self, *args): return
 
+class ConsoleLog:
+    """Mirror everything the bot prints into runtime/bot.log, one timestamped
+    line at a time, so the console can be read (and acted on) without anyone
+    watching the PowerShell window -- the user's 23 Sep 2026 request after
+    -1021/-2013 errors surfaced only on screen. The file is rotated once past
+    max_bytes so it cannot grow without bound."""
+
+    def __init__(self, stream, path, max_bytes=5_000_000, clock=time.time):
+        self.stream, self.path, self.max_bytes, self.clock = stream, Path(path), max_bytes, clock
+        self.lock = threading.Lock()
+        self.pending = ""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists() and self.path.stat().st_size > max_bytes:
+            self.path.replace(self.path.with_suffix(".log.1"))
+
+    def write(self, text):
+        self.stream.write(text)
+        with self.lock:
+            self.pending += text
+            *lines, self.pending = self.pending.split("\n")
+            if lines:
+                stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.clock()))
+                try:
+                    with self.path.open("a", encoding="utf-8") as log:
+                        log.writelines(f"{stamp} {line}\n" for line in lines if line.strip())
+                except OSError:
+                    pass  # logging must never take the bot down
+        return len(text)
+
+    def flush(self):
+        self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 def main():
     verify_from_environment()
+    log_path = Path(os.environ.get("CRYPTO_STORAGE", "runtime")) / "bot.log"
+    sys.stdout = ConsoleLog(sys.stdout, log_path)
+    sys.stderr = ConsoleLog(sys.stderr, log_path)
     config = json.loads(Path("live_config.json").read_text(encoding="utf-8"))
     # v5 long side (shorter 10/20/40-bar Donchian, uncapped winners via
     # cap_at_target=false) drives live candidates and exits; see ARASTIRMA.md.
@@ -891,7 +930,11 @@ def main():
     global APP, APPS
     APP = LiveApp(config, strategy, os.environ, short_config, strategy, tag="4",
                  state_url=local_url("state-relaxed.json"), state_short_url=local_url("short_state.json"))
-    app_2h = LiveApp(config_2h, strategy, os.environ, short_config_2h, strategy, tag="2",
+    # The 2H system's own strategy file: exits, trailing and the resting
+    # stop's ratchet must use the same 2h-scaled settings its entries were
+    # detected with (see github_worker.load_2h_strategy).
+    strategy_2h = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
+    app_2h = LiveApp(config_2h, strategy_2h, os.environ, short_config_2h, strategy_2h, tag="2",
                      state_url=local_url("state_2h.json"), state_short_url=local_url("short_state_2h.json"),
                      interval=TWO_HOUR)
     APPS = [APP, app_2h]

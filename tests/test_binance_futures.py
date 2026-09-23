@@ -152,3 +152,35 @@ class BinanceFuturesTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StaleTimestampRetryTests(unittest.TestCase):
+    """-1021 (request arrived after its recvWindow) is retried once with a
+    fresh timestamp: live 23 Sep 2026 one slow request aborted a whole
+    futures exit scan while the PC clock was only ~40 ms off."""
+
+    def setUp(self):
+        key = Ed25519PrivateKey.generate()
+        pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode()
+        self.env = {"BINANCE_API_KEY": "api", "BINANCE_ED25519_PRIVATE_KEY": pem,
+                    "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
+
+    def test_a_stale_timestamp_is_retried_once(self):
+        opener = Mock(side_effect=[_http_error(-1021, "Timestamp outside recvWindow"), Response([])])
+        self.assertEqual(FuturesExecutor({"live_trading_enabled": True}, self.env, opener).open_orders.__self__
+                         .request("GET", {}, path="/fapi/v1/openOrders"), [])
+        self.assertEqual(opener.call_count, 2)
+
+    def test_a_second_stale_timestamp_is_raised(self):
+        opener = Mock(side_effect=[_http_error(-1021), _http_error(-1021)])
+        with self.assertRaises(OrderRejected):
+            FuturesExecutor({"live_trading_enabled": True}, self.env, opener).request(
+                "GET", {}, path="/fapi/v1/openOrders")
+
+    def test_other_rejections_are_not_retried(self):
+        opener = Mock(side_effect=[_http_error(-2013)])
+        with self.assertRaises(OrderRejected):
+            FuturesExecutor({"live_trading_enabled": True}, self.env, opener).request(
+                "GET", {}, path="/fapi/v1/openOrders")
+        self.assertEqual(opener.call_count, 1)
+

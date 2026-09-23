@@ -40,6 +40,12 @@ ALLOWED = {
     ("GET", "/fapi/v1/exchangeInfo"),
 }
 
+# Binance rejects a signed request whose timestamp is older than this when
+# it arrives (-1021). 5 s was too tight for the PC's link: live 23 Sep 2026
+# a single slow request (clock was only ~40 ms off) aborted a whole futures
+# exit scan. 10 s still refuses a genuinely stale, replayed request.
+RECV_WINDOW_MS = 10000
+
 
 def signed_futures_request(method, path, params, api_key, private_pem, clock=None,
                            opener=urllib.request.urlopen):
@@ -48,7 +54,7 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
         raise ValueError("futures endpoint is not allow-listed")
     values = dict(params)
     values["timestamp"] = int((clock or time.time)() * 1000)
-    values["recvWindow"] = 5000
+    values["recvWindow"] = RECV_WINDOW_MS
     payload = urllib.parse.urlencode(values)
     key = load_pem_private_key(private_pem.encode("utf-8"), password=None)
     values["signature"] = base64.b64encode(key.sign(payload.encode("ascii"))).decode("ascii")
@@ -118,8 +124,17 @@ class FuturesExecutor:
 
     def request(self, method, params, path="/fapi/v1/order"):
         api_key, private_key = self._credentials(require_live=method.upper() != "GET")
-        return signed_futures_request(method, path, params, api_key, private_key,
-                                      opener=self.opener)
+        try:
+            return signed_futures_request(method, path, params, api_key, private_key,
+                                          opener=self.opener)
+        except OrderRejected as error:
+            # -1021: the request arrived after its recvWindow. Binance
+            # rejected it before acting on it -- nothing was read or placed
+            # -- so one retry with a fresh timestamp is safe for every method.
+            if error.code != -1021:
+                raise
+            return signed_futures_request(method, path, params, api_key, private_key,
+                                          opener=self.opener)
 
     def set_leverage(self, symbol, leverage):
         return self.request("POST", {"symbol": symbol, "leverage": int(leverage)},

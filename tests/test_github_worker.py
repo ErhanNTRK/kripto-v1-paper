@@ -455,3 +455,17 @@ class BtcHistoryStartTests(unittest.TestCase):
             fetch_all(["ETHUSDT", "BTCUSDT"], 500, 1000, FOUR_HOUR, btc_start=100)
         self.assertEqual(seen, {"ETHUSDT": 500, "BTCUSDT": 100})
 
+
+class TwoHourStrategyFileTests(unittest.TestCase):
+    """config_v5_long_2h.json must stay the 4H strategy with its BAR counts
+    doubled (2h bars are half as long); drifting apart silently is how the
+    2H system ended up measuring half the calendar time."""
+
+    def test_2h_file_is_the_4h_file_with_bar_counts_doubled(self):
+        four = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
+        two = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
+        self.assertEqual(two["donchian_windows"], [2 * w for w in four.get("donchian_windows", [10, 20, 40])])
+        self.assertEqual(two["first_time_high_bars"], 2 * four["first_time_high_bars"])
+        shared = {k for k in four if k not in ("donchian_windows", "first_time_high_bars", "trailing_atr")}
+        self.assertEqual({k: two[k] for k in shared}, {k: four[k] for k in shared})
+
