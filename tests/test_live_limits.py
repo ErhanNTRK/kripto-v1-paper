@@ -67,3 +67,34 @@ class LiveLimitTests(unittest.TestCase):
         self.assertEqual(confirmed_profit_exit("SAT", [dict(signal, reason="stop_loss")], 2000, config)[1],
                          "not_profit_exit")
         self.assertEqual(confirmed_profit_exit("SAT", [signal], 700000, config)[1], "exit_signal_expired")
+
+
+class ProportionalRiskTests(unittest.TestCase):
+    """23 Sep 2026: risk and loss limits scale with each system's equity
+    (user's decision: 0.75% per trade, 10% daily, 40% of baseline total)."""
+
+    def test_risk_per_trade_is_a_share_of_current_equity(self):
+        from decimal import Decimal
+        from crypto_v1.live_limits import trade_risk_usdt
+        config = {"risk_per_trade_usdt": 5.0, "risk_per_trade_fraction": 0.0075}
+        self.assertEqual(trade_risk_usdt(config, Decimal("80")), Decimal("0.6000"))
+        self.assertEqual(trade_risk_usdt(config, Decimal("160")), Decimal("1.2000"))
+
+    def test_fixed_risk_is_used_without_the_fraction_or_equity(self):
+        from decimal import Decimal
+        from crypto_v1.live_limits import trade_risk_usdt
+        self.assertEqual(trade_risk_usdt({"risk_per_trade_usdt": 5.0}, Decimal("80")), Decimal("5.0"))
+        self.assertEqual(trade_risk_usdt({"risk_per_trade_usdt": 5.0, "risk_per_trade_fraction": 0.0075}, None),
+                         Decimal("5.0"))
+
+    def test_proportional_loss_limits(self):
+        from crypto_v1.live_limits import may_open
+        config = {"live_trading_enabled": True, "max_open_positions": 6, "max_buys_per_day": 40,
+                  "daily_loss_limit_usdt": 12, "pilot_loss_limit_usdt": 15, "pilot_capital_usdt": 34.55,
+                  "daily_loss_limit_fraction": 0.10, "pilot_loss_limit_fraction": 0.40}
+        # 10% of 80 = 8 USDT daily limit.
+        self.assertEqual(may_open(config, 0, 0, 7.9, 0, equity=80), (True, "allowed"))
+        self.assertEqual(may_open(config, 0, 0, 8.0, 0, equity=80), (False, "daily_loss_limit"))
+        # 40% of the 34.55 baseline = 13.82 USDT drawdown limit.
+        self.assertEqual(may_open(config, 0, 0, 0, 13.9, equity=80), (False, "pilot_loss_limit"))
+

@@ -3,8 +3,33 @@ from decimal import Decimal
 from datetime import datetime, timezone
 
 
+def trade_risk_usdt(config, equity):
+    """Risk per trade in USDT. risk_per_trade_fraction (23 Sep 2026, user's
+    decision: 0.75%) makes it a share of this system's CURRENT equity, so
+    it grows with profit and shrinks after losses; without it the fixed
+    risk_per_trade_usdt applies (was 5 USDT on a ~37 USDT 4H slice, ~13.5%
+    per trade -- far past what a 30R+ losing stretch can survive)."""
+    fraction = config.get("risk_per_trade_fraction")
+    if fraction and equity and Decimal(str(equity)) > 0:
+        return Decimal(str(equity)) * Decimal(str(fraction))
+    return Decimal(str(config["risk_per_trade_usdt"]))
+
+
+def loss_limits(config, equity):
+    """(daily, pilot) loss limits in USDT. The *_fraction forms scale with
+    the system: daily as a share of current equity, pilot drawdown as a
+    share of the pilot_capital_usdt baseline it is measured from."""
+    daily = Decimal(str(config.get("daily_loss_limit_usdt", 0)))
+    pilot = Decimal(str(config.get("pilot_loss_limit_usdt", 0)))
+    if config.get("daily_loss_limit_fraction") and equity:
+        daily = Decimal(str(equity)) * Decimal(str(config["daily_loss_limit_fraction"]))
+    if config.get("pilot_loss_limit_fraction"):
+        pilot = Decimal(str(config["pilot_capital_usdt"])) * Decimal(str(config["pilot_loss_limit_fraction"]))
+    return daily, pilot
+
+
 def may_open(config, open_positions, buys_today, realized_loss_today, pilot_drawdown,
-            symbol=None, held_symbols=()):
+            symbol=None, held_symbols=(), equity=None):
     """symbol/held_symbols (default: no check, for backward compatibility
     with any caller that hasn't been updated) guard against opening a
     SECOND position in a symbol we already hold. Needed once entries are
@@ -21,9 +46,10 @@ def may_open(config, open_positions, buys_today, realized_loss_today, pilot_draw
         return False, "position_limit"
     if buys_today >= config["max_buys_per_day"]:
         return False, "daily_buy_limit"
-    if Decimal(str(realized_loss_today)) >= Decimal(str(config["daily_loss_limit_usdt"])):
+    daily_limit, pilot_limit = loss_limits(config, equity)
+    if Decimal(str(realized_loss_today)) >= daily_limit:
         return False, "daily_loss_limit"
-    if Decimal(str(pilot_drawdown)) >= Decimal(str(config["pilot_loss_limit_usdt"])):
+    if Decimal(str(pilot_drawdown)) >= pilot_limit:
         return False, "pilot_loss_limit"
     return True, "allowed"
 
