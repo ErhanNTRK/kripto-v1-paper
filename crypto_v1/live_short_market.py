@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
 
+from .binance_trade import OrderRejected
 from .data import INTERVAL, candles, futures_get, get, universe
 from .live_execution import futures_symbol_rules
 
@@ -250,17 +251,50 @@ class BinanceFuturesMarket:
                 continue
             if not _belongs_to_tag(stop_id, 5, self.tag):
                 continue
-            open_order = self.executor.query(stop["symbol"], open_prefix + stop_id[5:])
-            qty = Decimal(str(open_order.get("executedQty", "0")))
-            quote = Decimal(str(open_order.get("cumQuote", "0")))
-            if qty <= 0 or quote <= 0:
-                continue
-            positions.append({"symbol": stop["symbol"], "side": side, "entry": quote / qty,
+            try:
+                open_order = self.executor.query(stop["symbol"], open_prefix + stop_id[5:])
+            except OrderRejected as error:
+                if error.code != -2013:  # Binance: order does not exist.
+                    raise
+                open_order = None
+            if open_order is not None:
+                qty = Decimal(str(open_order.get("executedQty", "0")))
+                quote = Decimal(str(open_order.get("cumQuote", "0")))
+            if open_order is None or qty <= 0 or quote <= 0:
+                # An adopted position's stop carries a per-symbol code its
+                # older opening order does not, so that lookup 404s (-2013).
+                # The exchange's own position is the authority anyway; only
+                # falling back here keeps one missing order from aborting the
+                # WHOLE exit scan, which is what happened live 23 Sep 2026
+                # ("Futures exit scan failed: ... -2013" every tick, so no
+                # position was being checked for its exit at all).
+                held = self._account_position(stop["symbol"])
+                if held is None:
+                    continue
+                entry, quantity, open_time = held
+            else:
+                entry, quantity = quote / qty, stop["origQty"]
+                open_time = int(open_order.get("time", open_order.get("updateTime", 0)))
+            positions.append({"symbol": stop["symbol"], "side": side, "entry": entry,
                               "stop_price": Decimal(str(stop["stopPrice"])),
-                              "quantity": stop["origQty"], "stop_client_id": stop_id,
-                              "open_time": int(open_order.get("time", open_order.get("updateTime", 0)))})
+                              "quantity": quantity, "stop_client_id": stop_id,
+                              "open_time": open_time})
         positions.extend(self.unprotected_positions({p["symbol"] for p in positions}))
         return positions
+
+    def _account_position(self, symbol):
+        """(entry, quantity, open_time) straight from the exchange, or None
+        when nothing is open. open_time falls back to now: analysis() only
+        uses it to decide how far back to fetch candles, and a zero there
+        would ask Binance for every candle since 1970."""
+        account, _, _ = self._raw_pilot_data()
+        for position in account.get("positions", []):
+            amount = _decimal(position.get("positionAmt"))
+            if position.get("symbol") != symbol or amount == 0:
+                continue
+            open_time = int(position.get("updateTime") or 0) or int(self._now() * 1000)
+            return _decimal(position.get("entryPrice")), format(abs(amount), "f"), open_time
+        return None
 
     def unprotected_positions(self, protected_symbols=()):
         """Real Futures positions this system opened that have NO protective
