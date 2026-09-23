@@ -860,6 +860,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health": self._json(200 if STATUS["ready"] else 503, STATUS); return
         if self.path == "/status": self._json(200, status_snapshot()); return
+        if self.path == "/threads":
+            # Where every thread is RIGHT NOW -- to see what a slow or hung
+            # tick is waiting on while it is happening. Local callers only:
+            # stack frames name files and calls, nothing for the LAN.
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self.send_error(403); return
+            import traceback
+            names = {t.ident: t.name for t in threading.enumerate()}
+            self._json(200, {names.get(ident, str(ident)): traceback.format_stack(frame)
+                             for ident, frame in sys._current_frames().items()})
+            return
         if self.path == "/positions":
             try:
                 self._json(200, positions_snapshot())

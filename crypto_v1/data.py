@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import time
 import urllib.request
 import urllib.parse
@@ -8,25 +9,53 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 INTERVAL = 900000
-BASE = 'https://data-api.binance.vision'
+# Public market data (klines, tickers, exchangeInfo). api.binance.com sits
+# behind a CDN and answered in ~0.4 s from the live PC on 23 Sep 2026, while
+# data-api.binance.vision -- the original choice, because US GitHub Actions
+# runners are geo-blocked from api.binance.com -- resolved to bare AWS Tokyo
+# hosts that took 2-3 s per call and at times never answered: two live ticks
+# sat 9 minutes and 6+ minutes on exactly those addresses. The primary is
+# tried first; a geo-block (HTTP 451/403) switches this process to the
+# fallback for good, so GitHub Actions keeps working unchanged.
+MARKET_DATA_BASES = (os.environ.get('BINANCE_MARKET_DATA_BASE') or 'https://api.binance.com',
+                     'https://data-api.binance.vision')
+BASE = MARKET_DATA_BASES[0]
+SLOW_REQUEST_SECONDS = 15
+
+
+def note_slow(label, started, outcome="ok"):
+    """Print any HTTP call slower than SLOW_REQUEST_SECONDS with its target, so
+    a slow or stalled loop can be traced to the exact endpoint."""
+    elapsed = time.time() - started
+    if elapsed >= SLOW_REQUEST_SECONDS:
+        print(f"SLOW REQUEST {elapsed:.1f}s {outcome}: {label}", flush=True)
 BINANCE_CODE = {900_000: '15m', 3_600_000: '1h', 7_200_000: '2h', 14_400_000: '4h', 21_600_000: '6h', 86_400_000: '1d'}
 
 
 def get(path, params=None):
     if path not in ('time', 'exchangeInfo', 'ticker/24hr', 'klines'):
         raise ValueError('Only public market-data endpoints allowed')
-    url = BASE + '/api/v3/' + path + '?' + urllib.parse.urlencode(params or {})
+    global BASE
+    query = '/api/v3/' + path + '?' + urllib.parse.urlencode(params or {})
     for attempt in range(5):
+        started = time.time()
         try:
-            with urllib.request.urlopen(url, timeout=30) as response:
-                return json.load(response)
+            with urllib.request.urlopen(BASE + query, timeout=30) as response:
+                result = json.load(response)
+            note_slow(BASE + query[:120], started)
+            return result
         except urllib.error.HTTPError as exc:
+            note_slow(BASE + query[:120], started, f"HTTP {exc.code}")
+            if exc.code in (451, 403) and BASE != MARKET_DATA_BASES[-1]:
+                BASE = MARKET_DATA_BASES[-1]   # geo-blocked (e.g. GitHub Actions): use the fallback
+                continue
             if exc.code == 418:
                 raise RuntimeError('Binance temporary IP ban; stop requests') from exc
             if exc.code not in (429, 500, 502, 503, 504) or attempt == 4:
                 raise
             time.sleep(max(float(exc.headers.get('Retry-After', 0)), 2 ** attempt))
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError) as exc:
+            note_slow(BASE + query[:120], started, type(exc).__name__)
             if attempt == 4:
                 raise
             time.sleep(2 ** attempt)

@@ -96,3 +96,43 @@ class FuturesListingAgeTests(unittest.TestCase):
     def test_a_contract_without_an_onboard_date_is_kept(self):
         with patch('crypto_v1.data.futures_get', return_value=self.INFO):
             self.assertIn("NODATEUSDT", futures_tradable_symbols(360))
+
+
+class MarketDataHostTests(unittest.TestCase):
+    """23 Sep 2026: data-api.binance.vision (bare AWS Tokyo hosts) took 2-3 s
+    per call and sometimes never answered, stalling live ticks for minutes.
+    api.binance.com is now primary; a geo-block falls back for good."""
+
+    def setUp(self):
+        import crypto_v1.data as data
+        self.data = data
+        self.saved = data.BASE
+        data.BASE = data.MARKET_DATA_BASES[0]
+
+    def tearDown(self):
+        self.data.BASE = self.saved
+
+    def test_primary_host_is_api_binance_com(self):
+        self.assertEqual(self.data.MARKET_DATA_BASES[0], "https://api.binance.com")
+
+    def test_a_geo_block_switches_to_the_fallback(self):
+        import io, json, urllib.error
+        seen = []
+        class Resp(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        def fake(url, timeout):
+            seen.append(url)
+            if url.startswith("https://api.binance.com"):
+                raise urllib.error.HTTPError(url, 451, "unavailable", {}, io.BytesIO(b"{}"))
+            return Resp(json.dumps({"serverTime": 1}).encode())
+        with patch("urllib.request.urlopen", side_effect=fake):
+            self.assertEqual(self.data.get("time"), {"serverTime": 1})
+        self.assertTrue(seen[-1].startswith("https://data-api.binance.vision"))
+        self.assertEqual(self.data.BASE, "https://data-api.binance.vision")
+
+    def test_slow_calls_are_reported(self):
+        with patch("builtins.print") as out:
+            self.data.note_slow("GET klines", started=0)
+        self.assertIn("SLOW REQUEST", out.call_args.args[0])
+

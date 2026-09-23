@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .data import note_slow
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from .binance_trade import OrderRejected, OrderStateUnknown
@@ -68,10 +69,14 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
                                          headers={"X-MBX-APIKEY": api_key,
                                                   "Content-Type": "application/x-www-form-urlencoded"},
                                          method=method)
+    started = time.time()
     try:
         with opener(request, timeout=20) as response:
-            return json.load(response)
+            result = json.load(response)
+        note_slow(f"{method} {path}", started)
+        return result
     except urllib.error.HTTPError as error:
+        note_slow(f"{method} {path}", started, f"HTTP {error.code}")
         message = ""
         try:
             detail = json.loads(error.read().decode("utf-8"))
@@ -80,7 +85,8 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
         except Exception:
             code = error.code
         raise OrderRejected(code, message, error.code) from None
-    except Exception:
+    except Exception as exc:
+        note_slow(f"{method} {path}", started, type(exc).__name__)
         if method in {"POST", "DELETE"}:
             raise OrderStateUnknown("Binance Futures order result is unknown; query by client order ID") from None
         raise RuntimeError("Binance Futures order query failed") from None
