@@ -6,6 +6,7 @@ checked against the protective stop before that stop is placed -- an
 unsafe combination (stop too close to liquidation, e.g. from unexpected
 slippage or fee eating into the margin buffer) triggers an immediate
 market close instead of ever resting a stop that liquidation could beat."""
+import time
 from decimal import Decimal
 
 from .binance_trade import OrderRejected, OrderStateUnknown
@@ -16,6 +17,21 @@ from .live_signal import pending_candidates, pending_short_candidates
 from .short_signal import leverage_for_signal
 
 LIQUIDATION_SAFETY_BUFFER = 0.2  # stop must sit >=20% of the liquidation distance away
+
+
+def _settle_fill(executor, symbol, client_id, order, attempts=5, sleep=time.sleep):
+    """A Futures MARKET order's own response can say NEW with executedQty 0
+    even though it fills a moment later. Live 23 Sep 2026: PROVEUSDT's buy
+    FILLED on Binance at 13:01:31 while the response read unfilled, the
+    controller raised "not fully filled", and the position sat open with no
+    protective stop. Ask Binance for the order's real state before giving
+    up on it."""
+    for _ in range(attempts):
+        if order.get("status") == "FILLED" and Decimal(str(order.get("executedQty", "0"))) > 0:
+            return order
+        sleep(0.5)
+        order = executor.query(symbol, client_id)
+    return order
 
 
 def _position_for(symbol, position_risk):
@@ -61,6 +77,7 @@ def approve_short(update_id, command, now_ms, saved, config, environment, market
     open_id = f"kv1fs{int(update_id)}"
     opened = _known_or_place(executor, symbol, open_id,
                              lambda: executor.market_open_short(symbol, plan["quantity"], open_id))
+    opened = _settle_fill(executor, symbol, open_id, opened)
     filled_qty = Decimal(str(opened.get("executedQty", "0")))
     if opened.get("status") != "FILLED" or filled_qty <= 0:
         raise RuntimeError("short open was not fully filled; operator review required")
@@ -141,6 +158,7 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
     open_id = f"kv1fl{int(update_id)}"
     opened = _known_or_place(executor, symbol, open_id,
                              lambda: executor.market_open_long(symbol, plan["quantity"], open_id))
+    opened = _settle_fill(executor, symbol, open_id, opened)
     filled_qty = Decimal(str(opened.get("executedQty", "0")))
     if opened.get("status") != "FILLED" or filled_qty <= 0:
         raise RuntimeError("long open was not fully filled; operator review required")

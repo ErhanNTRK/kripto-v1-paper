@@ -299,3 +299,17 @@ class RegimeFilterTests(unittest.TestCase):
         row = {"c": 100.0, "atr": 1.0, "breaks_up": 3}
         self.assertIsNotNone(long_entry(row, {"c": 90.0}, self._config()))
 
+    def test_short_regime_only_shorts_below_the_line(self):
+        from crypto_v1.research_v5 import short_entry
+        row = {"c": 100.0, "atr": 1.0, "breaks_down": 3}
+        config = self._config(regime_ma_days=200, short_regime_only=True)
+        self.assertIsNotNone(short_entry(row, {"c": 90.0, "regime_ma": 100.0}, config))
+        self.assertIsNone(short_entry(row, {"c": 110.0, "regime_ma": 100.0}, config))
+        self.assertIsNone(short_entry(row, {"c": 90.0, "regime_ma": None}, config))
+
+    def test_disable_shorts_switches_the_short_side_off(self):
+        from crypto_v1.research_v5 import short_entry
+        row = {"c": 100.0, "atr": 1.0, "breaks_down": 3}
+        self.assertIsNone(short_entry(row, {"c": 90.0}, self._config(disable_shorts=True)))
+        self.assertIsNotNone(short_entry(row, {"c": 90.0}, self._config()))
+

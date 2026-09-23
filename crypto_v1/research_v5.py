@@ -176,6 +176,15 @@ def short_entry(row, btc, config):
     if not btc_down_ok(btc, config.get("btc_filter", "strict")) or not row.get("atr") \
        or row.get("breaks_down", 0) < config.get("min_breaks", 2):
         return None
+    # disable_shorts: research switch to measure the long side alone inside
+    # run_symmetric. short_regime_only: the mirror of the long regime line --
+    # shorts only while BTC is BELOW its regime_ma_days average, so the two
+    # sides take turns instead of fighting each other. Unknown line blocks.
+    if config.get("disable_shorts"):
+        return None
+    if config.get("short_regime_only") and config.get("regime_ma_days"):
+        if not btc.get("regime_ma") or btc["c"] >= btc["regime_ma"]:
+            return None
     stop = row["c"] + config["atr_multiplier"] * row["atr"]
     if 2 * (stop - row["c"]) / row["c"] < COST_HURDLE:
         return None
@@ -305,14 +314,21 @@ def run_symmetric(data, symbols, c, start, end, funding=None, interval=FOUR_HOUR
                 notional = p["qty"] * marks.get(symbol, p["entry"])
                 cash += -notional * rate if p["side"] == "long" else notional * rate
             funding_index += 1
-        for symbol, side in list(pending.items()):
+        for symbol, (side, stop) in list(pending.items()):
             if symbol in positions or symbol not in bars:
                 continue
             if len(positions) >= c["max_positions"]:
                 continue
             f = bars[symbol]
             entry = f["o"] * (1 + slippage) if side == "long" else f["o"] * (1 - slippage)
-            stop = long_entry(f, bars.get("BTCUSDT"), c) if side == "long" else short_entry(f, bars.get("BTCUSDT"), c)
+            # The stop comes from the SIGNAL bar, fixed when the order was
+            # queued. Until 23 Sep 2026 this re-ran long_entry/short_entry
+            # on the entry bar itself -- whose close, ATR and breakout count
+            # are not known yet at its open -- so a trade was only "taken"
+            # if the bar it opened on went on to close as a breakout too.
+            # That lookahead silently dropped nearly every immediate failure
+            # and inflated every run_symmetric result, including the 5/5 GO
+            # the v5 deployment was based on.
             if stop is None:
                 continue
             unit_risk = abs(entry - stop)
@@ -363,10 +379,13 @@ def run_symmetric(data, symbols, c, start, end, funding=None, interval=FOUR_HOUR
             f = bars.get(symbol)
             if not f or symbol in positions or symbol in pending:
                 continue
-            if long_entry(f, bars.get("BTCUSDT"), c) is not None:
-                pending[symbol] = "long"
-            elif short_entry(f, bars.get("BTCUSDT"), c) is not None:
-                pending[symbol] = "short"
+            long_stop_level = long_entry(f, bars.get("BTCUSDT"), c)
+            if long_stop_level is not None:
+                pending[symbol] = ("long", long_stop_level)
+                continue
+            short_stop_level = short_entry(f, bars.get("BTCUSDT"), c)
+            if short_stop_level is not None:
+                pending[symbol] = ("short", short_stop_level)
         curve.append(dict(time=t + interval, equity=equity_now(), positions=len(positions)))
     return dict(trades=trades, curve=curve, positions={})
 

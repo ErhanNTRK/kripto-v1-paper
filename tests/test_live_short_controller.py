@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import MagicMock
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -234,3 +235,33 @@ class ApproveLongLeveragedTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SettleFillTests(unittest.TestCase):
+    """A Futures MARKET response can read NEW/0 while the order fills a
+    moment later (PROVEUSDT, 23 Sep 2026): the real state is queried."""
+
+    def test_a_new_response_is_settled_by_querying(self):
+        from crypto_v1.live_short_controller import _settle_fill
+        executor = MagicMock()
+        executor.query.return_value = {"status": "FILLED", "executedQty": "89.5"}
+        order = _settle_fill(executor, "PROVEUSDT", "kv1fl2x", {"status": "NEW", "executedQty": "0"},
+                             sleep=lambda s: None)
+        self.assertEqual(order["status"], "FILLED")
+        executor.query.assert_called_once_with("PROVEUSDT", "kv1fl2x")
+
+    def test_an_already_filled_response_needs_no_query(self):
+        from crypto_v1.live_short_controller import _settle_fill
+        executor = MagicMock()
+        order = _settle_fill(executor, "X", "id", {"status": "FILLED", "executedQty": "1"}, sleep=lambda s: None)
+        self.assertEqual(order["status"], "FILLED")
+        executor.query.assert_not_called()
+
+    def test_gives_up_after_its_attempts(self):
+        from crypto_v1.live_short_controller import _settle_fill
+        executor = MagicMock()
+        executor.query.return_value = {"status": "NEW", "executedQty": "0"}
+        order = _settle_fill(executor, "X", "id", {"status": "NEW"}, attempts=3, sleep=lambda s: None)
+        self.assertEqual(order["status"], "NEW")
+        self.assertEqual(executor.query.call_count, 3)
+
