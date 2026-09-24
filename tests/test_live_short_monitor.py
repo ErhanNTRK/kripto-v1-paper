@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 from crypto_v1.binance_trade import OrderRejected, OrderStateUnknown
 from crypto_v1.live_short_monitor import execute_long_futures_exit, short_exit_decision, execute_short_exit
 
@@ -50,54 +50,85 @@ class ShortExitDecisionTests(unittest.TestCase):
 
 
 class ExecuteShortExitTests(unittest.TestCase):
-    def test_cancel_stop_then_close_once(self):
+    """Close first, then cancel the stop (24 Sep 2026): the close no longer
+    waits for a stop cancel Binance may be slow to confirm."""
+
+    def _executor(self, amount="-0.1"):
         e = Mock()
-        e.cancel.return_value = {"status": "CANCELED"}
+        e.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": amount}]
         e.query.side_effect = OrderRejected(-2013)
         e.market_close_short.return_value = {"status": "FILLED"}
+        return e
+
+    def test_closes_what_is_open_then_cancels_the_stop(self):
+        e = self._executor()
         r = execute_short_exit(P, "profit_signal", e)
         self.assertEqual(r["status"], "closed")
-        e.market_close_short.assert_called_once()
+        e.market_close_short.assert_called_once_with("SOLUSDT", "0.1", "kv1fx7")
+        e.cancel.assert_called_once_with("SOLUSDT", "kv1fp7")
+        self.assertLess(e.method_calls.index(call.market_close_short("SOLUSDT", "0.1", "kv1fx7")),
+                        e.method_calls.index(call.cancel("SOLUSDT", "kv1fp7")))
 
-    def test_ambiguous_cancel_is_queried(self):
-        e = Mock()
-        e.cancel.side_effect = OrderStateUnknown("unknown")
-        e.query.return_value = {"status": "FILLED"}
+    def test_nothing_open_means_the_stop_already_did_it(self):
+        e = self._executor(amount="0")
         self.assertEqual(execute_short_exit(P, "emergency_risk", e)["status"], "already_stopped")
         e.market_close_short.assert_not_called()
+        e.cancel.assert_called_once_with("SOLUSDT", "kv1fp7")
+
+    def test_a_failed_cancel_after_the_close_does_not_undo_the_exit(self):
+        e = self._executor()
+        e.cancel.side_effect = OrderStateUnknown("unknown")
+        self.assertEqual(execute_short_exit(P, "profit_signal", e)["status"], "closed")
 
 
 P_LONG = {"symbol": "ADAUSDT", "entry": 0.24, "stop_price": 0.23, "quantity": "50",
-         "stop_client_id": "kv1fq7"}
+          "stop_client_id": "kv1fq7"}
 
 
 class ExecuteLongFuturesExitTests(unittest.TestCase):
-    """Mirrors ExecuteShortExitTests exactly, side-flipped: cancels the
-    long's protective stop (kv1fq) then market-closes via
-    market_close_long, never market_close_short."""
+    """Mirrors ExecuteShortExitTests, side-flipped: market_close_long, never
+    market_close_short."""
 
-    def test_cancel_stop_then_close_once(self):
+    def _executor(self, amount="50"):
         e = Mock()
-        e.cancel.return_value = {"status": "CANCELED"}
+        e.position_risk.return_value = [{"symbol": "ADAUSDT", "positionAmt": amount}]
         e.query.side_effect = OrderRejected(-2013)
         e.market_close_long.return_value = {"status": "FILLED"}
+        return e
+
+    def test_closes_what_is_open_then_cancels_the_stop(self):
+        e = self._executor(amount="48")  # the exchange's own amount, not the stop's
         r = execute_long_futures_exit(P_LONG, "trailing_profit", e)
         self.assertEqual(r["status"], "closed")
-        e.market_close_long.assert_called_once()
+        e.market_close_long.assert_called_once_with("ADAUSDT", "48", "kv1fy7")
         e.market_close_short.assert_not_called()
+        e.cancel.assert_called_once_with("ADAUSDT", "kv1fq7")
 
-    def test_ambiguous_cancel_is_queried(self):
-        e = Mock()
-        e.cancel.side_effect = OrderStateUnknown("unknown")
-        e.query.return_value = {"status": "FILLED"}
-        self.assertEqual(execute_long_futures_exit(P_LONG, "emergency_risk", e)["status"], "already_stopped")
+    def test_a_moved_stop_s_exit_id_stays_within_36_characters(self):
+        e = self._executor()
+        position = dict(P_LONG, stop_client_id="kv1fq497791790193600000t1790223582")
+        execute_long_futures_exit(position, "trailing_profit", e)
+        exit_id = e.market_close_long.call_args.args[2]
+        self.assertEqual(exit_id, "kv1fy497791790193600000t1790223582")
+        self.assertLessEqual(len(exit_id), 36)
+
+    def test_a_short_position_is_never_closed_as_a_long(self):
+        e = self._executor(amount="-50")
+        self.assertEqual(execute_long_futures_exit(P_LONG, "trailing_profit", e)["status"], "already_stopped")
         e.market_close_long.assert_not_called()
 
-    def test_unconfirmed_cancel_state_raises(self):
-        e = Mock()
-        e.cancel.return_value = {"status": "PARTIALLY_FILLED"}
-        with self.assertRaises(RuntimeError):
+    def test_reduce_only_rejection_means_it_was_already_closed(self):
+        e = self._executor()
+        e.market_close_long.side_effect = OrderRejected(-2022, "ReduceOnly Order is rejected.")
+        self.assertEqual(execute_long_futures_exit(P_LONG, "trailing_profit", e)["status"], "already_stopped")
+        e.cancel.assert_called_once_with("ADAUSDT", "kv1fq7")
+
+    def test_any_other_rejection_is_raised(self):
+        e = self._executor()
+        e.market_close_long.side_effect = OrderRejected(-1003)
+        with self.assertRaises(OrderRejected):
             execute_long_futures_exit(P_LONG, "trailing_profit", e)
+        e.cancel.assert_not_called()
 
 
 if __name__ == '__main__':

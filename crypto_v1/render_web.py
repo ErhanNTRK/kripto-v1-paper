@@ -1,5 +1,6 @@
 """Render Frankfurt health probe and authenticated Telegram command webhook."""
-import collections, hmac, json, os, re, sys, threading, time
+import collections, hmac, json, os, re, subprocess, sys, threading, time
+from datetime import datetime, timezone
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -7,14 +8,17 @@ from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
 from . import ledger
+from .data import universe
 from .github_worker import local_tick
 from .live_controller import _known_or_place
 from .live_execution import _down, _up, execution_enabled
+from .live_limits import may_open, trade_risk_usdt
 from .live_market import BinanceMarket
 from .live_monitor import execute_exit, exit_decision
 from .live_short_controller import approve_long_leveraged, approve_short
 from .live_short_market import BinanceFuturesMarket, symbol_code
-from .live_short_monitor import execute_long_futures_exit, execute_short_exit, short_exit_decision
+from .live_short_monitor import (cancel_quietly, execute_long_futures_exit, execute_short_exit, open_amount,
+                                 short_exit_decision)
 from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_SHORT, fetch_runtime_state,
                           fetch_runtime_state_short, isolate_candidate,
                           isolate_short_candidate, pending_candidates,
@@ -22,11 +26,24 @@ from .live_signal import (RUNTIME_STATE, RUNTIME_STATE_SHORT, fetch_runtime_stat
 from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel, symmetric_features
 from .telegram import send_message
+from .telegram_poll import TelegramApprovals
 
-# "commit" is Render's own RENDER_GIT_COMMIT for the running build, so a
-# /health read (which paper.yml now prints into the Actions log) proves
-# whether a merge has actually been deployed -- without Render dashboard
-# access. Empty outside Render.
+def _running_commit():
+    """The commit this process actually loaded. The PC launcher sets
+    RENDER_GIT_COMMIT once per window, but its restart loop keeps that value
+    while the checkout underneath moves on -- /health showed 0da470a on 24
+    Sep 2026 while 6d4f517 was running. The checkout itself is asked first."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()[:12]
+    except Exception:
+        pass
+    return os.environ.get("RENDER_GIT_COMMIT", "")[:12]
+
+
+# "commit" proves which build is running (see _running_commit) -- a /health
+# read answers "is the fix live?" without dashboard access.
 STATUS = {"ready": False, "binance_connected": False, "orders_enabled": False, "telegram_ready": False,
           "commit": os.environ.get("RENDER_GIT_COMMIT", "")[:12]}
 APP = None
@@ -154,14 +171,42 @@ def _decision_view(position):
     return position
 
 
+def _utc_day(now_s):
+    return datetime.fromtimestamp(now_s, timezone.utc).date().isoformat()
+
+
+def _read_json(path, default):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def _write_json(path, value):
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value), encoding="utf-8")
+    tmp.replace(path)
+
+
 class LiveApp:
     # See auto_enter's docstring: bounds Binance API weight per automatic
     # tick so a burst of simultaneous candidates can never itself trip a
-    # rate limit and starve the same tick's exit check.
-    ENTRIES_PER_TICK = 1
+    # rate limit and starve the same tick's exit check. Raised from 1 to 3
+    # on 24 Sep 2026: at one per 2-minute loop the fifth candidate of a bar
+    # went in ~10 minutes late, and the research's best trades come from
+    # exactly those many-candidate bars. pilot_status now reads the daily
+    # list instead of re-ranking the market, and contract rules are cached,
+    # so three stay well inside Binance's weight budget.
+    ENTRIES_PER_TICK = 3
+    # One lock for every app: the 4H and 2H systems share one one-way
+    # account, and a /scan request ticking one system while the loop ticked
+    # the other could let both buy the same coin.
+    _SHARED_TICK_LOCK = threading.Lock()
 
     def __init__(self, config, strategy_config, environment, short_config=None, short_strategy_config=None,
-                 tag="", state_url=RUNTIME_STATE, state_short_url=RUNTIME_STATE_SHORT, interval=FOUR_HOUR):
+                 tag="", state_url=RUNTIME_STATE, state_short_url=RUNTIME_STATE_SHORT, interval=FOUR_HOUR,
+                 manifest_path=None, guard_path=None, universe_fn=None):
         self.config, self.environment = config, environment
         # scan()'s exit check must fetch/analyze candles on THIS system's
         # own interval (2H for tag "2", 4H for tag "4"). Bug found live
@@ -183,7 +228,21 @@ class LiveApp:
         # write_2h_signal_state) instead of always reading the 4H files.
         self.tag = tag
         self.state_url, self.state_short_url = state_url, state_short_url
-        self._tick_lock = threading.Lock()
+        self._tick_lock = LiveApp._SHARED_TICK_LOCK
+        # The daily-ranked coin list (runtime/manifest.json). With it, only
+        # the top auto_entry_top_n coins are bought automatically and the
+        # rest wait for the user's Telegram "AL <COIN>" (user's decision, 24
+        # Sep 2026). None (tests, Render) means no gate.
+        self.manifest_path = manifest_path
+        # Where the daily equity stop keeps its day-start snapshot, so a
+        # restart mid-day does not forget it. None keeps it in memory only.
+        self.guard_path = guard_path
+        self._guard = None
+        # Approval requests for coins outside the automatic list:
+        # {symbol: {"created_at", "expires_ms", "side", "approved"}}. Written
+        # by the loop, approved from the Telegram polling thread.
+        self._approvals = {}
+        self._approvals_lock = threading.Lock()
         # Most recent tick's full result (rejection reasons included) -- what
         # /status serves so a rejected entry can be diagnosed without Render
         # log access and without spending any Binance weight.
@@ -203,7 +262,7 @@ class LiveApp:
         # it the way a falsy `if short_config` check would.
         self.futures_executor = FuturesExecutor(short_config, environment) if short_config is not None else None
         self.futures_market = (BinanceFuturesMarket(short_config, short_strategy_config, environment,
-                                                     self.futures_executor, tag=tag)
+                                                     self.futures_executor, tag=tag, universe_fn=universe_fn)
                                if short_config is not None else None)
 
     def _approve_long(self, update_id, saved, tag=""):
@@ -280,6 +339,10 @@ class LiveApp:
         rest get taken over the next few 5-minute ticks instead of all at
         once."""
         now_ms = int(time.time() * 1000)
+        if self.halted_today():
+            return {"status": "auto_entry", "results": [], "halted": "daily_equity_stop"}
+        gate = self._auto_symbols()
+        self._forget_expired_approvals(now_ms)
         saved_long = fetch_runtime_state(url=self.state_url)
         saved_short = fetch_runtime_state_short(url=self.state_short_url) if self.futures_executor else {"state": {}}
         # short_config's expiry, not self.config's (22 Sep 2026 fix): every
@@ -308,6 +371,11 @@ class LiveApp:
         for candidate in long_pending:
             if taken >= self.ENTRIES_PER_TICK:
                 break
+            if not self._cleared(candidate, gate, now_ms):
+                result = self._attempt(candidate, "long", lambda: self._ask_approval(candidate, "long", gate, now_ms))
+                self._record(candidate, "long", result)
+                results.append({"symbol": candidate["symbol"], "side": "long", "result": result})
+                continue
             isolated = isolate_candidate(saved_long, candidate["symbol"])
             update_id = self._order_id(candidate)
             result = self._attempt(candidate, "long",
@@ -322,6 +390,11 @@ class LiveApp:
         for candidate in short_pending:
             if taken >= self.ENTRIES_PER_TICK:
                 break
+            if not self._cleared(candidate, gate, now_ms):
+                result = self._attempt(candidate, "short", lambda: self._ask_approval(candidate, "short", gate, now_ms))
+                self._record(candidate, "short", result)
+                results.append({"symbol": candidate["symbol"], "side": "short", "result": result})
+                continue
             isolated = isolate_short_candidate(saved_short, candidate["symbol"])
             update_id = self._order_id(candidate)
             result = self._attempt(candidate, "short",
@@ -339,7 +412,92 @@ class LiveApp:
     # the strongest candidates are in, so they are /status-only.
     _QUIET_REJECTIONS = {"already_holding_symbol", "pending_signal_count", "signal_expired",
                          "position_limit", "daily_buy_limit", "daily_loss_limit", "pilot_loss_limit",
-                         "order is below Binance minimums", "plan exceeds available margin"}
+                         "order is below Binance minimums", "plan exceeds available margin",
+                         "awaiting_approval"}
+
+    # ---- Coins outside the automatic list: ask on Telegram first ----------
+
+    def _auto_symbols(self):
+        """(automatic set, full ranked list) from the daily list, or None
+        when there is no gate. The list is ranked by 7-day average volume
+        (github_worker.prepare_data); the first auto_entry_top_n coins, BTC
+        not counted, are bought without asking. An unreadable list asks for
+        every coin: fail closed."""
+        top_n = (self.short_config or {}).get("auto_entry_top_n")
+        if self.manifest_path is None or not top_n:
+            return None
+        manifest = _read_json(self.manifest_path, {})
+        ranked = [s for s in manifest.get("symbols", []) if s != "BTCUSDT"]
+        return set(ranked[:int(top_n)]), ranked
+
+    def _cleared(self, candidate, gate, now_ms):
+        if gate is None or candidate["symbol"] in gate[0]:
+            return True
+        with self._approvals_lock:
+            request = self._approvals.get(candidate["symbol"])
+            return bool(request and request["approved"] and request["created_at"] == candidate["created_at"]
+                        and request["expires_ms"] >= now_ms)
+
+    def _forget_expired_approvals(self, now_ms):
+        with self._approvals_lock:
+            for symbol in [s for s, r in self._approvals.items() if r["expires_ms"] < now_ms]:
+                del self._approvals[symbol]
+
+    def _ask_approval(self, candidate, side, gate, now_ms):
+        """One Telegram question per candidate, and only when the bot could
+        take the trade right now (limits, free slot, coin not held)."""
+        symbol = candidate["symbol"]
+        with self._approvals_lock:
+            request = self._approvals.get(symbol)
+            if request and request["created_at"] == candidate["created_at"]:
+                return {"status": "rejected", "reason": "awaiting_approval"}
+        status = self.futures_market.pilot_status()
+        allowed, reason = may_open(dict(self.short_config, live_trading_enabled=True),
+                                   status["open_positions"], status["opens_today"],
+                                   status["realized_loss_today"], status["pilot_drawdown"],
+                                   symbol=symbol, held_symbols=status.get("held_symbols", ()),
+                                   equity=status.get("equity"))
+        if not allowed:
+            return {"status": "rejected", "reason": reason}
+        expires_ms = candidate["created_at"] + self.short_config["signal_confirmation_expiry_minutes"] * 60_000
+        close, stop = Decimal(str(candidate["close"])), Decimal(str(candidate["stop"]))
+        distance = abs(close - stop) / close * 100 if close else Decimal("0")
+        risk = trade_risk_usdt(self.short_config, status.get("equity"))
+        ranked = gate[1]
+        rank = ranked.index(symbol) + 1 if symbol in ranked else "?"
+        label = f"[{self.tag}] " if self.tag else ""
+        minutes = max(1, (expires_ms - now_ms) // 60_000)
+        coin = symbol.removesuffix("USDT")
+        with self._approvals_lock:
+            self._approvals[symbol] = {"created_at": candidate["created_at"], "expires_ms": expires_ms,
+                                       "side": side, "approved": False}
+        try:
+            send_message(f"{label}ONAY GEREKIYOR ({'LONG' if side == 'long' else 'SHORT'}): {symbol} | "
+                         f"hacim sirasi {rank} (otomatik: ilk {self.short_config['auto_entry_top_n']}) | "
+                         f"sinyal kapanisi {format(close, 'f')} | stop {format(stop, 'f')} (%{distance:.1f}) | "
+                         f"risk ~{risk:.2f} USDT\nAlmak icin {minutes} dk icinde yazin: AL {coin}")
+        except Exception as exc:
+            # Unseen question: forget it so the next tick asks again.
+            with self._approvals_lock:
+                self._approvals.pop(symbol, None)
+            print(f"Telegram approval request failed ({symbol}): {exc}", flush=True)
+        return {"status": "rejected", "reason": "awaiting_approval"}
+
+    def approve(self, symbol, now_ms=None):
+        """The user's "AL <COIN>" (Telegram polling thread). True when a
+        live question for that coin was waiting; the next tick buys it."""
+        now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+        with self._approvals_lock:
+            request = self._approvals.get(symbol)
+            if not request or request["expires_ms"] < now_ms:
+                return False
+            request["approved"] = True
+            return True
+
+    def awaiting_approval(self, now_ms=None):
+        now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+        with self._approvals_lock:
+            return sorted(s for s, r in self._approvals.items() if not r["approved"] and r["expires_ms"] >= now_ms)
     _REJECTION_TEXT = {
         "entry_price_moved": "fiyat sinyal kapanisindan izin verilen kaymadan fazla uzaklasti",
         "position_limit": "acik pozisyon limiti dolu",
@@ -535,6 +693,12 @@ class LiveApp:
                         results.append({"status": "scan_failed", "side": "futures",
                                         "symbol": position["symbol"], "error": str(exc)})
                         _note_if_rate_limited(exc)
+                for orphan in list(getattr(self.futures_market, "orphan_stops", None) or []):
+                    try:
+                        results.extend(self._clear_orphan(orphan))
+                    except Exception as exc:
+                        print(f"Orphan stop cleanup failed ({orphan['symbol']}): {exc}", flush=True)
+                        _note_if_rate_limited(exc)
             except Exception as exc:
                 print(f"Futures exit scan failed: {exc}", flush=True)
                 results.append({"status": "scan_failed", "side": "futures", "error": str(exc)})
@@ -545,12 +709,19 @@ class LiveApp:
         """Protect or ratchet, then check the exit, for one futures position.
         Returns the list of what happened (empty when nothing did)."""
         results = []
+        if position.get("extra_stop_ids") and execution_enabled(self.short_config, self.environment):
+            # A replaced stop whose cancel did not go through: the position's
+            # own stop is the tighter one, so the extra goes.
+            for extra in position["extra_stop_ids"]:
+                cancel_quietly(self.futures_executor, position["symbol"], extra)
+            results.append({"status": "extra_stops_cancelled", "symbol": position["symbol"],
+                            "stops": list(position["extra_stop_ids"])})
         if position["side"] == "short":
             feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
         else:
             feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
         if position.get("unprotected"):
-            results.append(self._protect(position, feature))
+            results.append(self._protect(position, feature, extreme))
         else:
             moved = self._ratchet(position, feature, extreme)
             if moved:
@@ -580,14 +751,30 @@ class LiveApp:
         results.append(result)
         return results
 
-    def _protect(self, position, feature):
+    def _resting_distance(self, atr):
+        """How far behind the best price the RESTING stop trails: the tested
+        trail distance times resting_stop_trail_multiple (2 live, 24 Sep 2026).
+        The real trailing exit is exit_decision's close-based market exit; on
+        3 years of data that beat a resting stop at the trail distance itself
+        (6.98 -> 7.77 R/week, and in every random candidate ordering), because
+        intrabar wicks no longer shake winners out. The wide resting stop is
+        the safety net for while this process is down."""
+        trailing = Decimal(str(self.futures_market.strategy_config["trailing_atr"]))
+        multiple = Decimal(str((self.short_config or {}).get("resting_stop_trail_multiple", 1)))
+        return trailing * multiple * atr
+
+    def _protect(self, position, feature, extreme=None):
         """Place the missing protective stop on a position that has none
         (live_short_market.unprotected_positions). Needed because a stop can
         fail to rest while the position itself is real: every one did on 22
         Sep 2026 (Binance -4120), and a crash between the open and its stop
-        does the same. The level is where the strategy would hold it right
-        now -- the same ATR distance a fresh entry would use -- so the
-        position is protected even while this process is not running.
+        does the same.
+
+        The level: the lost stop's own level when Binance still knows it (a
+        fresh entry-style ATR stop only when it does not), lifted to the
+        resting trail when the trade has run. Until 24 Sep 2026 it was always
+        close - 2 ATR, which loosened a losing trade's stop and squeezed a
+        winner's trail to 2 ATR.
 
         Sets stop_price either way, so an already-breached stop still gives
         the exit check something to act on (it closes the position this same
@@ -597,8 +784,27 @@ class LiveApp:
         close = Decimal(str(feature["c"]))
         multiplier = Decimal(str(self.futures_market.strategy_config["atr_multiplier"]))
         rules = self.futures_market.rules(symbol)
-        stop = (_down(close - multiplier * atr, rules["tick_size"]) if side == "long"
-                else _up(close + multiplier * atr, rules["tick_size"]))
+        stop_id = position["stop_client_id"]
+        try:
+            previous = self.futures_executor.query(symbol, stop_id)
+        except OrderRejected as error:
+            if error.code != -2013:  # Binance: order does not exist.
+                raise
+            previous = None
+        if previous is not None and previous.get("status") == "NEW" and Decimal(str(previous.get("stopPrice") or "0")) > 0:
+            # It does rest -- the open-orders list was a moment behind.
+            position["stop_price"] = Decimal(str(previous["stopPrice"]))
+            return {"status": "already_protected", "symbol": symbol, "order": previous}
+        level = Decimal(str((previous or {}).get("stopPrice") or "0"))
+        if level <= 0:
+            level = close - multiplier * atr if side == "long" else close + multiplier * atr
+        if extreme is not None and "trailing_atr" in self.futures_market.strategy_config:
+            best = Decimal(str(extreme))
+            if side == "long":
+                level = max(level, best - self._resting_distance(atr))
+            else:
+                level = min(level, best + self._resting_distance(atr))
+        stop = _down(level, rules["tick_size"]) if side == "long" else _up(level, rules["tick_size"])
         position["stop_price"] = stop
         price = Decimal(str(self.futures_market.price(symbol)))
         breached = stop >= price if side == "long" else stop <= price
@@ -606,15 +812,16 @@ class LiveApp:
             return {"status": "protect_skipped", "symbol": symbol, "reason": "stop_already_breached"}
         if not execution_enabled(self.short_config, self.environment):
             return {"status": "protect_skipped", "symbol": symbol, "reason": "real_orders_disabled"}
-        stop_id = position["stop_client_id"]
         place = (self.futures_executor.protective_stop_for_long if side == "long"
                  else self.futures_executor.protective_stop_for_short)
-        order = _known_or_place(self.futures_executor, symbol, stop_id,
-                                lambda: place(symbol, position["quantity"], format(stop, "f"), stop_id))
-        if order.get("status") in {"CANCELED", "EXPIRED", "FILLED"}:
+        if previous is None:
+            order = _known_or_place(self.futures_executor, symbol, stop_id,
+                                    lambda: place(symbol, position["quantity"], format(stop, "f"), stop_id))
+        else:
             # That id is an OLD stop, already gone (cancelled by a ratchet or
-            # an exit that then failed). Treating it as "already placed" left
-            # four positions with no stop at all on 24 Sep 2026.
+            # an exit that then failed) -- or in a state we do not know, which
+            # is not trusted as resting either. Treating it as "already
+            # placed" left four positions with no stop at all on 24 Sep 2026.
             stop_id = _fresh_stop_id(stop_id)
             order = place(symbol, position["quantity"], format(stop, "f"), stop_id)
         position["stop_client_id"] = stop_id
@@ -632,17 +839,18 @@ class LiveApp:
 
     def _ratchet(self, position, feature, extreme):
         """Move the RESTING protective stop in the profitable direction as
-        the trade works, mirroring exactly the trailing level exit_decision
-        already uses (best price since entry -/+ trailing_atr * ATR, armed
-        only once the trade is 1R in front). Until 23 Sep 2026 that trailing
-        logic existed only as a market-close decision taken by this loop, so
-        it protected nothing while this process was down -- the exchange
-        still held the ORIGINAL stop from entry. The ratchet never loosens a
-        stop: it only moves toward profit, and never past the current price.
+        the trade works: best price since entry -/+ the resting distance (see
+        _resting_distance), armed once the trade is 1R in front. It never
+        loosens a stop and never moves it past the current price.
 
-        Cancel-then-place leaves a brief window with no resting stop. If the
-        placement fails the position is left with none, which the next tick's
-        adoption pass (_protect) puts back."""
+        Two fixes on 24 Sep 2026:
+        - A stop already at or past entry counts as armed. Before, it made
+          "risk" zero or negative and this returned early, so the resting stop
+          froze at about breakeven for every big winner.
+        - The new stop is placed BEFORE the old one is cancelled, so there is
+          never a moment without one. If the placement fails, the old stop
+          simply stays. If the cancel fails, both rest (reduce-only, harmless)
+          and live_positions hands the looser one back for cancelling."""
         stop_id = position.get("stop_client_id")
         if not stop_id or position.get("stop_price") is None:
             return None
@@ -650,17 +858,20 @@ class LiveApp:
         entry, stop = Decimal(str(position["entry"])), Decimal(str(position["stop_price"]))
         atr = Decimal(str(feature["atr"]))
         best = Decimal(str(extreme))
-        distance = Decimal(str(self.futures_market.strategy_config["trailing_atr"])) * atr
-        risk = entry - stop if side == "long" else stop - entry
-        if risk <= 0 or atr <= 0:
+        if atr <= 0:
             return None
-        armed = best >= entry + risk if side == "long" else best <= entry - risk
+        risk = entry - stop if side == "long" else stop - entry
+        armed = risk <= 0 or (best >= entry + risk if side == "long" else best <= entry - risk)
         if not armed:
             return None
+        distance = self._resting_distance(atr)
         rules = self.futures_market.rules(position["symbol"])
         moved = (_down(best - distance, rules["tick_size"]) if side == "long"
                  else _up(best + distance, rules["tick_size"]))
-        threshold = stop * (Decimal("1") + self.RATCHET_MIN_IMPROVEMENT) if side == "long"             else stop * (Decimal("1") - self.RATCHET_MIN_IMPROVEMENT)
+        if side == "long":
+            threshold = stop * (Decimal("1") + self.RATCHET_MIN_IMPROVEMENT)
+        else:
+            threshold = stop * (Decimal("1") - self.RATCHET_MIN_IMPROVEMENT)
         if (moved <= threshold) if side == "long" else (moved >= threshold):
             return None
         price = Decimal(str(self.futures_market.price(position["symbol"])))
@@ -668,12 +879,12 @@ class LiveApp:
             return None  # already breached: the exit check closes it instead
         if not execution_enabled(self.short_config, self.environment):
             return None
-        self.futures_executor.cancel(position["symbol"], stop_id)
         new_id = _fresh_stop_id(stop_id)
         place = (self.futures_executor.protective_stop_for_long if side == "long"
                  else self.futures_executor.protective_stop_for_short)
         order = place(position["symbol"], position["quantity"], format(moved, "f"), new_id)
         position["stop_price"], position["stop_client_id"] = moved, new_id
+        cancel_quietly(self.futures_executor, position["symbol"], stop_id)
         label = f"[{self.tag}] " if self.tag else ""
         try:
             send_message(f"{label}STOP YUKSELTILDI: {position['symbol']} ({side}) | "
@@ -683,12 +894,112 @@ class LiveApp:
         return {"status": "stop_moved", "symbol": position["symbol"],
                 "from": format(stop, "f"), "to": format(moved, "f"), "order": order}
 
-    def tick(self):
-        """One full cycle: try to auto-enter any pending signal, then scan
-        open positions for exits. Entries are attempted first so a signal
-        that appears and immediately qualifies for exit conditions (rare,
-        but possible with very_loose) is still opened and protected before
-        anything else runs against it.
+    def _clear_orphan(self, orphan):
+        """Cancel the stop(s) of a position that is no longer open -- after a
+        fresh check, since the list that flagged it can be 90 s old."""
+        if not execution_enabled(self.short_config, self.environment):
+            return []
+        if open_amount(self.futures_executor, orphan["symbol"], orphan["side"]) > 0:
+            return []
+        for stop_id in orphan["stop_ids"]:
+            cancel_quietly(self.futures_executor, orphan["symbol"], stop_id)
+        print(f"Orphan stop removed: {orphan['symbol']} ({', '.join(orphan['stop_ids'])})", flush=True)
+        return [{"status": "orphan_stop_cancelled", "symbol": orphan["symbol"], "stops": orphan["stop_ids"]}]
+
+    # ---- The simulation's daily loss rule, live -------------------------
+
+    def _load_guard(self):
+        if self._guard is None and self.guard_path is not None:
+            self._guard = _read_json(self.guard_path, None)
+        return self._guard
+
+    def _save_guard(self):
+        if self.guard_path is None:
+            return
+        try:
+            _write_json(self.guard_path, self._guard)
+        except OSError as exc:
+            print(f"Daily equity stop state not saved: {exc}", flush=True)
+
+    def halted_today(self, now_s=None):
+        guard = self._load_guard()
+        day = _utc_day(time.time() if now_s is None else now_s)
+        return bool(guard and guard.get("day") == day and guard.get("halted"))
+
+    def daily_guard(self):
+        """The research simulation closes every position and stops buying
+        for the rest of the UTC day once a system is down
+        daily_equity_stop_fraction (10%) on the day; the live bot never did,
+        so its worst drawdown could reach 45-46% instead of the tested ~38%,
+        and the 40% pilot limit would then have stopped the bot at the bottom
+        (user's decision, 24 Sep 2026: add the rule).
+
+        Measured on this system's own trades only: today's realized result
+        plus the change in its open positions' result since the day began --
+        hand trades, the other system and transfers do not count. Checked once
+        per bar of this system, as the simulation does, not on every wick."""
+        fraction = (self.short_config or {}).get("daily_equity_stop_fraction")
+        if not fraction or not self.futures_market:
+            return None
+        now = time.time()
+        day = _utc_day(now)
+        guard = self._load_guard()
+        if not guard or guard.get("day") != day:
+            status = self.futures_market.pilot_status()
+            self._guard = {"day": day, "equity": str(status["equity"]),
+                           "unrealized": str(status.get("own_unrealized", 0)), "halted": False, "bar": None}
+            self._save_guard()
+            return None
+        if guard.get("halted"):
+            return self._close_all("daily_loss_limit")  # retries anything a failed close left open
+        bar = int(now * 1000) // self.interval
+        if guard.get("bar") == bar:
+            return None
+        status = self.futures_market.pilot_status()
+        guard["bar"] = bar
+        equity = Decimal(guard["equity"])
+        change = (Decimal(str(status.get("realized_pnl_today", 0))) + Decimal(str(status.get("own_unrealized", 0)))
+                  - Decimal(guard["unrealized"]))
+        if equity <= 0 or change > -Decimal(str(fraction)) * equity:
+            self._save_guard()
+            return None
+        guard["halted"], guard["change"] = True, str(change)
+        self._save_guard()
+        label = f"[{self.tag}] " if self.tag else ""
+        try:
+            send_message(f"{label}GUNLUK ZARAR KURALI: bu sistem bugun {change:.2f} USDT "
+                         f"(%{change / equity * 100:.1f}) geride. Tum pozisyonlari kapatiyorum; "
+                         "03:00'e (UTC gun sonu) kadar yeni giris yok.")
+        except Exception as exc:
+            print(f"Telegram daily stop notice failed: {exc}", flush=True)
+        return self._close_all("daily_loss_limit")
+
+    def _close_all(self, reason):
+        if not execution_enabled(self.short_config, self.environment):
+            return {"status": "daily_stop_preview"}
+        results = []
+        for position in self.futures_market.live_positions():
+            side = position["side"]
+            try:
+                execute = execute_short_exit if side == "short" else execute_long_futures_exit
+                result = execute(position, reason, self.futures_executor)
+                if result.get("status") == "closed":
+                    pnl = _fill_pnl(position["entry"], result.get("order"), side)
+                    send_message(f"SATTIM ({'SHORT' if side == 'short' else 'KALDIRACLI'} KAPANDI): "
+                                 f"{position['symbol']}{_pnl_suffix(pnl)} | Neden: gunluk zarar kurali")
+                results.append(result)
+            except Exception as exc:
+                print(f"Daily stop close failed ({position['symbol']}): {exc}", flush=True)
+                results.append({"status": "failed", "symbol": position["symbol"], "error": str(exc)})
+                _note_if_rate_limited(exc)
+        return {"status": "daily_stop", "results": results}
+
+    def tick(self, entries=True, exits=True):
+        """One cycle: the daily equity stop and the exit scan first, then any
+        pending entry. The periodic loop runs the exit half before candidate
+        detection and the entry half after it (see run_periodic_scans), so a
+        bar-close exit no longer waits for detection and entries; /scan runs
+        both.
 
         Skips entirely while the process-wide Binance rate-limit cooldown
         (see _rate_limited/_note_if_rate_limited) is active: every call
@@ -709,7 +1020,7 @@ class LiveApp:
         if not self._tick_lock.acquire(blocking=False):
             return {"status": "busy", "entries": {"status": "skipped"}, "exits": {"status": "skipped"}}
         try:
-            result = self._tick()
+            result = self._tick(entries, exits)
         except Exception as exc:
             self.last_tick = {"at": time.time(), "result": {"status": "failed", "error": str(exc)}}
             raise
@@ -718,17 +1029,26 @@ class LiveApp:
         self.last_tick = {"at": time.time(), "result": result}
         return result
 
-    def _tick(self):
+    def _tick(self, entries=True, exits=True):
         if _rate_limited():
             return {"status": "cooling_down", "entries": {"status": "skipped"}, "exits": {"status": "skipped"}}
         hits_before = _consecutive_rate_limit_hits
-        entry_result = {"status": "auto_entry", "results": []}
-        try:
-            entry_result = self.auto_enter()
-        except Exception as exc:
-            print(f"Auto-entry failed: {exc}", flush=True)
-            _note_if_rate_limited(exc)
-        exits = self.scan()
+        guard, exit_result = None, {"status": "skipped"}
+        if exits:
+            try:
+                guard = self.daily_guard()
+            except Exception as exc:
+                print(f"Daily equity stop check failed: {exc}", flush=True)
+                _note_if_rate_limited(exc)
+            exit_result = self.scan()
+        entry_result = {"status": "skipped"}
+        if entries:
+            entry_result = {"status": "auto_entry", "results": []}
+            try:
+                entry_result = self.auto_enter()
+            except Exception as exc:
+                print(f"Auto-entry failed: {exc}", flush=True)
+                _note_if_rate_limited(exc)
         # A tick that ran to completion without a FRESH -1003 (the counter
         # is unchanged from before this tick) means Binance is responding
         # normally again -- reset the escalation so the next real ban
@@ -736,7 +1056,10 @@ class LiveApp:
         # a previous, unrelated ban left off.
         if _consecutive_rate_limit_hits == hits_before:
             _note_rate_limit_cleared()
-        return {"entries": entry_result, "exits": exits}
+        result = {"entries": entry_result, "exits": exit_result}
+        if guard:
+            result["daily_guard"] = guard
+        return result
 
 def status_snapshot(apps=None, now=time.time):
     """Read-only view for GET /status: the real-order switch, the shared
@@ -845,20 +1168,29 @@ def run_periodic_scans(apps, interval_seconds=LOOP_SECONDS, sleep=time.sleep, ma
     say)."""
     if not isinstance(apps, (list, tuple)):
         apps = [apps]
+
+    def tick_all(**phase):
+        for app in apps:
+            LOOP_PROGRESS["at"] = time.time()
+            try:
+                app.tick(**phase)
+            except Exception as exc:
+                print(f"Periodic tick failed: {exc}", flush=True)
+
     iterations = 0
     while max_iterations is None or iterations < max_iterations:
         LOOP_PROGRESS["at"] = time.time()
+        # Exits first (24 Sep 2026): at a bar close the detection pass can
+        # take a minute or more, and the exits used to wait for it and for
+        # the entries.
+        tick_all(entries=False)
         if detect is not None:
+            LOOP_PROGRESS["at"] = time.time()
             try:
                 detect()
             except Exception as exc:
                 print(f"Local candidate detection failed: {exc}", flush=True)
-        for app in apps:
-            LOOP_PROGRESS["at"] = time.time()
-            try:
-                app.tick()
-            except Exception as exc:
-                print(f"Periodic tick failed: {exc}", flush=True)
+        tick_all(exits=False)
         if housekeeping is not None:
             # Non-trading chores (the trade ledger): never allowed to break
             # or delay what the loop is for beyond one caught exception.
@@ -1053,21 +1385,36 @@ def main():
         # and "file:///..." on Linux/macOS alike.
         return (runtime_dir / name).as_uri()
     global APP, APPS
+    # Both systems trade the one daily list github_worker.prepare_data ranks
+    # by 7-day volume (24 Sep 2026); its order history is what pilot_status
+    # reads, instead of re-ranking the whole market every 90 seconds.
+    manifest_path = runtime_dir / "manifest.json"
+    def manifest_symbols():
+        symbols = _read_json(manifest_path, {}).get("symbols")
+        return symbols if symbols else universe(strategy)
     APP = LiveApp(config, strategy, os.environ, short_config, strategy, tag="4",
-                 state_url=local_url("state-relaxed.json"), state_short_url=local_url("short_state.json"))
+                 state_url=local_url("state-relaxed.json"), state_short_url=local_url("short_state.json"),
+                 manifest_path=manifest_path, guard_path=runtime_dir / "daily_guard_4.json",
+                 universe_fn=manifest_symbols)
     # The 2H system's own strategy file: exits, trailing and the resting
     # stop's ratchet must use the same 2h-scaled settings its entries were
     # detected with (see github_worker.load_2h_strategy).
     strategy_2h = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
     app_2h = LiveApp(config_2h, strategy_2h, os.environ, short_config_2h, strategy_2h, tag="2",
                      state_url=local_url("state_2h.json"), state_short_url=local_url("short_state_2h.json"),
-                     interval=TWO_HOUR)
+                     interval=TWO_HOUR, manifest_path=manifest_path,
+                     guard_path=runtime_dir / "daily_guard_2.json", universe_fn=manifest_symbols)
     APPS = [APP, app_2h]
-    telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET"))
+    telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"))
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
-                  orders_enabled=execution_enabled(config, os.environ))
+                  orders_enabled=execution_enabled(config, os.environ), commit=_running_commit())
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
     threading.Thread(target=watch_loop, daemon=True).start()
+    if telegram_ready:
+        # "AL <COIN>" replies for coins outside the automatic list. Polled,
+        # since this PC has no public address for a webhook.
+        poller = TelegramApprovals(os.environ["TELEGRAM_BOT_TOKEN"], os.environ["TELEGRAM_CHAT_ID"], APPS)
+        threading.Thread(target=poller.run, daemon=True).start()
     # Trade ledger (user's request, 24 Sep 2026): every buy and sell with
     # its USDT result, refreshed hourly into ~/kripto/islem-kayitlari.
     ledger_state = {"at": 0.0}
@@ -1079,6 +1426,10 @@ def main():
     threading.Thread(target=run_periodic_scans, args=(APPS,),
                      kwargs={"detect": lambda: local_tick(runtime_dir), "housekeeping": refresh_ledger},
                      daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
+    # Loopback only on the Windows PC: /scan ticks the live systems and has
+    # no password, and nothing outside this machine needs it. Render and
+    # the containers (Linux) still listen on every interface.
+    host = os.environ.get("HOST") or ("127.0.0.1" if os.name == "nt" else "0.0.0.0")
+    ThreadingHTTPServer((host, int(os.environ.get("PORT", "10000"))), Handler).serve_forever()
 
 if __name__ == "__main__": main()

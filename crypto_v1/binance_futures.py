@@ -99,21 +99,26 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
 # else we send is a plain MARKET order on /fapi/v1/order.
 ALGO_STOP_PREFIXES = ("kv1fp", "kv1fq")
 
-_ALGO_STATUS = {"TRIGGERED": "FILLED", "FILLED": "FILLED", "FINISHED": "FILLED",
+_ALGO_STATUS = {"NEW": "NEW", "TRIGGERED": "FILLED", "FILLED": "FILLED", "FINISHED": "FILLED",
                 "CANCELLED": "CANCELED", "CANCELED": "CANCELED", "EXPIRED": "EXPIRED"}
 
 
-def normalize_algo_order(order):
+def normalize_algo_order(order, default_status="UNKNOWN"):
     """Present an algo order in the plain-order shape the rest of the code
     already reads (clientOrderId/stopPrice/origQty/status), so live_positions,
-    summarize_short_pilot and the exit monitors work unchanged."""
+    summarize_short_pilot and the exit monitors work unchanged.
+
+    A state not in the table (TRIGGERING, REJECTED, a new one) is passed on
+    as itself, never read as NEW: until 24 Sep 2026 anything unknown became
+    NEW, so a dead stop could pass for a resting one. Only the open-orders
+    list defaults to NEW -- everything in it is open by definition."""
     status = str(order.get("algoStatus", "")).upper()
     return {**order,
             "clientOrderId": order.get("clientAlgoId", ""),
             "stopPrice": order.get("triggerPrice", "0"),
             "origQty": order.get("quantity", "0"),
             "type": order.get("orderType", "STOP_MARKET"),
-            "status": _ALGO_STATUS.get(status, "NEW")}
+            "status": _ALGO_STATUS.get(status, status or default_status)}
 
 
 class FuturesExecutor:
@@ -250,7 +255,7 @@ class FuturesExecutor:
         read this one list."""
         plain = self.request("GET", {}, path="/fapi/v1/openOrders")
         algo = self.request("GET", {}, path="/fapi/v1/openAlgoOrders")
-        return plain + [normalize_algo_order(o) for o in algo]
+        return plain + [normalize_algo_order(o, default_status="NEW") for o in algo]
 
     def all_orders(self, symbol, start_time=None):
         params = {"symbol": symbol, "limit": 1000}

@@ -29,6 +29,16 @@ def symbol_code(symbol):
     return f"{zlib.crc32(str(symbol).encode()) % 10000:04d}"
 
 
+def base_suffix(client_id):
+    """The id after its 5-char prefix, without a replacement stop's "t<time>"
+    ending (render_web._fresh_stop_id). Every lookup that pairs a stop with
+    its opening order must use this: with the ending left on, a position
+    whose stop had been moved matched no opening order, so its margin
+    counted as 0 against the system's capital and its entry time fell back
+    to Binance's last position update."""
+    return str(client_id)[5:].split("t", 1)[0]
+
+
 def _belongs_to_tag(client_id, prefix_len, tag):
     """See live_market._belongs_to_tag -- same scheme, futures prefixes
     (kv1fs/kv1fp/kv1fx/kv1fe) are 5 chars instead of Spot's 4."""
@@ -59,11 +69,12 @@ def _side_pilot_summary(live_orders, open_side, open_prefix, close_side, close_p
     # Keyed by SYMBOL and suffix: ids carried no symbol before 23 Sep 2026,
     # so one suffix can belong to several symbols' orders and pairing by
     # suffix alone mixed up whole positions' P&L.
-    opens_by_suffix = {(o.get("symbol"), str(o.get("clientOrderId", ""))[5:]): o for o in opens}
+    opens_by_suffix = {(o.get("symbol"), base_suffix(o.get("clientOrderId", ""))): o for o in opens}
     realized_loss_today = Decimal("0")
+    realized_pnl_today = Decimal("0")
     realized_pnl = Decimal("0")
     for close in closes:
-        suffix = str(close.get("clientOrderId", ""))[5:]
+        suffix = base_suffix(close.get("clientOrderId", ""))
         symbol = close.get("symbol")
         open_order = opens_by_suffix.get((symbol, suffix))
         if not open_order:
@@ -85,7 +96,8 @@ def _side_pilot_summary(live_orders, open_side, open_prefix, close_side, close_p
         realized_pnl += pnl
         if int(close.get("updateTime", close.get("time", 0))) >= day_start_ms:
             realized_loss_today += max(Decimal("0"), -pnl)
-    return opens, opens_by_suffix, realized_pnl, realized_loss_today
+            realized_pnl_today += pnl
+    return opens, opens_by_suffix, realized_pnl, realized_loss_today, realized_pnl_today
 
 
 def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, tag=""):
@@ -102,9 +114,9 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     live_orders = [o for o in orders if str(o.get("clientOrderId", "")).startswith("kv1f")
                    and _belongs_to_tag(o.get("clientOrderId", ""), 5, tag)]
     fee = Decimal(str(config.get("live_fee_buffer_fraction", "0.001")))
-    short_opens, short_by_suffix, short_pnl, short_loss_today = _side_pilot_summary(
+    short_opens, short_by_suffix, short_pnl, short_loss_today, short_pnl_today = _side_pilot_summary(
         live_orders, "SELL", _SHORT_OPEN_PREFIX, "BUY", _SHORT_CLOSE_PREFIXES, fee, day_start_ms)
-    long_opens, long_by_suffix, long_pnl, long_loss_today = _side_pilot_summary(
+    long_opens, long_by_suffix, long_pnl, long_loss_today, long_pnl_today = _side_pilot_summary(
         live_orders, "BUY", _LONG_OPEN_PREFIX, "SELL", _LONG_CLOSE_PREFIXES, fee, day_start_ms)
     realized_pnl_all_time = short_pnl + long_pnl
     realized_loss_today = short_loss_today + long_loss_today
@@ -145,10 +157,16 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     leverage_by_symbol = {p.get("symbol"): _decimal(p.get("leverage"))
                           for p in account.get("positions", []) if _decimal(p.get("leverage")) > 0}
     committed = Decimal("0")
+    counted = set()
     for o in protective:
+        # A stop being replaced can briefly rest twice (the new one is placed
+        # before the old one is cancelled); the position counts once.
+        if o.get("symbol") in counted:
+            continue
+        counted.add(o.get("symbol"))
         client_id = str(o.get("clientOrderId", ""))
         by_suffix = short_by_suffix if client_id.startswith(_SHORT_STOP_PREFIX) else long_by_suffix
-        notional = _decimal(by_suffix.get((o.get("symbol"), client_id[5:]), {}).get("cumQuote"))
+        notional = _decimal(by_suffix.get((o.get("symbol"), base_suffix(client_id)), {}).get("cumQuote"))
         committed += notional / leverage_by_symbol.get(o.get("symbol"), Decimal("1"))
     for symbol, position in account_positions.items():
         if symbol in {o.get("symbol") for o in protective}:
@@ -178,10 +196,18 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     pilot_drawdown = max(Decimal("0"), pilot_capital - equity)
     opens_today = {o["clientOrderId"] for o in short_opens + long_opens
                    if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}
+    # This system's own open result, for the daily equity stop: only the
+    # positions its own stops protect -- never a hand-opened one, never the
+    # other system's.
+    protected_symbols = {o.get("symbol") for o in protective}
+    own_unrealized = sum((_decimal(p.get("unrealizedProfit")) for p in account.get("positions", [])
+                          if p.get("symbol") in protected_symbols and abs(_decimal(p.get("positionAmt"))) > 0),
+                         Decimal("0"))
     return {"open_positions": len(own_symbols), "held_symbols": held_symbols,
             "opens_today": len(opens_today),
             "realized_loss_today": realized_loss_today, "pilot_drawdown": pilot_drawdown,
-            "free_usdt": free_usdt, "equity": equity}
+            "free_usdt": free_usdt, "equity": equity,
+            "realized_pnl_today": short_pnl_today + long_pnl_today, "own_unrealized": own_unrealized}
 
 
 class BinanceFuturesMarket:
@@ -198,11 +224,21 @@ class BinanceFuturesMarket:
     _raw_pilot_cache = None
     _raw_pilot_lock = threading.Lock()
 
-    def __init__(self, config, strategy_config, environment, executor, tag="", now=time.time):
+    # Contract rules change rarely; the full futures exchangeInfo was being
+    # downloaded for every entry attempt, stop move and re-protection.
+    _RULES_CACHE_SECONDS = 3600
+
+    def __init__(self, config, strategy_config, environment, executor, tag="", now=time.time,
+                 universe_fn=None):
         self.config, self.strategy_config = config, strategy_config
         self.environment, self.executor = environment, executor
         self.tag = tag
         self._now = now
+        # Which symbols' order history to read. The live process passes the
+        # daily-ranked list both systems trade (runtime/manifest.json), so
+        # this no longer re-ranks the whole market every 90 seconds.
+        self._universe_fn = universe_fn or (lambda: universe(self.strategy_config))
+        self._rules_cache = {}
 
     def price(self, symbol):
         """Public mark price. positionRisk (used until 22 Sep 2026) reports
@@ -224,10 +260,15 @@ class BinanceFuturesMarket:
         ("rounded plan exceeds risk budget") and pricier coins fell under the
         minimum ("order is below Binance minimums") -- every candidate was
         silently rejected at planning time, no order ever sent."""
+        cached = self._rules_cache.get(symbol)
+        if cached is not None and self._now() - cached[0] < self._RULES_CACHE_SECONDS:
+            return cached[1]
         info = self.executor.request("GET", {"symbol": symbol}, path="/fapi/v1/exchangeInfo")
         for entry in info["symbols"]:
             if entry.get("symbol") == symbol:
-                return futures_symbol_rules(entry)
+                rules = futures_symbol_rules(entry)
+                self._rules_cache[symbol] = (self._now(), rules)
+                return rules
         raise ValueError("symbol is not listed on Binance Futures: " + symbol)
 
     def _raw_pilot_data(self):
@@ -238,7 +279,7 @@ class BinanceFuturesMarket:
                 return cached[1:]
             account = self.executor.account()
             open_orders = self.executor.open_orders()
-            symbols = set(universe(self.strategy_config))
+            symbols = set(self._universe_fn())
             symbols.update(o["symbol"] for o in open_orders)
             # A position whose symbol has dropped out of the re-ranked
             # universe still needs its own order history -- that is how an
@@ -272,18 +313,42 @@ class BinanceFuturesMarket:
         # the caller (render_web.LiveApp.scan) can apply the right exit
         # logic and executor calls to each.
         positions = []
+        # One position per symbol and side. A stop move places the new stop
+        # before cancelling the old one, so for a moment -- or longer, if that
+        # cancel failed -- two can rest: the tighter one is the position's
+        # stop, the others are returned as extra_stop_ids for the scan to
+        # cancel (they are reduce-only, so harmless meanwhile).
+        stops = {}
         for stop in self.executor.open_orders():
             stop_id = str(stop.get("clientOrderId", ""))
             if stop_id.startswith(_SHORT_STOP_PREFIX) and stop.get("side") == "BUY":
-                side, open_prefix = "short", _SHORT_OPEN_PREFIX
+                side = "short"
             elif stop_id.startswith(_LONG_STOP_PREFIX) and stop.get("side") == "SELL":
-                side, open_prefix = "long", _LONG_OPEN_PREFIX
+                side = "long"
             else:
                 continue
             if not _belongs_to_tag(stop_id, 5, self.tag):
                 continue
+            stops.setdefault((stop["symbol"], side), []).append(stop)
+        account, _, _ = self._raw_pilot_data()
+        held = {p.get("symbol") for p in account.get("positions", []) if abs(_decimal(p.get("positionAmt"))) > 0}
+        # Stops whose position is gone (closed by hand, or by an exit whose
+        # stop cancel failed). They are not positions: until 24 Sep 2026 one
+        # still counted as a held symbol and an open slot. The scan re-checks
+        # each live -- the account read above can be up to 90 s old -- before
+        # cancelling it.
+        self.orphan_stops = []
+        for (symbol, side), group in stops.items():
+            group.sort(key=lambda o: _decimal(o.get("stopPrice")), reverse=(side == "long"))
+            stop, extras = group[0], group[1:]
+            stop_id = str(stop.get("clientOrderId", ""))
+            if symbol not in held:
+                self.orphan_stops.append({"symbol": symbol, "side": side,
+                                          "stop_ids": [str(o.get("clientOrderId", "")) for o in group]})
+                continue
+            open_prefix = _LONG_OPEN_PREFIX if side == "long" else _SHORT_OPEN_PREFIX
             try:
-                open_order = self.executor.query(stop["symbol"], open_prefix + stop_id[5:])
+                open_order = self.executor.query(stop["symbol"], open_prefix + base_suffix(stop_id))
             except OrderRejected as error:
                 if error.code != -2013:  # Binance: order does not exist.
                     raise
@@ -299,17 +364,18 @@ class BinanceFuturesMarket:
                 # WHOLE exit scan, which is what happened live 23 Sep 2026
                 # ("Futures exit scan failed: ... -2013" every tick, so no
                 # position was being checked for its exit at all).
-                held = self._account_position(stop["symbol"])
-                if held is None:
+                account_position = self._account_position(stop["symbol"])
+                if account_position is None:
                     continue
-                entry, quantity, open_time = held
+                entry, quantity, open_time = account_position
             else:
                 entry, quantity = quote / qty, stop["origQty"]
                 open_time = int(open_order.get("time", open_order.get("updateTime", 0)))
             positions.append({"symbol": stop["symbol"], "side": side, "entry": entry,
                               "stop_price": Decimal(str(stop["stopPrice"])),
                               "quantity": quantity, "stop_client_id": stop_id,
-                              "open_time": open_time})
+                              "open_time": open_time,
+                              "extra_stop_ids": [str(o.get("clientOrderId", "")) for o in extras]})
         positions.extend(self.unprotected_positions({p["symbol"] for p in positions}))
         return positions
 

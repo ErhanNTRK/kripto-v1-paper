@@ -206,3 +206,19 @@ class StaleTimestampRetryTests(unittest.TestCase):
                 "GET", {}, path="/fapi/v1/openOrders")
         self.assertEqual(opener.call_count, 1)
 
+
+
+class UnknownAlgoStatusTests(unittest.TestCase):
+    """24 Sep 2026: a state outside the table used to read as NEW, so a dead
+    stop could pass for a resting one."""
+
+    def test_an_unknown_state_is_passed_on_not_read_as_resting(self):
+        from crypto_v1.binance_futures import normalize_algo_order
+        self.assertEqual(normalize_algo_order({"algoStatus": "REJECTED"})["status"], "REJECTED")
+        self.assertEqual(normalize_algo_order({"algoStatus": "TRIGGERING"})["status"], "TRIGGERING")
+        self.assertEqual(normalize_algo_order({})["status"], "UNKNOWN")
+        self.assertEqual(normalize_algo_order({"algoStatus": "NEW"})["status"], "NEW")
+
+    def test_the_open_orders_list_is_open_by_definition(self):
+        from crypto_v1.binance_futures import normalize_algo_order
+        self.assertEqual(normalize_algo_order({}, default_status="NEW")["status"], "NEW")

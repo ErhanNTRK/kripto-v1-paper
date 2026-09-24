@@ -188,12 +188,52 @@ class LivePositionsTests(unittest.TestCase):
     each tagged with its own "side" so the caller applies the right exit
     logic and executor calls."""
 
-    def _market(self, executor, unprotected=()):
+    def _market(self, executor, unprotected=(), held=None):
         market = BinanceFuturesMarket(C, {}, {}, executor)
         # Adoption of stopless positions has its own tests below; these
         # cover only what the protective stops themselves reveal.
         market.unprotected_positions = lambda protected=(): list(unprotected)
+        if held is None:
+            orders = executor.open_orders.return_value
+            held = {o["symbol"] for o in orders} if isinstance(orders, list) else set()
+        positions = [{"symbol": s, "positionAmt": "1"} for s in held]
+        market._raw_pilot_data = lambda: ({"positions": positions}, [], [])
         return market
+
+    def test_a_moved_stop_is_paired_with_its_opening_order(self):
+        # 24 Sep 2026: a stop id with the "t<time>" ending of a moved stop
+        # matched no opening order, so the entry time fell back to Binance's
+        # last position update.
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "NILUSDT", "clientOrderId": "kv1fq497791790193600000t1790223582", "side": "SELL",
+             "stopPrice": "0.11", "origQty": "40"}]
+        executor.query.return_value = {"executedQty": "40", "cumQuote": "4", "time": 1790193700000}
+        positions = self._market(executor).live_positions()
+        executor.query.assert_called_once_with("NILUSDT", "kv1fl497791790193600000")
+        self.assertEqual(positions[0]["open_time"], 1790193700000)
+
+    def test_two_resting_stops_make_one_position_and_the_looser_is_handed_back(self):
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq2", "side": "SELL", "stopPrice": "0.20", "origQty": "50"},
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq2t99", "side": "SELL", "stopPrice": "0.22",
+             "origQty": "50"}]
+        executor.query.return_value = {"executedQty": "50", "cumQuote": "10", "time": 1}
+        positions = self._market(executor).live_positions()
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0]["stop_client_id"], "kv1fq2t99")
+        self.assertEqual(positions[0]["stop_price"], Decimal("0.22"))
+        self.assertEqual(positions[0]["extra_stop_ids"], ["kv1fq2"])
+
+    def test_a_stop_with_nothing_held_is_an_orphan_not_a_position(self):
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "ADAUSDT", "clientOrderId": "kv1fq2", "side": "SELL", "stopPrice": "0.20", "origQty": "50"}]
+        market = self._market(executor, held=set())
+        self.assertEqual(market.live_positions(), [])
+        self.assertEqual(market.orphan_stops, [{"symbol": "ADAUSDT", "side": "long", "stop_ids": ["kv1fq2"]}])
+        executor.query.assert_not_called()
 
     def test_recognizes_a_short_stop(self):
         executor = MagicMock()
@@ -637,3 +677,70 @@ class PositionOwnershipTests(unittest.TestCase):
         # 80 slice; own: SAGA via its stop (no fills in this fixture -> 0) + orphan 3.
         self.assertEqual(four["free_usdt"], Decimal("77.0"))
 
+
+
+class MovedStopAccountingTests(unittest.TestCase):
+    """24 Sep 2026: a moved stop's id ends in "t<time>". Its position's margin
+    must still count against the system's capital, and the daily equity stop
+    needs today's signed result and the system's own open result."""
+
+    CONFIG = dict(C, pilot_capital_usdt=78, pilot_capital_fraction=0.5)
+
+    def test_a_moved_stop_still_commits_its_margin(self):
+        orders = [{"symbol": "NILUSDT", "clientOrderId": "kv1fl497791790193600000", "side": "BUY",
+                   "status": "FILLED", "cumQuote": "20", "time": 1, "updateTime": 1}]
+        open_orders = [{"symbol": "NILUSDT", "clientOrderId": "kv1fq497791790193600000t1790223582"}]
+        account = {"availableBalance": "150", "totalMarginBalance": "156",
+                   "positions": [{"symbol": "NILUSDT", "positionAmt": "40", "leverage": "4"}]}
+        result = summarize_short_pilot(account, open_orders, orders, self.CONFIG, 0, tag="4")
+        self.assertEqual(result["free_usdt"], Decimal("78") - Decimal("5"))
+
+    def test_a_stop_resting_twice_counts_its_position_once(self):
+        orders = [{"symbol": "NILUSDT", "clientOrderId": "kv1fl41", "side": "BUY",
+                   "status": "FILLED", "cumQuote": "20", "time": 1, "updateTime": 1}]
+        open_orders = [{"symbol": "NILUSDT", "clientOrderId": "kv1fq41"},
+                       {"symbol": "NILUSDT", "clientOrderId": "kv1fq41t5"}]
+        account = {"availableBalance": "150", "totalMarginBalance": "156",
+                   "positions": [{"symbol": "NILUSDT", "positionAmt": "40", "leverage": "4"}]}
+        result = summarize_short_pilot(account, open_orders, orders, self.CONFIG, 0, tag="4")
+        self.assertEqual(result["free_usdt"], Decimal("73"))
+
+    def test_today_s_signed_result_and_own_open_result(self):
+        orders = [
+            {"symbol": "ACEUSDT", "clientOrderId": "kv1fl41", "side": "BUY", "status": "FILLED",
+             "cumQuote": "10", "time": 1, "updateTime": 1},
+            {"symbol": "ACEUSDT", "clientOrderId": "kv1fy41", "side": "SELL", "status": "FILLED",
+             "cumQuote": "12", "time": 100, "updateTime": 100},
+            {"symbol": "LSKUSDT", "clientOrderId": "kv1fl42", "side": "BUY", "status": "FILLED",
+             "cumQuote": "10", "time": 1, "updateTime": 1},
+            {"symbol": "LSKUSDT", "clientOrderId": "kv1fq42", "side": "SELL", "status": "FILLED",
+             "cumQuote": "9", "time": 100, "updateTime": 100},
+        ]
+        open_orders = [{"symbol": "SAGAUSDT", "clientOrderId": "kv1fq43"}]
+        account = {"availableBalance": "150", "totalMarginBalance": "156", "positions": [
+            {"symbol": "SAGAUSDT", "positionAmt": "600", "unrealizedProfit": "-1.4"},
+            {"symbol": "BNBUSDT", "positionAmt": "0.01", "unrealizedProfit": "0.5"}]}  # by hand
+        result = summarize_short_pilot(account, open_orders, orders, self.CONFIG, 50, tag="4")
+        fee = Decimal("0.001")
+        expected = (Decimal("12") * (1 - fee) - Decimal("10") * (1 + fee)) + \
+                   (Decimal("9") * (1 - fee) - Decimal("10") * (1 + fee))
+        self.assertEqual(result["realized_pnl_today"], expected)
+        self.assertEqual(result["own_unrealized"], Decimal("-1.4"))
+
+
+class RulesCacheTests(unittest.TestCase):
+    def test_contract_rules_are_downloaded_once_an_hour(self):
+        executor = MagicMock()
+        executor.request.return_value = {"symbols": [{"symbol": "ADAUSDT", "filters": [
+            {"filterType": "PRICE_FILTER", "tickSize": "0.0001"},
+            {"filterType": "LOT_SIZE", "stepSize": "1", "minQty": "1"},
+            {"filterType": "MARKET_LOT_SIZE", "stepSize": "1", "minQty": "1"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5"}]}]}
+        clock = [1000.0]
+        market = BinanceFuturesMarket(C, {}, {}, executor, now=lambda: clock[0])
+        first = market.rules("ADAUSDT")
+        self.assertEqual(market.rules("ADAUSDT"), first)
+        self.assertEqual(executor.request.call_count, 1)
+        clock[0] += 3601
+        market.rules("ADAUSDT")
+        self.assertEqual(executor.request.call_count, 2)

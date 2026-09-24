@@ -19,5 +19,8 @@
   "risk_per_trade_fraction": 0.0075,
   "daily_loss_limit_fraction": 0.1,
   "pilot_loss_limit_fraction": 0.4,
-  "max_risk_per_trade_fraction": 0.015
+  "max_risk_per_trade_fraction": 0.015,
+  "auto_entry_top_n": 30,
+  "resting_stop_trail_multiple": 2.0,
+  "daily_equity_stop_fraction": 0.1
 }

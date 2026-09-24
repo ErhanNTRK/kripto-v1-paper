@@ -125,6 +125,26 @@ def universe(config):
     return [t['symbol'] for t in ranked[:config['top_n']]]
 
 
+def average_daily_volume(symbol, now_ms, days=7):
+    """Average USDT volume per day over the last `days` complete days."""
+    rows = get('klines', {'symbol': symbol, 'interval': '1d', 'endTime': int(now_ms) - 1, 'limit': days + 1})
+    complete = [r for r in rows if int(r[6]) < now_ms][-days:]
+    return sum(float(r[7]) for r in complete) / len(complete) if complete else 0.0
+
+
+def weekly_universe(config, now_ms, pool_size=100, days=7, workers=4):
+    """The top_n by 7-day average volume (24 Sep 2026, user's decision)
+    instead of the last 24 hours: a one-day pump no longer lifts a coin into
+    the list mid-move (the 2H system re-ranked by 24h volume on every scan
+    and bought LSK, SUPER, TUT that way). Candidates are the top pool_size
+    by 24h volume -- a coin outside that is not in the weekly top 50."""
+    pool = universe(dict(config, top_n=max(pool_size, config['top_n'])))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        volumes = list(executor.map(lambda s: average_daily_volume(s, now_ms, days), pool))
+    ranked = sorted(zip(pool, volumes), key=lambda x: (-x[1], x[0]))
+    return [symbol for symbol, _ in ranked[:config['top_n']]]
+
+
 def validate(rows, interval=INTERVAL):
     previous = None
     for r in rows:

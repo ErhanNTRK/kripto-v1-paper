@@ -136,3 +136,28 @@ class MarketDataHostTests(unittest.TestCase):
             self.data.note_slow("GET klines", started=0)
         self.assertIn("SLOW REQUEST", out.call_args.args[0])
 
+
+
+class WeeklyVolumeRankingTests(unittest.TestCase):
+    """24 Sep 2026: the daily list is ranked by 7-day average volume, so a
+    one-day pump no longer lifts a coin into it mid-move."""
+
+    DAY = 86_400_000
+
+    def _kline(self, open_ms, quote):
+        return [open_ms, "1", "1", "1", "1", "1", open_ms + self.DAY - 1, str(quote)]
+
+    def test_the_forming_day_is_left_out(self):
+        from crypto_v1.data import average_daily_volume
+        now = 10 * self.DAY + 3_600_000
+        rows = [self._kline(d * self.DAY, 100) for d in range(2, 10)] + [self._kline(10 * self.DAY, 10_000)]
+        with patch("crypto_v1.data.get", return_value=rows):
+            self.assertEqual(average_daily_volume("XUSDT", now, days=7), 100)
+
+    def test_a_one_day_spike_does_not_outrank_steady_volume(self):
+        from crypto_v1.data import weekly_universe
+        volumes = {"STEADYUSDT": 500.0, "PUMPUSDT": 300.0, "SMALLUSDT": 10.0}
+        with patch("crypto_v1.data.universe", return_value=["PUMPUSDT", "STEADYUSDT", "SMALLUSDT"]), \
+             patch("crypto_v1.data.average_daily_volume", side_effect=lambda s, now, days: volumes[s]):
+            ranked = weekly_universe({"top_n": 2}, now_ms=0, pool_size=3)
+        self.assertEqual(ranked, ["STEADYUSDT", "PUMPUSDT"])

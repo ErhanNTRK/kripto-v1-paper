@@ -54,35 +54,37 @@ class ApproveLongWiringTests(unittest.TestCase):
 class RenderWebTests(unittest.TestCase):
     def test_periodic_scans_calls_tick_each_iteration_and_survives_errors(self):
         app = MagicMock()
-        app.tick.side_effect = [None, Exception('boom'), None]
+        app.tick.side_effect = [None, Exception('boom'), None, None, None, None]
         sleeps = []
         run_periodic_scans(app, interval_seconds=5, sleep=sleeps.append, max_iterations=3)
-        self.assertEqual(app.tick.call_count, 3)
+        # Two halves per iteration: exits, then entries.
+        self.assertEqual(app.tick.call_count, 6)
         self.assertEqual(sleeps, [5, 5, 5])
 
-    def test_periodic_scans_calls_detect_before_apps_each_iteration(self):
+    def test_periodic_scans_runs_exits_before_detect_and_entries_after(self):
         # detect (github_worker.local_tick bound to a runtime dir, 21 Sep
-        # 2026) must run BEFORE the apps tick, same thread/iteration, so
-        # entries always see what detection just wrote -- never a stale or
-        # concurrently-written file from a separate loop.
+        # 2026) must run BEFORE the entries, same thread/iteration, so
+        # entries always see what detection just wrote. Exits run before
+        # detection (24 Sep 2026) so a bar-close exit does not wait for it.
         app = MagicMock()
         order = []
         detect = MagicMock(side_effect=lambda: order.append('detect'))
-        app.tick.side_effect = lambda: order.append('tick')
+        app.tick.side_effect = lambda **phase: order.append(
+            'exits' if phase.get('entries') is False else 'entries')
         run_periodic_scans(app, interval_seconds=1, sleep=lambda s: None, max_iterations=2, detect=detect)
         self.assertEqual(detect.call_count, 2)
-        self.assertEqual(order, ['detect', 'tick', 'detect', 'tick'])
+        self.assertEqual(order, ['exits', 'detect', 'entries', 'exits', 'detect', 'entries'])
 
     def test_periodic_scans_survives_detect_failure_and_still_ticks_apps(self):
         app = MagicMock()
         detect = MagicMock(side_effect=Exception('boom'))
         run_periodic_scans(app, interval_seconds=1, sleep=lambda s: None, max_iterations=2, detect=detect)
-        self.assertEqual(app.tick.call_count, 2)
+        self.assertEqual(app.tick.call_count, 4)
 
     def test_periodic_scans_without_detect_is_unaffected(self):
         app = MagicMock()
         run_periodic_scans(app, interval_seconds=1, sleep=lambda s: None, max_iterations=2)
-        self.assertEqual(app.tick.call_count, 2)
+        self.assertEqual(app.tick.call_count, 4)
 
     def test_only_verified_private_chat_is_accepted(self):
         payload = {"update_id": 7, "message": {"text": " AL ", "chat": {"id": 123, "type": "private"}}}
@@ -241,10 +243,13 @@ class LiveAppAutoEntryTests(unittest.TestCase):
     # Built without a class-body comprehension: comprehensions get their own
     # scope in Python 3 and cannot see NOW_S from the enclosing class body.
     MANY_LONG_SAVED = {"state": {
-        "pending_buys": {"SOLUSDT": {"stop": 90}, "ETHUSDT": {"stop": 90}, "BNBUSDT": {"stop": 90}},
+        "pending_buys": {"SOLUSDT": {"stop": 90}, "ETHUSDT": {"stop": 90}, "BNBUSDT": {"stop": 90},
+                         "XRPUSDT": {"stop": 90}, "ADAUSDT": {"stop": 90}},
         "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "SOLUSDT", "close": 100},
                   {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "ETHUSDT", "close": 100},
-                  {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "BNBUSDT", "close": 100}]}}
+                  {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "BNBUSDT", "close": 100},
+                  {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "XRPUSDT", "close": 100},
+                  {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "ADAUSDT", "close": 100}]}}
     EMPTY_SAVED = {"state": {}}
 
     def _app(self):
@@ -291,12 +296,11 @@ class LiveAppAutoEntryTests(unittest.TestCase):
              patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.MANY_LONG_SAVED), \
              patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
              patch.object(LiveApp, "_approve_long",
-                          side_effect=[{"status": "rejected", "reason": "entry_price_moved"},
-                                       {"status": "bought_and_protected"},
-                                       {"status": "bought_and_protected"}]) as long_mock:
+                          side_effect=[{"status": "rejected", "reason": "entry_price_moved"}]
+                                      + [{"status": "bought_and_protected"}] * 4) as long_mock:
             result = app.auto_enter()
         self.assertEqual(long_mock.call_count, 1 + LiveApp.ENTRIES_PER_TICK)
-        self.assertEqual([r["symbol"] for r in result["results"]], ["BNBUSDT", "ETHUSDT"])
+        self.assertEqual([r["symbol"] for r in result["results"]], ["ADAUSDT", "BNBUSDT", "ETHUSDT", "SOLUSDT"])
         self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
 
     def test_a_failed_candidate_does_not_abort_the_rest_of_the_tick(self):
@@ -312,12 +316,11 @@ class LiveAppAutoEntryTests(unittest.TestCase):
              patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
              patch("crypto_v1.render_web.send_message") as send, \
              patch.object(LiveApp, "_approve_long",
-                          side_effect=[OrderRejected(-1111),
-                                       {"status": "bought_and_protected"},
-                                       {"status": "bought_and_protected"}]) as long_mock:
+                          side_effect=[OrderRejected(-1111)]
+                                      + [{"status": "bought_and_protected"}] * 4) as long_mock:
             result = app.auto_enter()
         self.assertEqual(long_mock.call_count, 1 + LiveApp.ENTRIES_PER_TICK)
-        self.assertEqual([r["symbol"] for r in result["results"]], ["BNBUSDT", "ETHUSDT"])
+        self.assertEqual([r["symbol"] for r in result["results"]], ["ADAUSDT", "BNBUSDT", "ETHUSDT", "SOLUSDT"])
         self.assertEqual(result["results"][0]["result"]["status"], "failed")
         self.assertEqual(result["results"][0]["result"]["code"], -1111)
         self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
@@ -334,11 +337,10 @@ class LiveAppAutoEntryTests(unittest.TestCase):
              patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
              patch("crypto_v1.render_web.send_message") as send, \
              patch.object(LiveApp, "_approve_long",
-                          side_effect=[ValueError("order is below Binance minimums"),
-                                       {"status": "bought_and_protected"},
-                                       {"status": "bought_and_protected"}]) as long_mock:
+                          side_effect=[ValueError("order is below Binance minimums")]
+                                      + [{"status": "bought_and_protected"}] * 4) as long_mock:
             result = app.auto_enter()
-        self.assertEqual(long_mock.call_count, 2)
+        self.assertEqual(long_mock.call_count, 1 + LiveApp.ENTRIES_PER_TICK)
         self.assertEqual(result["results"][0]["result"],
                          {"status": "rejected", "reason": "order is below Binance minimums"})
         self.assertEqual(result["results"][1]["result"]["status"], "bought_and_protected")
@@ -351,14 +353,13 @@ class LiveAppAutoEntryTests(unittest.TestCase):
              patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=self.EMPTY_SAVED), \
              patch("crypto_v1.render_web.send_message") as send, \
              patch.object(LiveApp, "_approve_long",
-                          side_effect=[RuntimeError("buy was not fully filled; operator review required"),
-                                       {"status": "bought_and_protected"},
-                                       {"status": "bought_and_protected"}]) as long_mock:
+                          side_effect=[RuntimeError("buy was not fully filled; operator review required")]
+                                      + [{"status": "bought_and_protected"}] * 4) as long_mock:
             result = app.auto_enter()
-        self.assertEqual(long_mock.call_count, 2)
+        self.assertEqual(long_mock.call_count, 1 + LiveApp.ENTRIES_PER_TICK)
         self.assertEqual(result["results"][0]["result"]["status"], "failed")
         send.assert_called_once()
-        self.assertIn("BNBUSDT", send.call_args.args[0])
+        self.assertIn("ADAUSDT", send.call_args.args[0])
 
     def test_auto_enter_is_a_noop_with_nothing_pending(self):
         app = self._app()
@@ -1149,3 +1150,315 @@ class WatchdogTests(unittest.TestCase):
         rw.run_periodic_scans([app], interval_seconds=1, sleep=lambda s: None, max_iterations=1)
         self.assertGreater(rw.LOOP_PROGRESS["at"], 0)
 
+
+
+class RestingStopTests(unittest.TestCase):
+    """24 Sep 2026: the resting stop trails at twice the tested distance
+    (the real trail is the close-based exit), keeps moving once it is past
+    entry, and a new stop always rests before the old one is cancelled."""
+    LIVE = {"TELEGRAM_CHAT_ID": "123", "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "telegram_buy_command": "AL",
+              "live_trading_enabled": True, "resting_stop_trail_multiple": 2.0}
+
+    def _app(self, price):
+        app = LiveApp(self.CONFIG, {}, self.LIVE, short_config=self.CONFIG,
+                      short_strategy_config={}, tag="4")
+        app.futures_market = MagicMock()
+        app.futures_market.strategy_config = {"trailing_atr": 4.0, "atr_multiplier": 2.0}
+        app.futures_market.rules.return_value = {"tick_size": Decimal("0.01")}
+        app.futures_market.price.return_value = Decimal(str(price))
+        app.futures_executor = MagicMock()
+        return app
+
+    def _position(self, stop="90"):
+        return {"symbol": "NILUSDT", "side": "long", "quantity": "40",
+                "entry": Decimal("100"), "stop_price": Decimal(stop), "stop_client_id": "kv1fq41234"}
+
+    def test_the_resting_stop_trails_at_twice_the_tested_distance(self):
+        app = self._app(price=135)
+        position = self._position()
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._ratchet(position, {"atr": 2.0}, extreme=140)
+        # 140 - 2 x 4 ATR x 2 = 124
+        self.assertEqual(result["to"], "124.00")
+
+    def test_a_stop_already_past_entry_keeps_moving(self):
+        # Until 24 Sep 2026 a stop at or above entry returned early: the
+        # resting stop froze at about breakeven for every big winner.
+        app = self._app(price=150)
+        position = self._position(stop="104")
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._ratchet(position, {"atr": 2.0}, extreme=160)
+        self.assertEqual(result["to"], "144.00")
+
+    def test_the_new_stop_rests_before_the_old_one_is_cancelled(self):
+        app = self._app(price=135)
+        order = []
+        app.futures_executor.protective_stop_for_long.side_effect = lambda *a: order.append("place") or {}
+        app.futures_executor.cancel.side_effect = lambda *a: order.append("cancel") or {}
+        with patch("crypto_v1.render_web.send_message"):
+            app._ratchet(self._position(), {"atr": 2.0}, extreme=140)
+        self.assertEqual(order, ["place", "cancel"])
+
+    def test_a_failed_placement_leaves_the_old_stop_alone(self):
+        app = self._app(price=135)
+        app.futures_executor.protective_stop_for_long.side_effect = OrderRejected(-4015)
+        position = self._position()
+        with self.assertRaises(OrderRejected):
+            app._ratchet(position, {"atr": 2.0}, extreme=140)
+        app.futures_executor.cancel.assert_not_called()
+        self.assertEqual(position["stop_client_id"], "kv1fq41234")
+
+    def test_a_lost_stop_is_put_back_at_its_own_level(self):
+        # Before: always close - 2 ATR, looser than the lost stop for a loser.
+        app = self._app(price=97)
+        app.futures_executor.query.return_value = {"status": "CANCELED", "stopPrice": "92.5"}
+        position = dict(self._position(), stop_price=None, unprotected=True)
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._protect(position, {"c": 97.0, "atr": 2.0}, extreme=101)
+        self.assertEqual(Decimal(result["stop_price"]), Decimal("92.50"))
+        new_id = app.futures_executor.protective_stop_for_long.call_args.args[3]
+        self.assertTrue(new_id.startswith("kv1fq41234t"))
+
+    def test_a_lost_stop_of_a_runner_comes_back_at_the_resting_trail(self):
+        app = self._app(price=150)
+        app.futures_executor.query.return_value = {"status": "CANCELED", "stopPrice": "92.5"}
+        position = dict(self._position(), stop_price=None, unprotected=True)
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._protect(position, {"c": 150.0, "atr": 2.0}, extreme=160)
+        self.assertEqual(result["stop_price"], "144.00")
+
+    def test_a_stop_that_does_rest_is_not_placed_twice(self):
+        app = self._app(price=150)
+        app.futures_executor.query.return_value = {"status": "NEW", "stopPrice": "120"}
+        position = dict(self._position(), stop_price=None, unprotected=True)
+        result = app._protect(position, {"c": 150.0, "atr": 2.0}, extreme=160)
+        self.assertEqual(result["status"], "already_protected")
+        self.assertEqual(position["stop_price"], Decimal("120"))
+        app.futures_executor.protective_stop_for_long.assert_not_called()
+
+
+class StrayStopTests(unittest.TestCase):
+    LIVE = {"TELEGRAM_CHAT_ID": "123", "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "live_trading_enabled": True}
+
+    def _app(self):
+        app = LiveApp(self.CONFIG, {}, self.LIVE, short_config=self.CONFIG, short_strategy_config={}, tag="4")
+        app.futures_executor = MagicMock()
+        return app
+
+    def test_an_orphan_stop_is_cancelled_only_after_a_live_check(self):
+        app = self._app()
+        app.futures_executor.position_risk.return_value = [{"symbol": "ADAUSDT", "positionAmt": "0"}]
+        result = app._clear_orphan({"symbol": "ADAUSDT", "side": "long", "stop_ids": ["kv1fq2"]})
+        app.futures_executor.cancel.assert_called_once_with("ADAUSDT", "kv1fq2")
+        self.assertEqual(result[0]["status"], "orphan_stop_cancelled")
+
+    def test_a_stop_whose_position_is_still_open_is_left_alone(self):
+        # The list that flagged it can be 90 s old (a fresh buy).
+        app = self._app()
+        app.futures_executor.position_risk.return_value = [{"symbol": "ADAUSDT", "positionAmt": "50"}]
+        self.assertEqual(app._clear_orphan({"symbol": "ADAUSDT", "side": "long", "stop_ids": ["kv1fq2"]}), [])
+        app.futures_executor.cancel.assert_not_called()
+
+    def test_the_looser_of_two_resting_stops_is_cancelled(self):
+        app = self._app()
+        app.futures_market = MagicMock()
+        app.futures_market.analysis.return_value = ({"c": 1.0, "atr": 0.1}, {}, 1.0)
+        position = {"symbol": "ADAUSDT", "side": "long", "entry": Decimal("1"), "stop_price": Decimal("0.9"),
+                    "quantity": "5", "stop_client_id": "kv1fq2t9", "extra_stop_ids": ["kv1fq2"]}
+        with patch.object(LiveApp, "_ratchet", return_value=None), \
+             patch("crypto_v1.render_web.exit_decision", return_value=None):
+            results = app._manage_futures_position(position, lambda f, b: False)
+        app.futures_executor.cancel.assert_called_once_with("ADAUSDT", "kv1fq2")
+        self.assertEqual(results[0]["status"], "extra_stops_cancelled")
+
+
+class ApprovalGateTests(unittest.TestCase):
+    """24 Sep 2026 (user's decision): only the top 30 of the daily list (by
+    7-day volume) are bought automatically; any other coin is asked on
+    Telegram once and bought only after "AL <COIN>"."""
+
+    NOW_S = 1_700_000_000
+    CONFIG = {"signal_confirmation_expiry_minutes": 30, "auto_entry_top_n": 1,
+              "max_open_positions": 6, "max_buys_per_day": 40, "live_trading_enabled": True,
+              "risk_per_trade_usdt": 1, "pilot_capital_usdt": 78, "daily_loss_limit_usdt": 10,
+              "pilot_loss_limit_usdt": 30}
+    SAVED = {"state": {
+        "pending_buys": {"SOLUSDT": {"stop": 95}, "NILUSDT": {"stop": 0.1}},
+        "events": [{"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "SOLUSDT", "close": 100},
+                   {"type": "AL_ADAYI", "time": NOW_S * 1000 - 1000, "symbol": "NILUSDT", "close": 0.127}]}}
+
+    def setUp(self):
+        import tempfile, json
+        self.tmp = tempfile.TemporaryDirectory()
+        self.manifest = __import__("pathlib").Path(self.tmp.name) / "manifest.json"
+        self.manifest.write_text(json.dumps({"symbols": ["BTCUSDT", "SOLUSDT", "NILUSDT"]}), encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _app(self):
+        app = LiveApp(self.CONFIG, {}, {"TELEGRAM_CHAT_ID": "123"}, short_config=self.CONFIG,
+                      short_strategy_config={}, tag="4", manifest_path=self.manifest)
+        app.futures_market = MagicMock()
+        app.futures_market.pilot_status.return_value = {
+            "open_positions": 0, "opens_today": 0, "realized_loss_today": 0, "pilot_drawdown": 0,
+            "held_symbols": set(), "equity": Decimal("78")}
+        return app
+
+    def _enter(self, app, now_s=None):
+        with patch("crypto_v1.render_web.time.time", return_value=now_s or self.NOW_S), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=self.SAVED), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={"state": {}}), \
+             patch("crypto_v1.render_web.send_message") as send, \
+             patch.object(LiveApp, "_approve_long", return_value={"status": "opened_and_protected"}) as buy:
+            result = app.auto_enter()
+        return result, send, buy
+
+    def test_a_top_coin_is_bought_and_a_lower_one_is_asked_once(self):
+        app = self._app()
+        result, send, buy = self._enter(app)
+        self.assertEqual(buy.call_count, 1)
+        statuses = {r["symbol"]: r["result"]["status"] for r in result["results"]}
+        self.assertEqual(statuses["SOLUSDT"], "opened_and_protected")
+        by_symbol = {r["symbol"]: r["result"] for r in result["results"]}
+        self.assertEqual(by_symbol["NILUSDT"]["reason"], "awaiting_approval")
+        send.assert_called_once()
+        self.assertIn("AL NIL", send.call_args.args[0])
+        self.assertIn("hacim sirasi 2", send.call_args.args[0])
+        _, send_again, _ = self._enter(app)
+        send_again.assert_not_called()  # one question per candidate
+
+    def test_after_al_the_coin_is_bought_on_the_next_tick(self):
+        app = self._app()
+        self._enter(app)
+        self.assertEqual(app.awaiting_approval((self.NOW_S) * 1000), ["NILUSDT"])
+        self.assertTrue(app.approve("NILUSDT", self.NOW_S * 1000))
+        _, _, buy = self._enter(app)
+        self.assertEqual(buy.call_count, 2)  # SOL again (idempotent) and now NIL
+
+    def test_an_approval_after_the_signal_expired_is_refused(self):
+        app = self._app()
+        self._enter(app)
+        self.assertFalse(app.approve("NILUSDT", (self.NOW_S + 31 * 60) * 1000))
+
+    def test_nothing_is_asked_when_the_trade_could_not_be_taken_anyway(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value["open_positions"] = 6
+        result, send, _ = self._enter(app)
+        send.assert_not_called()
+        by_symbol = {r["symbol"]: r["result"] for r in result["results"]}
+        self.assertEqual(by_symbol["NILUSDT"]["reason"], "position_limit")
+
+    def test_an_unreadable_list_asks_for_every_coin(self):
+        app = self._app()
+        self.manifest.write_text("{broken", encoding="utf-8")
+        _, send, buy = self._enter(app)
+        buy.assert_not_called()
+        self.assertEqual(send.call_count, 2)
+
+    def test_without_a_list_nothing_is_gated(self):
+        app = self._app()
+        app.manifest_path = None
+        _, send, buy = self._enter(app)
+        self.assertEqual(buy.call_count, 2)
+        send.assert_not_called()
+
+
+class DailyEquityStopTests(unittest.TestCase):
+    """The simulation's daily loss rule, live (24 Sep 2026): a system down
+    10% on the UTC day closes everything and buys nothing until the next."""
+    LIVE = {"TELEGRAM_CHAT_ID": "123", "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}
+    CONFIG = {"signal_confirmation_expiry_minutes": 10, "live_trading_enabled": True,
+              "daily_equity_stop_fraction": 0.1}
+    DAY_START = 1_790_208_000  # 2026-09-24 00:00 UTC
+
+    def _app(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        app = LiveApp(self.CONFIG, {}, self.LIVE, short_config=self.CONFIG, short_strategy_config={}, tag="2",
+                      guard_path=__import__("pathlib").Path(self.tmp.name) / "guard.json",
+                      interval=render_web.TWO_HOUR)
+        app.futures_market = MagicMock()
+        app.futures_executor = MagicMock()
+        return app
+
+    def _status(self, realized, unrealized, equity="78"):
+        return {"equity": Decimal(equity), "realized_pnl_today": Decimal(realized),
+                "own_unrealized": Decimal(unrealized)}
+
+    def _guard(self, app, now_s):
+        with patch("crypto_v1.render_web.time.time", return_value=now_s), \
+             patch("crypto_v1.render_web.send_message") as send:
+            return app.daily_guard(), send
+
+    def test_the_first_check_of_the_day_only_takes_a_snapshot(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status("0", "-5")
+        result, _ = self._guard(app, self.DAY_START + 60)
+        self.assertIsNone(result)
+        self.assertEqual(app._guard["unrealized"], "-5")
+
+    def test_a_ten_percent_day_closes_everything_and_stops_buying(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status("0", "-1")
+        self._guard(app, self.DAY_START + 60)
+        # Realized -4 today, open result fell from -1 to -5: -8 on 78 > 10%? No: 7.8 limit -> -8 trips.
+        app.futures_market.pilot_status.return_value = self._status("-4", "-5")
+        app.futures_market.live_positions.return_value = [
+            {"symbol": "TUTUSDT", "side": "long", "entry": Decimal("0.028"), "quantity": "229",
+             "stop_client_id": "kv1fq21"}]
+        with patch("crypto_v1.render_web.execute_long_futures_exit",
+                   return_value={"status": "closed", "order": {}}) as close:
+            result, send = self._guard(app, self.DAY_START + 3 * 3600)
+        self.assertEqual(result["status"], "daily_stop")
+        close.assert_called_once()
+        self.assertEqual(close.call_args.args[1], "daily_loss_limit")
+        self.assertIn("GUNLUK ZARAR KURALI", send.call_args_list[0].args[0])
+        with patch("crypto_v1.render_web.time.time", return_value=self.DAY_START + 4 * 3600):
+            self.assertTrue(app.halted_today())
+            self.assertEqual(app.auto_enter()["halted"], "daily_equity_stop")
+        with patch("crypto_v1.render_web.time.time", return_value=self.DAY_START + 86_400 + 60):
+            self.assertFalse(app.halted_today())
+
+    def test_a_smaller_loss_trades_on(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status("0", "0")
+        self._guard(app, self.DAY_START + 60)
+        app.futures_market.pilot_status.return_value = self._status("-3", "-4")  # -7 of 7.8
+        result, _ = self._guard(app, self.DAY_START + 3 * 3600)
+        self.assertIsNone(result)
+        app.futures_market.live_positions.assert_not_called()
+
+    def test_checked_once_per_bar_not_on_every_tick(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status("0", "0")
+        self._guard(app, self.DAY_START + 60)
+        self._guard(app, self.DAY_START + 3 * 3600)
+        self._guard(app, self.DAY_START + 3 * 3600 + 120)
+        self.assertEqual(app.futures_market.pilot_status.call_count, 2)
+
+    def test_the_halt_survives_a_restart(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status("0", "0")
+        self._guard(app, self.DAY_START + 60)
+        app.futures_market.pilot_status.return_value = self._status("-9", "0")
+        app.futures_market.live_positions.return_value = []
+        self._guard(app, self.DAY_START + 3 * 3600)
+        restarted = LiveApp(self.CONFIG, {}, self.LIVE, short_config=self.CONFIG, short_strategy_config={},
+                            tag="2", guard_path=app.guard_path, interval=render_web.TWO_HOUR)
+        self.assertTrue(restarted.halted_today(self.DAY_START + 5 * 3600))
+
+
+class SharedTickLockTests(unittest.TestCase):
+    def test_the_4h_and_2h_systems_never_tick_at_the_same_time(self):
+        config = {"signal_confirmation_expiry_minutes": 10}
+        four = LiveApp(config, {}, {}, short_config=config, short_strategy_config={}, tag="4")
+        two = LiveApp(config, {}, {}, short_config=config, short_strategy_config={}, tag="2")
+        four._tick_lock.acquire()
+        try:
+            self.assertEqual(two.tick()["status"], "busy")
+        finally:
+            four._tick_lock.release()

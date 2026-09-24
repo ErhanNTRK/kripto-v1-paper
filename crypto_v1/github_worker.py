@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .backtest import report
-from .data import candles, futures_tradable_symbols, get, load, universe, validate
+from .data import candles, futures_tradable_symbols, get, load, universe, validate, weekly_universe
 from .paper_trading import tick
 from .research_v2 import FOUR_HOUR, TWO_HOUR
 from .research_v5 import ShortWindowLongModel
@@ -108,13 +108,25 @@ def prepare_data(config, runtime, now):
     # paper state -- harmless, that state only feeds candidate detection.
     # A manifest without ranked_at predates this and is refreshed too.
     stale = (manifest is None or manifest.get("timeframe") != "4h"
+             or "ranked_by" not in manifest
              or now - int(manifest.get("ranked_at", -86_400_000)) >= 86_400_000)
     if stale:
         # Also covers a pre-V2 cache (15m, top-50 V1 universe) left over
         # from before the V1->V2 switch -- must not be silently reused.
-        symbols = universe(config)
+        # Ranked by 7-day volume (24 Sep 2026); this list is also the 2H
+        # system's list and, in order, what render_web buys without asking.
+        try:
+            symbols = weekly_universe(config, now)
+            ranked_at, ranked_by = now, "7d_volume"
+        except Exception as exc:
+            # Keep trading yesterday's list (or today's 24h one on a first
+            # start) and try the ranking again in about an hour.
+            print(f"7-day volume ranking failed, list kept: {exc}", flush=True)
+            kept = manifest and manifest.get("timeframe") == "4h" and manifest.get("symbols")
+            symbols = manifest["symbols"] if kept else universe(config)
+            ranked_at, ranked_by = now - 23 * 3_600_000, "kept_after_failure" if kept else "24h_volume"
         manifest = {"symbols": symbols, "timeframe": "4h", "source": "Binance public market data",
-                    "ranked_at": now}
+                    "ranked_at": ranked_at, "ranked_by": ranked_by}
         write_json(manifest_path, manifest)
     symbols = manifest["symbols"]
     # Between daily re-ranks the cached list is reused as-is, so a manifest written before
@@ -241,8 +253,21 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
     state in the exact same shape the 4H files use (see write_short_state
     and paper_trading's own state), so the existing pending_candidates/
     isolate_candidate/approve_buy machinery in live_signal.py and
-    live_controller.py works for the 2H system completely unmodified."""
-    symbols = universe(strategy_config)
+    live_controller.py works for the 2H system completely unmodified.
+
+    Coin list (24 Sep 2026): the 4H system's daily list (runtime/manifest.json,
+    ranked by 7-day volume), as the research tested -- not a fresh 24h-volume
+    ranking on every scan, which pulled coins in mid-pump (LSK was stopped out
+    twice within an hour; SUPER, TUT, MARSCOIN were never in the tested list).
+    Only when that list is missing or over two days old is the market ranked
+    here."""
+    manifest = {}
+    try:
+        manifest = json.loads((runtime / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    fresh = now_2h - int(manifest.get("ranked_at", 0) or 0) < 2 * 86_400_000
+    symbols = manifest.get("symbols") if fresh and manifest.get("symbols") else universe(strategy_config)
     long_symbols = [s for s in symbols if s != "BTCUSDT"]
     # Same 45-day floor as prepare_data's 4H fetch (see its comment on the
     # BTC EMA200 floor) -- at 2H bars this is a much wider margin (~540
