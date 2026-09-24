@@ -99,6 +99,28 @@ class BinanceFuturesTests(unittest.TestCase):
         self.assertIn("/fapi/v1/algoOrder", opener.call_args.args[0].full_url)
         self.assertEqual(queried["origQty"], "0.01")
 
+    def test_cancelling_an_already_cancelled_stop_reads_as_cancelled(self):
+        # 24 Sep 2026: -2011 on a stop an earlier tick had already cancelled
+        # aborted the exit scan every tick, leaving positions unprotected.
+        opener = Mock(side_effect=[_http_error(-2011, "Unknown order sent."),
+                                   Response({"algoStatus": "CANCELED", "clientAlgoId": "kv1fq-1"})])
+        executor = FuturesExecutor({"live_trading_enabled": True}, self.env, opener, sleep=Mock())
+        self.assertEqual(executor.cancel("BTCUSDT", "kv1fq-1")["status"], "CANCELED")
+
+    def test_a_cancel_the_query_has_not_caught_up_with_is_asked_again(self):
+        sleep = Mock()
+        opener = Mock(side_effect=[Response({"code": "200", "msg": "success"}),
+                                   Response({"algoStatus": "NEW", "clientAlgoId": "kv1fq-1"}),
+                                   Response({"algoStatus": "CANCELED", "clientAlgoId": "kv1fq-1"})])
+        executor = FuturesExecutor({"live_trading_enabled": True}, self.env, opener, sleep=sleep)
+        self.assertEqual(executor.cancel("BTCUSDT", "kv1fq-1")["status"], "CANCELED")
+        sleep.assert_called_once()
+
+    def test_a_stop_that_stays_open_is_still_reported_unconfirmed(self):
+        opener = Mock(return_value=Response({"algoStatus": "NEW", "clientAlgoId": "kv1fq-1"}))
+        executor = FuturesExecutor({"live_trading_enabled": True}, self.env, opener, sleep=Mock())
+        self.assertEqual(executor.cancel("BTCUSDT", "kv1fq-1")["status"], "NEW")
+
     def test_plain_orders_still_use_the_normal_endpoint(self):
         opener = Mock(return_value=Response({"status": "FILLED"}))
         FuturesExecutor({"live_trading_enabled": True}, self.env, opener).query("BTCUSDT", "kv1fl-1")

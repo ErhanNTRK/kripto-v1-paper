@@ -125,6 +125,14 @@ def telegram_command(payload, expected_chat):
     if not text: return None
     return {"update_id": int(payload["update_id"]), "command": text}
 
+def _fresh_stop_id(stop_id):
+    """A new client id for a replacement stop: the base id plus the time.
+    Any earlier replacement suffix is dropped first -- appending again on the
+    second move made a 45-character id, which Binance rejects (-4015, limit
+    36) AFTER the old stop was already cancelled (NILUSDT, 24 Sep 2026)."""
+    return f"{str(stop_id).split('t', 1)[0]}t{int(time.time())}"
+
+
 class LiveApp:
     # See auto_enter's docstring: bounds Binance API weight per automatic
     # tick so a burst of simultaneous candidates can never itself trip a
@@ -496,42 +504,59 @@ class LiveApp:
                 # silently diverge from what was actually validated).
                 futures_sell = lambda f, b: ShortWindowLongModel.sell(f, b, self.futures_market.strategy_config)
                 for position in self.futures_market.live_positions():
-                    if position["side"] == "short":
-                        feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
-                    else:
-                        feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
-                    if position.get("unprotected"):
-                        results.append(self._protect(position, feature))
-                    else:
-                        moved = self._ratchet(position, feature, extreme)
-                        if moved:
-                            results.append(moved)
-                    if position["side"] == "short":
-                        reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
-                    else:
-                        reason = exit_decision(position, feature, btc, extreme,
-                                               {**self.short_config,
-                                                "trailing_atr": self.futures_market.strategy_config["trailing_atr"],
-                                                "cap_at_target": False},
-                                               sell_fn=futures_sell)
-                    if not reason: continue
-                    if not execution_enabled(self.short_config, self.environment):
-                        results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
-                        continue
-                    if position["side"] == "short":
-                        result = execute_short_exit(position, reason, self.futures_executor)
-                        pnl = _fill_pnl(position["entry"], result.get("order"), "short")
-                        send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
-                    else:
-                        result = execute_long_futures_exit(position, reason, self.futures_executor)
-                        pnl = _fill_pnl(position["entry"], result.get("order"), "long")
-                        send_message(f"SATTIM (KALDIRACLI KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
-                    results.append(result)
+                    try:
+                        results.extend(self._manage_futures_position(position, futures_sell))
+                    except Exception as exc:
+                        # One position's failure must not stop the others from
+                        # being protected and checked (24 Sep 2026: one bad
+                        # stop aborted the scan for every position, each tick).
+                        print(f"Futures exit scan failed ({position['symbol']}): {exc}", flush=True)
+                        results.append({"status": "scan_failed", "side": "futures",
+                                        "symbol": position["symbol"], "error": str(exc)})
+                        _note_if_rate_limited(exc)
             except Exception as exc:
                 print(f"Futures exit scan failed: {exc}", flush=True)
                 results.append({"status": "scan_failed", "side": "futures", "error": str(exc)})
                 _note_if_rate_limited(exc)
         return {"status": "scanned", "results": results}
+
+    def _manage_futures_position(self, position, futures_sell):
+        """Protect or ratchet, then check the exit, for one futures position.
+        Returns the list of what happened (empty when nothing did)."""
+        results = []
+        if position["side"] == "short":
+            feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
+        else:
+            feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
+        if position.get("unprotected"):
+            results.append(self._protect(position, feature))
+        else:
+            moved = self._ratchet(position, feature, extreme)
+            if moved:
+                results.append(moved)
+        if position["side"] == "short":
+            reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
+        else:
+            reason = exit_decision(position, feature, btc, extreme,
+                                   {**self.short_config,
+                                    "trailing_atr": self.futures_market.strategy_config["trailing_atr"],
+                                    "cap_at_target": False},
+                                   sell_fn=futures_sell)
+        if not reason:
+            return results
+        if not execution_enabled(self.short_config, self.environment):
+            results.append({"status": "preview_exit", "symbol": position["symbol"], "reason": reason})
+            return results
+        if position["side"] == "short":
+            result = execute_short_exit(position, reason, self.futures_executor)
+            pnl = _fill_pnl(position["entry"], result.get("order"), "short")
+            send_message(f"SATTIM (SHORT KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
+        else:
+            result = execute_long_futures_exit(position, reason, self.futures_executor)
+            pnl = _fill_pnl(position["entry"], result.get("order"), "long")
+            send_message(f"SATTIM (KALDIRACLI KAPANDI): {position['symbol']}{_pnl_suffix(pnl)} | Neden: {reason}")
+        results.append(result)
+        return results
 
     def _protect(self, position, feature):
         """Place the missing protective stop on a position that has none
@@ -564,6 +589,13 @@ class LiveApp:
                  else self.futures_executor.protective_stop_for_short)
         order = _known_or_place(self.futures_executor, symbol, stop_id,
                                 lambda: place(symbol, position["quantity"], format(stop, "f"), stop_id))
+        if order.get("status") in {"CANCELED", "EXPIRED", "FILLED"}:
+            # That id is an OLD stop, already gone (cancelled by a ratchet or
+            # an exit that then failed). Treating it as "already placed" left
+            # four positions with no stop at all on 24 Sep 2026.
+            stop_id = _fresh_stop_id(stop_id)
+            order = place(symbol, position["quantity"], format(stop, "f"), stop_id)
+        position["stop_client_id"] = stop_id
         label = f"[{self.tag}] " if self.tag else ""
         try:
             send_message(f"{label}KORUMA EKLENDI: {symbol} ({side}) | stop {format(stop, 'f')} | "
@@ -615,7 +647,7 @@ class LiveApp:
         if not execution_enabled(self.short_config, self.environment):
             return None
         self.futures_executor.cancel(position["symbol"], stop_id)
-        new_id = f"{stop_id}t{int(time.time())}"
+        new_id = _fresh_stop_id(stop_id)
         place = (self.futures_executor.protective_stop_for_long if side == "long"
                  else self.futures_executor.protective_stop_for_short)
         order = place(position["symbol"], position["quantity"], format(moved, "f"), new_id)

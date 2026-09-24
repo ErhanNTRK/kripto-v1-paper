@@ -117,10 +117,14 @@ def normalize_algo_order(order):
 
 
 class FuturesExecutor:
-    def __init__(self, config, environment, opener=urllib.request.urlopen):
+    CANCEL_SETTLE_TRIES = 4
+    CANCEL_SETTLE_WAIT = 1.0
+
+    def __init__(self, config, environment, opener=urllib.request.urlopen, sleep=time.sleep):
         self.config = config
         self.environment = environment
         self.opener = opener
+        self.sleep = sleep
 
     def _credentials(self, require_live=True):
         if require_live and not execution_enabled(self.config, self.environment):
@@ -208,21 +212,36 @@ class FuturesExecutor:
     def cancel(self, symbol, client_id):
         if not str(client_id).startswith(ALGO_STOP_PREFIXES):
             return self.request("DELETE", {"symbol": symbol, "origClientOrderId": client_id})
-        canceled = normalize_algo_order(
-            self.request("DELETE", {"clientAlgoId": client_id}, path="/fapi/v1/algoOrder"))
+        try:
+            canceled = normalize_algo_order(
+                self.request("DELETE", {"clientAlgoId": client_id}, path="/fapi/v1/algoOrder"))
+        except OrderRejected as error:
+            # -2011: nothing left to cancel -- an earlier attempt already did,
+            # or it triggered. Live 24 Sep 2026 every tick hit this on a stop
+            # cancelled the tick before and aborted the whole exit scan.
+            if error.code != -2011:
+                raise
+            canceled = {"clientOrderId": client_id, "status": "NEW"}
         if canceled["status"] in {"CANCELED", "EXPIRED", "FILLED"}:
             return canceled
         # The delete response does not always carry a final algoStatus, and
         # the exit monitors refuse to close a position whose stop is not
         # provably gone. Live 23 Sep 2026: the stop WAS cancelled, this read
         # as unconfirmed, the exit aborted -- and the position was left both
-        # open and unprotected. Ask what actually happened before deciding.
-        try:
-            settled = self.query(symbol, client_id)
-        except OrderRejected as error:
-            if error.code != -2013:  # Binance: order does not exist -> it is gone.
-                raise
-            return {**canceled, "status": "CANCELED"}
+        # open and unprotected. Ask what actually happened before deciding;
+        # the query itself can lag the delete by a moment (24 Sep 2026), so
+        # it is asked a few times.
+        for attempt in range(self.CANCEL_SETTLE_TRIES):
+            if attempt:
+                self.sleep(self.CANCEL_SETTLE_WAIT)
+            try:
+                settled = self.query(symbol, client_id)
+            except OrderRejected as error:
+                if error.code != -2013:  # Binance: order does not exist -> it is gone.
+                    raise
+                return {**canceled, "status": "CANCELED"}
+            if settled["status"] in {"CANCELED", "EXPIRED", "FILLED"}:
+                break
         return settled
 
     def open_orders(self):

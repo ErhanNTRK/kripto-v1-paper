@@ -445,6 +445,22 @@ class ScanResilienceTests(unittest.TestCase):
         self.assertEqual(result["status"], "scanned")
         self.assertTrue(any(r.get("status") == "scan_failed" and r.get("side") == "futures" for r in result["results"]))
 
+    def test_one_failing_futures_position_does_not_skip_the_others(self):
+        # 24 Sep 2026: one position's failed stop cancel aborted the loop
+        # every tick, so the positions after it were never protected.
+        app = self._app()
+        app.market.live_positions = MagicMock(return_value=[])
+        first = {"symbol": "NILUSDT", "side": "long", "open_time": 0}
+        second = {"symbol": "ACEUSDT", "side": "long", "open_time": 0}
+        app.futures_market.live_positions = MagicMock(return_value=[first, second])
+        app.futures_market.strategy_config = {"trailing_atr": 2.0}
+        app.futures_market.analysis = MagicMock(side_effect=[RuntimeError("-2011"), ({"c": 1}, {"c": 1}, 1)])
+        with patch("crypto_v1.render_web.exit_decision", return_value=None),              patch.object(app, "_ratchet", return_value=None) as ratchet:
+            result = app.scan()
+        failed = [r for r in result["results"] if r.get("status") == "scan_failed"]
+        self.assertEqual([r["symbol"] for r in failed], ["NILUSDT"])
+        self.assertEqual(ratchet.call_args.args[0]["symbol"], "ACEUSDT")
+
     def test_scan_analyzes_positions_on_the_apps_own_interval_not_always_4h(self):
         # Bug found live 21 Sep 2026: scan() hardcoded FOUR_HOUR for every
         # app's exit check. A position the 2H system opened mid-way through
@@ -894,6 +910,21 @@ class ProtectUnprotectedPositionTests(unittest.TestCase):
         app.futures_executor.protective_stop_for_long.assert_called_once_with(
             "BCHUSDT", "0.261", "330.00", "kv1fq41790107200000")
 
+    def test_an_old_cancelled_stop_under_that_id_gets_a_fresh_one(self):
+        # 24 Sep 2026: the id already belonged to a stop cancelled earlier;
+        # _known_or_place returned that dead order and nothing was placed.
+        app = self._app(price=355)
+        app.futures_executor.query.side_effect = None
+        app.futures_executor.query.return_value = {"status": "CANCELED"}
+        app.futures_executor.protective_stop_for_long.return_value = {"status": "NEW"}
+        position = self._position()
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._protect(position, {"c": 350.0, "atr": 10.0})
+        self.assertEqual(result["order"], {"status": "NEW"})
+        new_id = app.futures_executor.protective_stop_for_long.call_args.args[3]
+        self.assertTrue(new_id.startswith("kv1fq41790107200000t"))
+        self.assertEqual(position["stop_client_id"], new_id)
+
     def test_a_short_stop_sits_above_and_uses_the_short_placer(self):
         app = self._app(price=90)
         position = self._position("short")
@@ -958,6 +989,19 @@ class RatchetTests(unittest.TestCase):
         # A fresh id: the old one belongs to the just-cancelled order.
         self.assertTrue(new_id.startswith("kv1fq41234t"))
         self.assertEqual(position["stop_client_id"], new_id)
+
+    def test_a_second_move_keeps_the_id_within_binances_36_characters(self):
+        # 24 Sep 2026 (NILUSDT): the second move appended another suffix,
+        # Binance rejected the 45-character id (-4015) after the old stop
+        # was already cancelled.
+        app = self._app(price=118)
+        position = dict(self._position(), stop_client_id="kv1fq497791790193600000t1790208072")
+        with patch("crypto_v1.render_web.send_message"):
+            app._ratchet(position, {"atr": 2.0}, extreme=120)
+        new_id = app.futures_executor.protective_stop_for_long.call_args.args[3]
+        self.assertTrue(new_id.startswith("kv1fq497791790193600000t"))
+        self.assertEqual(new_id.count("t"), 1)
+        self.assertLessEqual(len(new_id), 36)
 
     def test_does_nothing_before_the_trade_is_1r_ahead(self):
         app = self._app(price=105)
