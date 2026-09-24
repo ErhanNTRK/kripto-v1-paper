@@ -51,5 +51,6 @@
   "entry_mode": "breakout+momentum",
   "short_regime_only": true,
   "disable_shorts": true,
-  "ichimoku_filter": true
+  "ichimoku_filter": true,
+  "btc_exit_bars": 2
 }

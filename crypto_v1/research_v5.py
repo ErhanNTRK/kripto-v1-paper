@@ -115,6 +115,11 @@ def symmetric_features(rows, config):
             row["regime_ma"] = running / period if i + 1 >= period else None
     ichimoku = ichimoku_strong(rows, config.get("ichimoku_params", (9, 26, 52))) \
         if config.get("ichimoku_filter") else None
+    # btc_exit_bars (24 Sep 2026): how many consecutive closes BTC must spend
+    # outside the BTC filter before the long side is closed. Counted on every
+    # series; only BTC's own row is ever read (see long_exit).
+    exit_bars = int(config.get("btc_exit_bars", 1) or 1)
+    btc_mode = config.get("btc_filter", "strict")
     for i, row in enumerate(out):
         up = down = 0
         for period in windows:
@@ -127,6 +132,9 @@ def symmetric_features(rows, config):
         row["breaks_up"], row["breaks_down"] = up, down
         mid = windows[1]
         row["long_exit"] = min(x["l"] for x in rows[i - mid:i]) if i >= mid else None
+        if exit_bars > 1:
+            weak = not btc_up_ok(row, btc_mode)
+            row["btc_weak_run"] = (out[i - 1]["btc_weak_run"] + 1 if i else 1) if weak else 0
         row["short_exit"] = max(x["h"] for x in rows[i - mid:i]) if i >= mid else None
         # Context for the "do not buy a first-time vertical move" filters in
         # long_entry (23 Sep 2026, user's observation on NIL/SAGA). Computed
@@ -354,12 +362,13 @@ class ShortWindowLongModel:
         # loosened entry mode is honored on exit too, instead of silently
         # falling back to "strict" and force-exiting a real position one
         # bar after it opens.
-        return long_exit(row, btc, (config or {}).get("btc_filter", "strict"))
+        config = config or {}
+        return long_exit(row, btc, config.get("btc_filter", "strict"), config.get("btc_exit_bars", 1))
 
     stop = staticmethod(long_stop)
 
 
-def long_exit(row, btc, mode="strict"):
+def long_exit(row, btc, mode="strict", btc_bars=1):
     # mode MUST match whatever mode opened the position (see btc_up_ok):
     # a position opened under a loosened entry filter but checked against
     # the strict filter on exit would almost always fail the strict check
@@ -367,7 +376,18 @@ def long_exit(row, btc, mode="strict"):
     # the real trade thesis -- caught via a suspicious 28/28-win, all-
     # trend_exit, sub-1R result when testing btc_filter="loose" (18 Sep
     # 2026); real trades were never given a chance to develop.
-    return not btc_up_ok(btc, mode) or row.get("long_exit") is None or row["c"] < row["long_exit"]
+    # btc_bars > 1 (24 Sep 2026): BTC must have closed outside the filter
+    # that many bars in a row. With one bar, a 2H system sold every position
+    # each time BTC dipped under its 2h EMA50 for a single candle and bought
+    # back two hours later (ACE/LTC/ZRO, 24 Sep); over 3 years two bars took
+    # the 2H+4H result from 1766 to 3376 (better in 5 of 6 half-years, 3 bars
+    # 2486), drawdown 34% -> 39%. A BTC row without the run count (the
+    # setting off when it was built) falls back to the single-bar check.
+    if btc_bars and int(btc_bars) > 1 and btc is not None and "btc_weak_run" in btc:
+        btc_failed = btc["btc_weak_run"] >= int(btc_bars)
+    else:
+        btc_failed = not btc_up_ok(btc, mode)
+    return btc_failed or row.get("long_exit") is None or row["c"] < row["long_exit"]
 
 
 def short_exit(row, btc, mode="strict"):
@@ -479,7 +499,7 @@ def run_symmetric(data, symbols, c, start, end, funding=None, interval=FOUR_HOUR
                 continue
             f = bars[symbol]
             btc_mode = c.get("btc_filter", "strict")
-            exited = (long_exit(f, bars.get("BTCUSDT"), btc_mode) if p["side"] == "long"
+            exited = (long_exit(f, bars.get("BTCUSDT"), btc_mode, c.get("btc_exit_bars", 1)) if p["side"] == "long"
                      else short_exit(f, bars.get("BTCUSDT"), btc_mode))
             if exited:
                 fill, pnl, pos = close(symbol, f["c"], t)

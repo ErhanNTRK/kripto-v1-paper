@@ -391,6 +391,46 @@ class IchimokuFilterTests(unittest.TestCase):
         self.assertNotIn("ichimoku_ok", symmetric_features(rows, config)[-1])
 
 
+class BtcExitBarsTests(unittest.TestCase):
+    """btc_exit_bars (24 Sep 2026): the 2H system closes its longs only
+    after BTC has spent that many closes in a row outside the BTC filter."""
+    BTC_OK = {"c": 110.0, "ema20": 105.0, "ema50": 100.0, "ema200": 90.0}
+    BTC_WEAK = {"c": 95.0, "ema20": 105.0, "ema50": 100.0, "ema200": 90.0}
+    ROW = {"c": 10.0, "long_exit": 9.0}
+
+    def test_one_weak_bar_is_not_enough_with_two(self):
+        from crypto_v1.research_v5 import long_exit
+        self.assertFalse(long_exit(self.ROW, dict(self.BTC_WEAK, btc_weak_run=1), "loose", 2))
+        self.assertTrue(long_exit(self.ROW, dict(self.BTC_WEAK, btc_weak_run=2), "loose", 2))
+        # The default is unchanged: one weak close exits.
+        self.assertTrue(long_exit(self.ROW, dict(self.BTC_WEAK, btc_weak_run=1), "loose"))
+
+    def test_the_channel_exit_is_not_delayed(self):
+        from crypto_v1.research_v5 import long_exit
+        self.assertTrue(long_exit({"c": 8.0, "long_exit": 9.0}, dict(self.BTC_OK, btc_weak_run=0), "loose", 2))
+
+    def test_a_btc_row_without_the_count_falls_back_to_one_bar(self):
+        from crypto_v1.research_v5 import long_exit
+        self.assertTrue(long_exit(self.ROW, self.BTC_WEAK, "loose", 2))
+
+    def test_features_count_consecutive_weak_closes(self):
+        from crypto_v1.research_v5 import symmetric_features
+        step = 2 * 3600 * 1000
+        closes = [100.0 + i for i in range(250)] + [400.0, 200.0, 190.0, 500.0]
+        rows = [dict(t=i * step, o=c, h=c + 1, l=c - 1, c=c, v=1.0) for i, c in enumerate(closes)]
+        config = dict(atr_multiplier=2.0, breakout_bars=20, support_bars=10, min_breaks=1,
+                      btc_filter="loose", btc_exit_bars=2)
+        out = symmetric_features(rows, config)
+        self.assertEqual([r["btc_weak_run"] for r in out[-4:]], [0, 1, 2, 0])
+        self.assertNotIn("btc_weak_run", symmetric_features(rows, dict(config, btc_exit_bars=1))[-1])
+
+    def test_the_model_passes_the_setting_through(self):
+        from crypto_v1.research_v5 import ShortWindowLongModel
+        btc = dict(self.BTC_WEAK, btc_weak_run=1)
+        self.assertFalse(ShortWindowLongModel.sell(self.ROW, btc, {"btc_filter": "loose", "btc_exit_bars": 2}))
+        self.assertTrue(ShortWindowLongModel.sell(self.ROW, btc, {"btc_filter": "loose"}))
+
+
 class TrendPullbackTests(unittest.TestCase):
     """entry_mode (23 Sep 2026): a dip to EMA20 inside an uptrend as a
     second entry pattern next to the Donchian breakout; off by default."""

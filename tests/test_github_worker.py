@@ -509,6 +509,13 @@ class TwoHourStrategyFileTests(unittest.TestCase):
         self.assertEqual(four.get("max_week_gain"), 0.5)
         self.assertNotIn("max_week_gain", two)
 
+    def test_the_btc_exit_delay_is_2h_only(self):
+        # 2H: 1766 -> 3376 over 3 years; on 4H the same delay changed nothing.
+        four = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
+        two = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
+        self.assertEqual(two.get("btc_exit_bars"), 2)
+        self.assertNotIn("btc_exit_bars", four)
+
     def test_both_systems_use_the_ichimoku_filter(self):
         for name in ("config_v5_long.json", "config_v5_long_2h.json"):
             self.assertTrue(json.loads(Path(name).read_text(encoding="utf-8")).get("ichimoku_filter"), name)
