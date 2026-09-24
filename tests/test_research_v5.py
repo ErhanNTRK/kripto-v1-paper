@@ -314,6 +314,34 @@ class RegimeFilterTests(unittest.TestCase):
         self.assertIsNotNone(short_entry(row, {"c": 90.0}, self._config()))
 
 
+class WeekGainCapTests(unittest.TestCase):
+    """max_week_gain (24 Sep 2026): no 4H long in a coin already up more
+    than the cap over the last 7 days (NILUSDT was +210%)."""
+
+    def _config(self, **extra):
+        return dict(atr_multiplier=2.0, breakout_bars=20, support_bars=10, min_breaks=1,
+                    btc_filter="off", **extra)
+
+    def test_week_gain_is_measured_over_seven_days_of_bars(self):
+        from crypto_v1.research_v5 import symmetric_features
+        step = 4 * 3600 * 1000  # 42 bars = 7 days
+        closes = [100.0] * 50 + [160.0]
+        rows = [dict(t=i * step, o=c, h=c, l=c, c=c, v=1.0) for i, c in enumerate(closes)]
+        out = symmetric_features(rows, self._config(max_week_gain=0.5))
+        self.assertAlmostEqual(out[-1]["week_gain"], 0.6)
+        self.assertIsNone(out[41]["week_gain"])
+        self.assertNotIn("week_gain", symmetric_features(rows, self._config())[-1])
+
+    def test_no_long_above_the_cap(self):
+        from crypto_v1.research_v5 import long_entry
+        config = self._config(max_week_gain=0.5)
+        base = {"c": 100.0, "atr": 1.0, "breaks_up": 3}
+        self.assertIsNone(long_entry(dict(base, week_gain=2.1), {"c": 1.0}, config))
+        self.assertIsNotNone(long_entry(dict(base, week_gain=0.5), {"c": 1.0}, config))
+        self.assertIsNone(long_entry(dict(base, week_gain=None), {"c": 1.0}, config))
+        self.assertIsNotNone(long_entry(dict(base, week_gain=2.1), {"c": 1.0}, self._config()))
+
+
 class TrendPullbackTests(unittest.TestCase):
     """entry_mode (23 Sep 2026): a dip to EMA20 inside an uptrend as a
     second entry pattern next to the Donchian breakout; off by default."""

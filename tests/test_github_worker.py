@@ -487,7 +487,8 @@ class TwoHourStrategyFileTests(unittest.TestCase):
         two = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
         self.assertEqual(two["donchian_windows"], [2 * w for w in four.get("donchian_windows", [10, 20, 40])])
         self.assertEqual(two["first_time_high_bars"], 2 * four["first_time_high_bars"])
-        shared = {k for k in four if k not in ("donchian_windows", "first_time_high_bars", "trailing_atr")}
+        shared = {k for k in four if k not in ("donchian_windows", "first_time_high_bars", "trailing_atr",
+                                                "max_week_gain")}
         self.assertEqual({k: two[k] for k in shared}, {k: four[k] for k in shared})
 
     def test_short_sides_follow_the_24_sep_2026_decision(self):
@@ -500,4 +501,11 @@ class TwoHourStrategyFileTests(unittest.TestCase):
         self.assertFalse(four.get("disable_shorts"))
         self.assertTrue(four.get("short_regime_only"))
         self.assertEqual(four.get("regime_ma_days"), 200)
+
+    def test_the_week_gain_cap_is_4h_only(self):
+        # 4H: 184 -> 205 USDT over 3 years with a 50% cap; 2H: 477 -> 459.
+        four = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
+        two = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
+        self.assertEqual(four.get("max_week_gain"), 0.5)
+        self.assertNotIn("max_week_gain", two)
 

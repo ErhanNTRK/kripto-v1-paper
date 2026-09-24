@@ -112,6 +112,9 @@ def symmetric_features(rows, config):
             span = int(config.get("first_time_high_bars", 200))
             row["range_high"] = max(x["h"] for x in rows[i - span:i]) if i >= span else None
             row["has_history"] = i >= span
+        if config.get("max_week_gain") is not None and len(rows) > 1:
+            week = 7 * max(1, int(86_400_000 // (rows[1]["t"] - rows[0]["t"])))
+            row["week_gain"] = row["c"] / rows[i - week]["c"] - 1 if i >= week and rows[i - week]["c"] else None
         if "momentum" in str(config.get("entry_mode", "")) and len(rows) > 1:
             # Pre-move context for is_momentum_setup, in calendar time so 2h
             # and 4h bars measure the same thing: the last 48h's range and
@@ -192,6 +195,16 @@ def long_entry(row, btc, config):
     # (not enough history yet) blocks too: fail closed, never open blind.
     if config.get("regime_ma_days"):
         if not btc.get("regime_ma") or btc["c"] < btc["regime_ma"]:
+            return None
+    # max_week_gain (24 Sep 2026, the user's reading of NIL's +210% week):
+    # no new long in a coin that already rose more than this over the last
+    # 7 days. Over 3 years on 4h bars, entries after a 50%+ week lost on
+    # average; any cap between 40% and 75% improved the 4H result ~11% at a
+    # cost of 0.2 trades a week. On 2h bars it hurt, so only config_v5_long
+    # sets it. Unknown (too little history) blocks: fail closed.
+    week_cap = config.get("max_week_gain")
+    if week_cap is not None:
+        if row.get("week_gain") is None or row["week_gain"] > float(week_cap):
             return None
     # Optional "quality of the breakout" filters, all off by default so the
     # live signal is unchanged until one is validated. They exist because a
