@@ -133,6 +133,27 @@ def _fresh_stop_id(stop_id):
     return f"{str(stop_id).split('t', 1)[0]}t{int(time.time())}"
 
 
+def _decision_view(position):
+    """The position as the exit rules must see it. They measure risk as
+    entry-to-stop and read a stop at or past entry as "no risk left" ->
+    emergency close. That held while the resting stop never moved; once the
+    ratchet (or a re-placed stop) puts it in profit, every such trade would be
+    cut at once instead of trailing as tested -- NILUSDT was closed that way
+    on 24 Sep 2026. A stop only gets there after the trade is 1R ahead, so it
+    is judged as an armed trade: a minimal risk keeps the signal and trailing
+    checks exactly as they are."""
+    stop = position.get("stop_price")
+    if stop is None:
+        return position
+    entry, stop = Decimal(str(position["entry"])), Decimal(str(stop))
+    tiny = entry * Decimal("1e-9")
+    if position["side"] == "short" and stop <= entry:
+        return {**position, "stop_price": entry + tiny}
+    if position["side"] != "short" and stop >= entry:
+        return {**position, "stop_price": entry - tiny}
+    return position
+
+
 class LiveApp:
     # See auto_enter's docstring: bounds Binance API weight per automatic
     # tick so a burst of simultaneous candidates can never itself trip a
@@ -534,10 +555,11 @@ class LiveApp:
             moved = self._ratchet(position, feature, extreme)
             if moved:
                 results.append(moved)
+        judged = _decision_view(position)
         if position["side"] == "short":
-            reason = short_exit_decision(position, feature, btc, extreme, self.short_config)
+            reason = short_exit_decision(judged, feature, btc, extreme, self.short_config)
         else:
-            reason = exit_decision(position, feature, btc, extreme,
+            reason = exit_decision(judged, feature, btc, extreme,
                                    {**self.short_config,
                                     "trailing_atr": self.futures_market.strategy_config["trailing_atr"],
                                     "cap_at_target": False},

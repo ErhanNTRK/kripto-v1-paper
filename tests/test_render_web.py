@@ -461,6 +461,50 @@ class ScanResilienceTests(unittest.TestCase):
         self.assertEqual([r["symbol"] for r in failed], ["NILUSDT"])
         self.assertEqual(ratchet.call_args.args[0]["symbol"], "ACEUSDT")
 
+    def _profit_stop_app(self, position, feature, extreme):
+        app = LiveApp(self.CONFIG, {"trailing_atr": 2.0},
+                      {"TELEGRAM_CHAT_ID": "123", "LIVE_TRADING_CONFIRMATION": LIVE_PHRASE},
+                      short_config={**self.CONFIG, "live_trading_enabled": True}, short_strategy_config={})
+        app.futures_market = MagicMock()
+        app.futures_market.strategy_config = {"trailing_atr": 4.0}
+        app.futures_market.analysis.return_value = (feature, {"c": 1}, extreme)
+        app.futures_executor = MagicMock()
+        return app
+
+    def test_a_stop_moved_into_profit_does_not_force_an_emergency_close(self):
+        # 24 Sep 2026: NILUSDT's re-placed stop sat above entry; the exit
+        # rules read that as "no risk left" and closed a winning trade.
+        position = {"symbol": "NILUSDT", "side": "long", "entry": Decimal("0.098"),
+                    "stop_price": Decimal("0.117"), "quantity": "52.7",
+                    "stop_client_id": "kv1fq4977t1", "open_time": 0}
+        app = self._profit_stop_app(position, {"c": 0.137, "atr": 0.005}, extreme=0.14)
+        with patch.object(app, "_ratchet", return_value=None):
+            results = app._manage_futures_position(position, lambda f, b: False)
+        self.assertEqual(results, [])
+        app.futures_executor.cancel.assert_not_called()
+
+    def test_a_stop_in_profit_still_trails_out(self):
+        position = {"symbol": "NILUSDT", "side": "long", "entry": Decimal("0.098"),
+                    "stop_price": Decimal("0.117"), "quantity": "52.7",
+                    "stop_client_id": "kv1fq4977t1", "open_time": 0}
+        # high 0.16 - 4 * 0.005 = 0.14: close 0.137 is below -> trailing exit.
+        app = self._profit_stop_app(position, {"c": 0.137, "atr": 0.005}, extreme=0.16)
+        with patch.object(app, "_ratchet", return_value=None),              patch("crypto_v1.render_web.execute_long_futures_exit",
+                   return_value={"status": "closed", "order": None}) as close,              patch("crypto_v1.render_web.send_message"):
+            app._manage_futures_position(position, lambda f, b: False)
+        self.assertEqual(close.call_args.args[1], "trailing_profit")
+        self.assertEqual(close.call_args.args[0]["stop_client_id"], "kv1fq4977t1")
+
+    def test_a_short_stop_moved_into_profit_is_judged_the_same_way(self):
+        position = {"symbol": "XUSDT", "side": "short", "entry": Decimal("100"),
+                    "stop_price": Decimal("90"), "quantity": "1",
+                    "stop_client_id": "kv1fp1t1", "open_time": 0}
+        app = self._profit_stop_app(position, {"c": 80, "atr": 1}, extreme=79)
+        app.short_config["trailing_atr"] = 4.0
+        with patch.object(app, "_ratchet", return_value=None),              patch("crypto_v1.render_web.short_exit_decision", return_value=None) as decide:
+            app._manage_futures_position(position, lambda f, b: False)
+        self.assertGreater(decide.call_args.args[0]["stop_price"], Decimal("100"))
+
     def test_scan_analyzes_positions_on_the_apps_own_interval_not_always_4h(self):
         # Bug found live 21 Sep 2026: scan() hardcoded FOUR_HOUR for every
         # app's exit check. A position the 2H system opened mid-way through
