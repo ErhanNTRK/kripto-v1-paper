@@ -509,3 +509,7 @@ class TwoHourStrategyFileTests(unittest.TestCase):
         self.assertEqual(four.get("max_week_gain"), 0.5)
         self.assertNotIn("max_week_gain", two)
 
+    def test_both_systems_use_the_ichimoku_filter(self):
+        for name in ("config_v5_long.json", "config_v5_long_2h.json"):
+            self.assertTrue(json.loads(Path(name).read_text(encoding="utf-8")).get("ichimoku_filter"), name)
+

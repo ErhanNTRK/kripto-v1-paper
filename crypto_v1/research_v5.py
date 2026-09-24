@@ -64,6 +64,34 @@ def btc_down_ok(btc, mode="strict"):
     return btc["c"] < btc["ema20"] < btc["ema50"] < btc["ema200"]
 
 
+def ichimoku_strong(rows, params=(9, 26, 52)):
+    """Per bar: is the coin's own Ichimoku fully bullish? Price above the
+    cloud drawn under this bar, Tenkan above Kijun, the cloud being drawn
+    ahead green, and Chikou (this close) above the close `kijun` bars back.
+    None until there is enough history. Uses bars up to i only.
+
+    The user's favourite indicator (24 Sep 2026). As an extra condition on
+    every long, over 3 years it took 100 USDT (4H+2H) to 1766 instead of
+    682, drawdown 40% -> 34%, with 15.3 instead of 19.3 trades a week; both
+    systems and every half-year improved or held, and 7/22/44 and 12/30/60
+    gave 1150-1394, so it is not a knife-edge on the standard settings."""
+    tenkan_n, kijun_n, span_b_n = (int(x) for x in params)
+    highs, lows, closes = [r["h"] for r in rows], [r["l"] for r in rows], [r["c"] for r in rows]
+
+    def midline(n):
+        return [(max(highs[i - n + 1:i + 1]) + min(lows[i - n + 1:i + 1])) / 2 if i >= n - 1 else None
+                for i in range(len(rows))]
+
+    tenkan, kijun, span_b = midline(tenkan_n), midline(kijun_n), midline(span_b_n)
+    span_a = [(t + k) / 2 if t is not None and k is not None else None for t, k in zip(tenkan, kijun)]
+    out = [None] * len(rows)
+    for i in range(span_b_n - 1 + kijun_n, len(rows)):
+        cloud_a, cloud_b = span_a[i - kijun_n], span_b[i - kijun_n]  # plotted kijun bars ahead
+        out[i] = (closes[i] > max(cloud_a, cloud_b) and tenkan[i] > kijun[i]
+                  and span_a[i] > span_b[i] and closes[i] > closes[i - kijun_n])
+    return out
+
+
 def symmetric_features(rows, config):
     # donchian_windows (default WINDOWS=(10,20,40)) is user-tunable, per
     # the user's 18 Sep 2026 request for even more signal frequency after
@@ -85,6 +113,8 @@ def symmetric_features(rows, config):
             if i >= period:
                 running -= rows[i - period]["c"]
             row["regime_ma"] = running / period if i + 1 >= period else None
+    ichimoku = ichimoku_strong(rows, config.get("ichimoku_params", (9, 26, 52))) \
+        if config.get("ichimoku_filter") else None
     for i, row in enumerate(out):
         up = down = 0
         for period in windows:
@@ -112,6 +142,8 @@ def symmetric_features(rows, config):
             span = int(config.get("first_time_high_bars", 200))
             row["range_high"] = max(x["h"] for x in rows[i - span:i]) if i >= span else None
             row["has_history"] = i >= span
+        if ichimoku is not None:
+            row["ichimoku_ok"] = ichimoku[i]
         if config.get("max_week_gain") is not None and len(rows) > 1:
             week = 7 * max(1, int(86_400_000 // (rows[1]["t"] - rows[0]["t"])))
             row["week_gain"] = row["c"] / rows[i - week]["c"] - 1 if i >= week and rows[i - week]["c"] else None
@@ -206,6 +238,10 @@ def long_entry(row, btc, config):
     if week_cap is not None:
         if row.get("week_gain") is None or row["week_gain"] > float(week_cap):
             return None
+    # ichimoku_filter (24 Sep 2026): only buy while the coin's own Ichimoku
+    # is fully bullish (see ichimoku_strong). Unknown blocks: fail closed.
+    if config.get("ichimoku_filter") and row.get("ichimoku_ok") is not True:
+        return None
     # Optional "quality of the breakout" filters, all off by default so the
     # live signal is unchanged until one is validated. They exist because a
     # Donchian break says only THAT a high was taken out, never how violent

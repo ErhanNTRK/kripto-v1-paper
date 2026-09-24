@@ -45,5 +45,6 @@
   "regime_ma_days": 200,
   "entry_mode": "breakout+momentum",
   "short_regime_only": true,
-  "max_week_gain": 0.5
+  "max_week_gain": 0.5,
+  "ichimoku_filter": true
 }

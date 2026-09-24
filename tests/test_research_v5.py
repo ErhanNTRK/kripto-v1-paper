@@ -342,6 +342,55 @@ class WeekGainCapTests(unittest.TestCase):
         self.assertIsNotNone(long_entry(dict(base, week_gain=2.1), {"c": 1.0}, self._config()))
 
 
+class IchimokuFilterTests(unittest.TestCase):
+    """ichimoku_filter (24 Sep 2026): longs only while the coin's own
+    Ichimoku is fully bullish."""
+
+    def _rows(self, closes):
+        step = 4 * 3600 * 1000
+        return [dict(t=i * step, o=c, h=c + 1, l=c - 1, c=c, v=1.0) for i, c in enumerate(closes)]
+
+    def test_a_steady_uptrend_is_fully_bullish(self):
+        from crypto_v1.research_v5 import ichimoku_strong
+        flags = ichimoku_strong(self._rows([100.0 + i for i in range(120)]))
+        self.assertIsNone(flags[76])   # not enough history for the cloud yet
+        self.assertTrue(flags[-1])
+
+    def test_a_downtrend_and_a_flat_market_are_not(self):
+        from crypto_v1.research_v5 import ichimoku_strong
+        self.assertFalse(ichimoku_strong(self._rows([300.0 - i for i in range(120)]))[-1])
+        # Flat: Tenkan equals Kijun, so "Tenkan above Kijun" fails.
+        self.assertFalse(ichimoku_strong(self._rows([100.0] * 120))[-1])
+
+    def test_a_spike_inside_a_downtrend_stays_below_the_cloud(self):
+        from crypto_v1.research_v5 import ichimoku_strong
+        closes = [300.0 - 2 * i for i in range(110)] + [100.0, 104.0]
+        self.assertFalse(ichimoku_strong(self._rows(closes))[-1])
+
+    def test_uses_no_later_bars(self):
+        from crypto_v1.research_v5 import ichimoku_strong
+        rows = self._rows([100.0 + i for i in range(120)])
+        full = ichimoku_strong(rows)
+        self.assertEqual(ichimoku_strong(rows[:100])[-1], full[99])
+
+    def test_long_entry_requires_it_when_switched_on(self):
+        from crypto_v1.research_v5 import long_entry
+        config = dict(atr_multiplier=2.0, breakout_bars=20, support_bars=10, min_breaks=1,
+                      btc_filter="off", ichimoku_filter=True)
+        base = {"c": 100.0, "atr": 1.0, "breaks_up": 3}
+        self.assertIsNotNone(long_entry(dict(base, ichimoku_ok=True), {"c": 1.0}, config))
+        self.assertIsNone(long_entry(dict(base, ichimoku_ok=False), {"c": 1.0}, config))
+        self.assertIsNone(long_entry(dict(base, ichimoku_ok=None), {"c": 1.0}, config))
+        self.assertIsNotNone(long_entry(base, {"c": 1.0}, dict(config, ichimoku_filter=False)))
+
+    def test_features_carry_the_flag_only_when_asked(self):
+        from crypto_v1.research_v5 import symmetric_features
+        rows = self._rows([100.0 + i for i in range(120)])
+        config = dict(atr_multiplier=2.0, breakout_bars=20, support_bars=10, min_breaks=1, btc_filter="off")
+        self.assertTrue(symmetric_features(rows, dict(config, ichimoku_filter=True))[-1]["ichimoku_ok"])
+        self.assertNotIn("ichimoku_ok", symmetric_features(rows, config)[-1])
+
+
 class TrendPullbackTests(unittest.TestCase):
     """entry_mode (23 Sep 2026): a dip to EMA20 inside an uptrend as a
     second entry pattern next to the Donchian breakout; off by default."""
