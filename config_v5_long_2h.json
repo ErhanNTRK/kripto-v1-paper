@@ -48,5 +48,7 @@
     40,
     80
   ],
-  "entry_mode": "breakout+momentum"
+  "entry_mode": "breakout+momentum",
+  "short_regime_only": true,
+  "disable_shorts": true
 }

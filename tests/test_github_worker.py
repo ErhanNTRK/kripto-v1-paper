@@ -490,3 +490,14 @@ class TwoHourStrategyFileTests(unittest.TestCase):
         shared = {k for k in four if k not in ("donchian_windows", "first_time_high_bars", "trailing_atr")}
         self.assertEqual({k: two[k] for k in shared}, {k: four[k] for k in shared})
 
+    def test_short_sides_follow_the_24_sep_2026_decision(self):
+        # 3-year test, shorts alone: 2H 50 -> 23 USDT, 4H 50 -> 45. The user
+        # switched 2H shorts off and kept 4H shorts only while BTC is under
+        # its 200-day average (where the long side is closed anyway).
+        four = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
+        two = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
+        self.assertTrue(two.get("disable_shorts"))
+        self.assertFalse(four.get("disable_shorts"))
+        self.assertTrue(four.get("short_regime_only"))
+        self.assertEqual(four.get("regime_ma_days"), 200)
+
