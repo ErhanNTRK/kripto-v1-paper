@@ -158,6 +158,20 @@ class ApproveLongLeveragedTests(unittest.TestCase):
         normal = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_TIERED_NORMAL, C_LONG, {}, Market(), executor)
         self.assertEqual(normal["plan"]["leverage"], 3)
 
+    def test_breakout_and_momentum_signals_get_their_own_risk_size(self):
+        # 25 Sep 2026: quality_risk_multipliers [1.5, 0.5] on 0.75% of equity.
+        class EquityMarket(Market):
+            def pilot_status(self):
+                return dict(Market.pilot_status(self), equity=400)
+        config = dict(C_LONG, risk_per_trade_fraction=0.0075, quality_risk_multipliers=[1.5, 0.5])
+        momentum = {"state": {"pending_buys": {"SOLUSDT": {"stop": 95, "breaks_up": 0}},
+                              "events": SAVED_LONG_TIERED_STRONG["state"]["events"]}}
+        # 400 x 0.75% = 3 USDT; a 5-point stop (95 vs 100) -> 0.6 SOL plain.
+        breakout = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_TIERED_NORMAL, config, {}, EquityMarket(), Mock())
+        quiet = approve_long_leveraged(7, "AL", 501000, momentum, config, {}, EquityMarket(), Mock())
+        self.assertEqual(Decimal(breakout["plan"]["quantity"]), Decimal("0.9"))
+        self.assertEqual(Decimal(quiet["plan"]["quantity"]), Decimal("0.3"))
+
     def test_a_tight_stop_reaches_the_full_5x_tier(self):
         tight = {"state": {"pending_buys": {"SOLUSDT": {"stop": 99, "breaks_up": 3}},
                            "events": SAVED_LONG_TIERED_STRONG["state"]["events"]}}

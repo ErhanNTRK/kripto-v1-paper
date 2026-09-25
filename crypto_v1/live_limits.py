@@ -3,7 +3,7 @@ from decimal import Decimal
 from datetime import datetime, timezone
 
 
-def trade_risk_usdt(config, equity):
+def trade_risk_usdt(config, equity, breaks_up=None):
     """Risk per trade in USDT. risk_per_trade_fraction (23 Sep 2026, user's
     decision: 0.75%) makes it a share of this system's CURRENT equity, so
     it grows with profit and shrinks after losses; without it the fixed
@@ -11,8 +11,23 @@ def trade_risk_usdt(config, equity):
     per trade -- far past what a 30R+ losing stretch can survive)."""
     fraction = config.get("risk_per_trade_fraction")
     if fraction and equity and Decimal(str(equity)) > 0:
-        return Decimal(str(equity)) * Decimal(str(fraction))
+        return Decimal(str(equity)) * Decimal(str(fraction)) * signal_risk_multiplier(config, breaks_up)
     return Decimal(str(config["risk_per_trade_usdt"]))
+
+
+def signal_risk_multiplier(config, breaks_up):
+    """quality_risk_multipliers [breakout, momentum] (25 Sep 2026, user's
+    decision): a long that actually broke a Donchian high (breaks_up >= 1)
+    risks more than a momentum-only entry. Over 3 years the breakout entries
+    earned about twice as much per trade; with 1.5 / 0.5 and the 30/70
+    capital split the out-of-sample last year went from +122% to +203%
+    (drawdown 29% -> 32%). An unknown signal type (no breaks_up) keeps the
+    plain size rather than guessing."""
+    multipliers = config.get("quality_risk_multipliers")
+    if not multipliers or breaks_up is None:
+        return Decimal("1")
+    breakout, momentum = (Decimal(str(x)) for x in multipliers)
+    return breakout if int(breaks_up) >= 1 else momentum
 
 
 def max_trade_risk_usdt(config, equity):

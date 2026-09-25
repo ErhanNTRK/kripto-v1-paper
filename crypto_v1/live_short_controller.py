@@ -176,7 +176,8 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
         return {"status": "rejected", "reason": "stop_too_wide_for_safe_leverage"}
     rules = market.rules(signal["symbol"])
     plan = leveraged_order_plan("long", price, stop, status["free_usdt"],
-                                trade_risk_usdt(config, status.get("equity")), leverage, rules,
+                                trade_risk_usdt(config, status.get("equity"), signal.get("breaks_up")),
+                                leverage, rules,
                                 max_risk_usdt=max_trade_risk_usdt(config, status.get("equity")))
     plan.update(symbol=signal["symbol"], entry_price=format(price, "f"))
     if not execution_enabled(config, environment):

@@ -80,6 +80,37 @@ class ProportionalRiskTests(unittest.TestCase):
         self.assertEqual(trade_risk_usdt(config, Decimal("80")), Decimal("0.6000"))
         self.assertEqual(trade_risk_usdt(config, Decimal("160")), Decimal("1.2000"))
 
+    def test_breakouts_risk_more_than_momentum_entries(self):
+        # 25 Sep 2026: quality_risk_multipliers [breakout, momentum].
+        from decimal import Decimal
+        from crypto_v1.live_limits import trade_risk_usdt
+        config = {"risk_per_trade_usdt": 5.0, "risk_per_trade_fraction": 0.0075,
+                  "quality_risk_multipliers": [1.5, 0.5]}
+        self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=2), Decimal("1.125"))
+        self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=1), Decimal("1.125"))
+        self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=0), Decimal("0.375"))
+        # Unknown signal type: plain size, never a guess.
+        self.assertEqual(trade_risk_usdt(config, Decimal("100")), Decimal("0.75"))
+        # Without the setting nothing changes.
+        del config["quality_risk_multipliers"]
+        self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=0), Decimal("0.75"))
+
+    def test_live_configs_split_30_70_with_quality_sizing(self):
+        # 25 Sep 2026 decision: 4H 30% / 2H 70% of the wallet; loss-limit
+        # baselines are the same split of the 156 USDT the systems started from.
+        import json
+        from pathlib import Path
+        four = json.loads(Path("short_live_config.json").read_text(encoding="utf-8"))
+        two = json.loads(Path("short_live_config_2h.json").read_text(encoding="utf-8"))
+        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.3, 0.7))
+        self.assertAlmostEqual(four["pilot_capital_usdt"] + two["pilot_capital_usdt"], 156.0)
+        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.3)
+        for config in (four, two):
+            self.assertEqual(config["quality_risk_multipliers"], [1.5, 0.5])
+            self.assertEqual(config["risk_per_trade_fraction"], 0.0075)
+            # The breakout size stays under the hard per-trade ceiling.
+            self.assertLessEqual(config["risk_per_trade_fraction"] * 1.5, config["max_risk_per_trade_fraction"])
+
     def test_fixed_risk_is_used_without_the_fraction_or_equity(self):
         from decimal import Decimal
         from crypto_v1.live_limits import trade_risk_usdt
