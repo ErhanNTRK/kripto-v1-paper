@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 
 def trade_risk_usdt(config, equity, breaks_up=None):
     """Risk per trade in USDT. risk_per_trade_fraction (23 Sep 2026, user's
-    decision: 0.75%) makes it a share of this system's CURRENT equity, so
+    decision: 0.75%; raised to 1% on 26 Sep 2026 -- over 3 years 239x vs
+    200x, but the last year +106% vs +203% and drawdown 57% vs 51%, a
+    trade-off the user chose knowingly) makes it a share of this system's CURRENT equity, so
     it grows with profit and shrinks after losses; without it the fixed
     risk_per_trade_usdt applies (was 5 USDT on a ~37 USDT 4H slice, ~13.5%
     per trade -- far past what a 30R+ losing stretch can survive)."""

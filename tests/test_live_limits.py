@@ -107,7 +107,7 @@ class ProportionalRiskTests(unittest.TestCase):
         self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.3)
         for config in (four, two):
             self.assertEqual(config["quality_risk_multipliers"], [1.5, 0.5])
-            self.assertEqual(config["risk_per_trade_fraction"], 0.0075)
+            self.assertEqual(config["risk_per_trade_fraction"], 0.01)  # user's choice, 26 Sep 2026
             # A size under Binance's minimum is rounded up to it only while
             # the trade then risks at most 1% of the system (user's decision,
             # 25 Sep 2026; any cap from 0.75% to 1% tested within 1% of

@@ -16,7 +16,7 @@
   "profit_exit_confirmation_required": false,
   "max_entry_drift_fraction": 0.01,
   "live_fee_buffer_fraction": 0.001,
-  "risk_per_trade_fraction": 0.0075,
+  "risk_per_trade_fraction": 0.01,
   "daily_loss_limit_fraction": 0.1,
   "pilot_loss_limit_fraction": 0.4,
   "max_risk_per_trade_fraction": 0.01,
