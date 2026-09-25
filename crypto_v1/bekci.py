@@ -2,8 +2,8 @@
 Scheduler every 5 minutes. The bot's own Telegram alerts cannot report the
 bot itself being gone -- a closed launcher window, a crash the launcher did
 not recover from, the whole process hung. This checks it from outside and
-tells Telegram once it has been down DOWN_ALERT_SECONDS, then hourly, and
-once more when it is back.
+tells Telegram once it has been down DOWN_ALERT_SECONDS, then every
+REMIND_SECONDS, and once more when it is back.
 
 Standard library only and no package imports, so the task can run it as a
 plain script. It never starts, stops or trades anything; the protective
@@ -18,7 +18,8 @@ from pathlib import Path
 HOME = Path(os.environ.get("USERPROFILE") or Path.home()) / "kripto"
 BOT = "http://127.0.0.1:10000"
 DOWN_ALERT_SECONDS = 600
-REMIND_SECONDS = 3600
+# User's request, 25 Sep 2026: a weekend outage must not ping every hour.
+REMIND_SECONDS = 6 * 3600
 # The bot's own loop watchdog restarts it after 15 minutes without progress.
 STALE_TICK_SECONDS = 20 * 60
 

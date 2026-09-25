@@ -36,12 +36,13 @@ class BekciTests(unittest.TestCase):
         self.assertEqual(self._check(state, healthy(1400), 1400 + DOWN_ALERT_SECONDS), {})
         self.assertEqual(self.sent, [])
 
-    def test_ten_minutes_down_is_reported_then_hourly_then_the_recovery(self):
+    def test_ten_minutes_down_is_reported_then_every_six_hours_then_the_recovery(self):
         state = self._check({}, down, 0)
         state = self._check(state, down, DOWN_ALERT_SECONDS)
         self.assertEqual(len(self.sent), 1)
         self.assertIn("10 dakikadir cevap vermiyor", self.sent[0])
-        state = self._check(state, down, DOWN_ALERT_SECONDS + 300)
+        self.assertEqual(REMIND_SECONDS, 6 * 3600)
+        state = self._check(state, down, DOWN_ALERT_SECONDS + 5 * 3600)
         self.assertEqual(len(self.sent), 1)
         state = self._check(state, down, DOWN_ALERT_SECONDS + REMIND_SECONDS)
         self.assertEqual(len(self.sent), 2)
