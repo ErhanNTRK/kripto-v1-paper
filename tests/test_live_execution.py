@@ -240,3 +240,24 @@ class MinimumNotionalHeadroomTests(unittest.TestCase):
                                     Decimal("0.303"), 4, self.RULES, max_risk_usdt=Decimal("0.54"))
         self.assertGreaterEqual(Decimal(plan["quantity"]), Decimal("5.15"))
 
+
+
+class MinimumSkipTests(unittest.TestCase):
+    """Audit A5 (25 Sep 2026): no rounding up to Binance's minimum any
+    more -- LTC's 0.44 USDT risk became 1.19 that way. A size under the
+    minimum is skipped with its own reason."""
+
+    RULES = {"step_size": Decimal("0.001"), "tick_size": Decimal("0.01"), "min_qty": Decimal("0.001"),
+             "min_notional": Decimal("20")}
+
+    def test_a_risk_size_under_the_minimum_is_skipped(self):
+        from crypto_v1.live_execution import leveraged_order_plan
+        with self.assertRaisesRegex(ValueError, "risk target below Binance minimum"):
+            leveraged_order_plan("long", Decimal("70.98"), Decimal("66.87"), Decimal("100"),
+                                 Decimal("0.44"), 4, self.RULES)
+
+    def test_too_little_margin_keeps_its_own_reason(self):
+        from crypto_v1.live_execution import leveraged_order_plan
+        with self.assertRaisesRegex(ValueError, "order is below Binance minimums"):
+            leveraged_order_plan("long", Decimal("70.98"), Decimal("66.87"), Decimal("2"),
+                                 Decimal("0.44"), 4, self.RULES)

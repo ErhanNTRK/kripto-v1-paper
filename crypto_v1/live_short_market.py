@@ -3,20 +3,70 @@ fail safely -- mirrors live_market.py's BinanceMarket/summarize_pilot,
 adapted for a Futures account (single USDT-margined wallet, not a
 per-asset balance list) and short-specific order pairing (open=SELL,
 close=BUY reduceOnly)."""
+import json
 import threading
 import time
 import zlib
 from datetime import datetime, timezone
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from .binance_trade import OrderRejected
 from .data import INTERVAL, candles, futures_get, get, universe
 from .live_execution import futures_symbol_rules
+from .telegram import send_message
+
+DAY_MS = 86_400_000
+WEEK_MS = 7 * DAY_MS
+# Binance serves income history about 3 months back; asking earlier fails.
+INCOME_HISTORY_MS = 89 * DAY_MS
+# How long our own filled orders are kept on disk (A7): far past any hold.
+ORDER_STORE_MS = 120 * DAY_MS
+_ORDER_FIELDS = ("symbol", "orderId", "clientOrderId", "side", "status", "type", "executedQty",
+                 "cumQuote", "avgPrice", "time", "updateTime", "reduceOnly")
 
 
 def _decimal(value):
     return Decimal(str(value or "0"))
+
+
+def _load(path, default):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def _save(path, value):
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _order_time(order):
+    return int(order.get("updateTime") or order.get("time") or 0)
+
+
+def _left_open(open_order, fills):
+    """What the bot's opening order should still have open now: its filled
+    quantity (signed), less every later fill in the symbol that reduced it
+    -- ours, a stop's, or a partial close by hand. None when the bot's
+    position ended (reached zero or flipped: anything open now came later)
+    or was added to (the bot never adds, so that was done by hand)."""
+    sign = Decimal("1") if open_order.get("side") == "BUY" else Decimal("-1")
+    running = sign * _decimal(open_order.get("executedQty"))
+    later = sorted((o for o in fills if o.get("orderId") != open_order.get("orderId")
+                    and _order_time(o) > _order_time(open_order)), key=_order_time)
+    for order in later:
+        move = (Decimal("1") if order.get("side") == "BUY" else Decimal("-1")) * _decimal(order.get("executedQty"))
+        if (move > 0) == (sign > 0):
+            return None
+        running += move
+        if running == 0 or (running > 0) != (sign > 0):
+            return None
+    return running
 
 
 def symbol_code(symbol):
@@ -100,7 +150,16 @@ def _side_pilot_summary(live_orders, open_side, open_prefix, close_side, close_p
     return opens, opens_by_suffix, realized_pnl, realized_loss_today, realized_pnl_today
 
 
-def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, tag=""):
+def _closed_symbols(live_orders, day_start_ms):
+    """Symbols one of our own close orders (stop, exit, emergency) filled
+    today."""
+    return {o.get("symbol") for o in live_orders
+            if o.get("status") == "FILLED"
+            and str(o.get("clientOrderId", "")).startswith(_SHORT_CLOSE_PREFIXES + _LONG_CLOSE_PREFIXES)
+            and int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}
+
+
+def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, tag="", net_deposits=None):
     """tag: see live_market.summarize_pilot's docstring -- same reasoning,
     two systems (e.g. 4H and 2H) sharing the SAME real Futures wallet each
     only own a slice of config["pilot_capital_usdt"], tracked via this
@@ -193,21 +252,36 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     else:
         equity = account_equity
         free_usdt = account_free_usdt
-    pilot_drawdown = max(Decimal("0"), pilot_capital - equity)
+    # The 40% loss limit's baseline (25 Sep 2026 audit, A1). A frozen
+    # pilot_capital_usdt stopped meaning anything once equity became a share
+    # of the whole wallet: a deposit pushed the limit out of reach, a
+    # withdrawal tripped it with no loss at all. With the account's net
+    # deposits known, the baseline is this system's share of the money
+    # actually put in, so only trading results move it closer to the limit.
+    baseline = pilot_capital
+    if tag and fraction > 0 and net_deposits is not None and Decimal(str(net_deposits)) > 0:
+        baseline = Decimal(str(net_deposits)) * fraction
+    pilot_drawdown = max(Decimal("0"), baseline - equity)
     opens_today = {o["clientOrderId"] for o in short_opens + long_opens
                    if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms}
     # This system's own open result, for the daily equity stop: only the
     # positions its own stops protect -- never a hand-opened one, never the
     # other system's.
     protected_symbols = {o.get("symbol") for o in protective}
-    own_unrealized = sum((_decimal(p.get("unrealizedProfit")) for p in account.get("positions", [])
-                          if p.get("symbol") in protected_symbols and abs(_decimal(p.get("positionAmt"))) > 0),
-                         Decimal("0"))
+    own_unrealized_by_symbol = {p.get("symbol"): _decimal(p.get("unrealizedProfit"))
+                                for p in account.get("positions", [])
+                                if p.get("symbol") in protected_symbols and abs(_decimal(p.get("positionAmt"))) > 0}
+    own_unrealized = sum(own_unrealized_by_symbol.values(), Decimal("0"))
     return {"open_positions": len(own_symbols), "held_symbols": held_symbols,
             "opens_today": len(opens_today),
             "realized_loss_today": realized_loss_today, "pilot_drawdown": pilot_drawdown,
+            "pilot_baseline": baseline,
             "free_usdt": free_usdt, "equity": equity,
-            "realized_pnl_today": short_pnl_today + long_pnl_today, "own_unrealized": own_unrealized}
+            "realized_pnl_today": short_pnl_today + long_pnl_today, "own_unrealized": own_unrealized,
+            "own_unrealized_by_symbol": own_unrealized_by_symbol,
+            "opened_symbols_today": {o.get("symbol") for o in short_opens + long_opens
+                                     if int(o.get("updateTime", o.get("time", 0))) >= day_start_ms},
+            "closed_symbols_today": _closed_symbols(live_orders, day_start_ms)}
 
 
 class BinanceFuturesMarket:
@@ -227,6 +301,17 @@ class BinanceFuturesMarket:
     # Contract rules change rarely; the full futures exchangeInfo was being
     # downloaded for every entry attempt, stop move and re-protection.
     _RULES_CACHE_SECONDS = 3600
+
+    # Where the bot keeps what Binance forgets: our own filled orders past
+    # allOrders' 7-day window (bot_orders.json) and the running transfer
+    # total (transfers.json). main() points it at runtime/; None (tests,
+    # Render) keeps nothing on disk.
+    store_dir = None
+    _DEPOSITS_REFRESH_SECONDS = 600
+    _deposits_cache = None
+    _deposits_lock = threading.Lock()
+    # Positions already reported as not the bot's, so one is reported once.
+    _foreign_noted = set()
 
     def __init__(self, config, strategy_config, environment, executor, tag="", now=time.time,
                  universe_fn=None):
@@ -289,9 +374,83 @@ class BinanceFuturesMarket:
                            if abs(_decimal(p.get("positionAmt"))) > 0)
             with ThreadPoolExecutor(max_workers=5) as pool:
                 batches = list(pool.map(lambda s: self.executor.all_orders(s), symbols))
-            orders = [order for batch in batches for order in batch]
+            orders = self._with_stored_orders([order for batch in batches for order in batch])
             BinanceFuturesMarket._raw_pilot_cache = (now, account, open_orders, orders)
             return account, open_orders, orders
+
+    def _store(self, name):
+        return Path(self.store_dir) / name if self.store_dir else None
+
+    def _with_stored_orders(self, orders):
+        """allOrders without a start time returns only the last 7 days, so a
+        position held longer lost its opening order: it could no longer be
+        told apart from a hand-opened one, nor re-protected, nor its close
+        paired for P&L (audit A7). Our own filled orders are kept on disk and
+        merged back in."""
+        path = self._store("bot_orders.json")
+        if path is None:
+            return orders
+        stored = _load(path, [])
+        kept = {(o.get("symbol"), o.get("orderId")): o for o in stored}
+        changed = False
+        for order in orders:
+            if order.get("status") == "FILLED" and str(order.get("clientOrderId", "")).startswith("kv1f"):
+                key = (order.get("symbol"), order.get("orderId"))
+                if key not in kept:
+                    kept[key] = {k: order[k] for k in _ORDER_FIELDS if k in order}
+                    changed = True
+        cutoff = int(self._now() * 1000) - ORDER_STORE_MS
+        fresh = {k: o for k, o in kept.items() if _order_time(o) >= cutoff}
+        changed = changed or len(fresh) != len(kept) or len(kept) != len(stored)
+        kept = fresh
+        if changed:
+            try:
+                _save(path, list(kept.values()))
+            except OSError as exc:
+                print(f"Order store not saved: {exc}", flush=True)
+        seen = {(o.get("symbol"), o.get("orderId")) for o in orders}
+        return orders + [o for k, o in kept.items() if k not in seen]
+
+    def net_deposits(self):
+        """USDT moved into the Futures wallet minus USDT moved out, for the
+        loss limit's baseline (audit A1). Binance serves transfer history 7
+        days per request and ~3 months back, so the running total and how far
+        it has been read are kept in transfers.json. None when unknown -- the
+        limit then falls back to pilot_capital_usdt."""
+        path = self._store("transfers.json")
+        if path is None:
+            return None
+        with BinanceFuturesMarket._deposits_lock:
+            now = self._now()
+            cached = BinanceFuturesMarket._deposits_cache
+            if cached is not None and now - cached[0] < self._DEPOSITS_REFRESH_SECONDS:
+                return cached[1]
+            state = _load(path, None)
+            now_ms = int(now * 1000)
+            if state:
+                total, cursor = Decimal(str(state["total"])), int(state["cursor"])
+            else:
+                total, cursor = Decimal("0"), now_ms - INCOME_HISTORY_MS
+            try:
+                start = cursor + 1
+                while start <= now_ms:
+                    end = min(now_ms, start + WEEK_MS - 1)
+                    rows = self.executor.income(start, end, income_type="TRANSFER")
+                    if len(rows) >= 1000:
+                        raise RuntimeError("too many transfers in one week to total safely")
+                    total += sum((_decimal(r.get("income")) for r in rows
+                                  if r.get("asset", "USDT") == "USDT"), Decimal("0"))
+                    start = end + 1
+            except Exception as exc:
+                print(f"Transfer history not read: {exc}", flush=True)
+                known = Decimal(str(state["total"])) if state else (cached[1] if cached else None)
+                return known
+            try:
+                _save(path, {"total": str(total), "cursor": now_ms})
+            except OSError as exc:
+                print(f"Transfer total not saved: {exc}", flush=True)
+            BinanceFuturesMarket._deposits_cache = (now, total)
+            return total
 
     @classmethod
     def invalidate_pilot_cache(cls):
@@ -304,7 +463,8 @@ class BinanceFuturesMarket:
         account, open_orders, orders = self._raw_pilot_data()
         start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0,
                                                    microsecond=0).timestamp() * 1000
-        return summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag)
+        return summarize_short_pilot(account, open_orders, orders, self.config, int(start), self.tag,
+                                     net_deposits=self.net_deposits())
 
     def live_positions(self):
         # Recognizes both a short's protective stop (kv1fp, BUY -- buys
@@ -331,7 +491,12 @@ class BinanceFuturesMarket:
                 continue
             stops.setdefault((stop["symbol"], side), []).append(stop)
         account, _, _ = self._raw_pilot_data()
-        held = {p.get("symbol") for p in account.get("positions", []) if abs(_decimal(p.get("positionAmt"))) > 0}
+        # What is really open, per symbol. A stop's own quantity goes stale
+        # once part of the position is closed (by hand, or a take-profit)
+        # and every moved stop copied it (audit A6).
+        amounts = {p.get("symbol"): abs(_decimal(p.get("positionAmt"))) for p in account.get("positions", [])
+                   if abs(_decimal(p.get("positionAmt"))) > 0}
+        held = set(amounts)
         # Stops whose position is gone (closed by hand, or by an exit whose
         # stop cancel failed). They are not positions: until 24 Sep 2026 one
         # still counted as a held symbol and an open slot. The scan re-checks
@@ -369,7 +534,7 @@ class BinanceFuturesMarket:
                     continue
                 entry, quantity, open_time = account_position
             else:
-                entry, quantity = quote / qty, stop["origQty"]
+                entry, quantity = quote / qty, format(amounts[symbol], "f")
                 open_time = int(open_order.get("time", open_order.get("updateTime", 0)))
             positions.append({"symbol": stop["symbol"], "side": side, "entry": entry,
                               "stop_price": Decimal(str(stop["stopPrice"])),
@@ -402,11 +567,20 @@ class BinanceFuturesMarket:
         Attribution is by the opening order's own tag, so the 4H and 2H
         systems never both adopt the same position; a position with no
         opening order of ours (opened by hand, or older than the order
-        history window) is deliberately left alone."""
+        history window) is deliberately left alone.
+
+        Ownership is proven, not assumed from the symbol (audit A4): the
+        bot's opening order, less every later fill in the symbol, must add
+        up to exactly what is open now. Until 25 Sep 2026 any position in a
+        symbol the bot had bought within 7 days was taken over -- a BNB the
+        user bought by hand after the bot's BNB trade had ended would get
+        the bot's stop and exits."""
         account, _, orders = self._raw_pilot_data()
-        opens = {}
+        opens, fills = {}, {}
         for order in orders:
             client_id = str(order.get("clientOrderId", ""))
+            if _decimal(order.get("executedQty")) > 0:  # a cancelled order can still have part-filled
+                fills.setdefault(order.get("symbol"), []).append(order)
             if order.get("status") != "FILLED" or not client_id.startswith((_LONG_OPEN_PREFIX, _SHORT_OPEN_PREFIX)):
                 continue
             seen = opens.get(order["symbol"])
@@ -419,6 +593,9 @@ class BinanceFuturesMarket:
                 continue
             opened = opens.get(position["symbol"])
             if opened is None or not _belongs_to_tag(opened["clientOrderId"], 5, self.tag):
+                continue
+            if _left_open(opened, fills.get(position["symbol"], [])) != amount:
+                self._note_foreign(position["symbol"], amount)
                 continue
             client_id = str(opened["clientOrderId"])
             side = "long" if amount > 0 else "short"
@@ -435,6 +612,21 @@ class BinanceFuturesMarket:
                               "stop_client_id": stop_prefix + suffix,
                               "open_time": int(opened.get("time") or opened.get("updateTime") or 0)})
         return positions
+
+    def _note_foreign(self, symbol, amount):
+        """One Telegram line per position the bot will not touch although it
+        traded that coin: opened by hand after the bot's own trade ended,
+        or changed by hand since. It has no stop from the bot."""
+        key = (symbol, str(amount))
+        if key in BinanceFuturesMarket._foreign_noted:
+            return
+        BinanceFuturesMarket._foreign_noted.add(key)
+        print(f"Position not adopted ({symbol} {amount}): not the bot's own", flush=True)
+        try:
+            send_message(f"ELLE ACILMIS POZISYON: {symbol} ({format(amount, 'f')}) botun kendi islemiyle "
+                         "eslesmiyor. Dokunmuyorum, stop koymuyorum; korumasi sizde.")
+        except Exception as exc:
+            print(f"Telegram foreign-position notice failed: {exc}", flush=True)
 
     def analysis(self, position, feature_fn, interval=INTERVAL):
         now = get("time")["serverTime"] // interval * interval

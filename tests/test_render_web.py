@@ -989,6 +989,31 @@ class ProtectUnprotectedPositionTests(unittest.TestCase):
         self.assertEqual(position["stop_price"], Decimal("330.00"))
         app.futures_executor.protective_stop_for_long.assert_not_called()
 
+    def test_a_position_past_its_lost_stop_is_closed_at_once(self):
+        # Audit A3: no stop could be placed any more and the exit rules never
+        # compare the price with the stop, so it sat with nothing but
+        # liquidation behind it.
+        app = self._app(price=320)
+        app.futures_market.strategy_config = {"atr_multiplier": 2.0, "trailing_atr": 4.0}
+        app.futures_market.analysis.return_value = ({"c": 350.0, "atr": 10.0}, {}, 351.0)
+        with patch("crypto_v1.render_web.execute_long_futures_exit",
+                   return_value={"status": "closed", "order": {}}) as close, \
+             patch("crypto_v1.render_web.send_message"):
+            results = app._manage_futures_position(self._position(), lambda f, b: False)
+        close.assert_called_once()
+        self.assertEqual(close.call_args.args[1], "stop_loss")
+        self.assertEqual(results[-1]["status"], "closed")
+
+    def test_a_protected_position_is_not_closed_by_that_rule(self):
+        app = self._app(price=355)
+        app.futures_market.strategy_config = {"atr_multiplier": 2.0, "trailing_atr": 4.0}
+        app.futures_market.analysis.return_value = ({"c": 350.0, "atr": 10.0}, {}, 351.0)
+        with patch("crypto_v1.render_web.execute_long_futures_exit") as close, \
+             patch("crypto_v1.render_web.exit_decision", return_value=None), \
+             patch("crypto_v1.render_web.send_message"):
+            app._manage_futures_position(self._position(), lambda f, b: False)
+        close.assert_not_called()
+
     def test_nothing_is_placed_while_real_orders_are_disabled(self):
         app = self._app(price=355, environment={"TELEGRAM_CHAT_ID": "123"})
         result = app._protect(self._position(), {"c": 350.0, "atr": 10.0})
@@ -1127,9 +1152,20 @@ class WatchdogTests(unittest.TestCase):
         import crypto_v1.render_web as rw
         events = []
         rw.LOOP_PROGRESS["at"] = 0
-        rw.watch_loop(limit=60, now=lambda: 1000, sleep=lambda s: None,
-                      dump=lambda: events.append("dump"), exit_process=lambda: events.append("exit"))
+        with patch("crypto_v1.render_web.send_message") as send:
+            rw.watch_loop(limit=60, now=lambda: 1000, sleep=lambda s: None,
+                          dump=lambda: events.append("dump"), exit_process=lambda: events.append("exit"))
         self.assertEqual(events, ["dump", "exit"])
+        self.assertIn("DONMA", send.call_args.args[0])  # audit C2: the user hears of it
+
+    def test_it_exits_even_when_telegram_fails(self):
+        import crypto_v1.render_web as rw
+        events = []
+        rw.LOOP_PROGRESS["at"] = 0
+        with patch("crypto_v1.render_web.send_message", side_effect=RuntimeError("offline")):
+            rw.watch_loop(limit=60, now=lambda: 1000, sleep=lambda s: None,
+                          dump=lambda: None, exit_process=lambda: events.append("exit"))
+        self.assertEqual(events, ["exit"])
 
     def test_a_progressing_loop_is_left_alone(self):
         import crypto_v1.render_web as rw
@@ -1440,6 +1476,53 @@ class DailyEquityStopTests(unittest.TestCase):
         self._guard(app, self.DAY_START + 3 * 3600 + 120)
         self.assertEqual(app.futures_market.pilot_status.call_count, 2)
 
+    def _status_by_symbol(self, realized, unrealized, by_symbol, held=(), opened=(), closed=(), equity="78"):
+        return {"equity": Decimal(equity), "realized_pnl_today": Decimal(realized),
+                "own_unrealized": Decimal(unrealized),
+                "own_unrealized_by_symbol": {k: Decimal(v) for k, v in by_symbol.items()},
+                "held_symbols": set(held), "opened_symbols_today": set(opened),
+                "closed_symbols_today": set(closed)}
+
+    def test_a_winner_closed_by_hand_is_not_read_as_a_loss(self):
+        # Audit A2: SAGA +12 open at the day's start, closed by hand. Before,
+        # the +12 vanished from the open result with nothing booked in its
+        # place: -12 on 78, the rule tripped and sold everything else.
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status_by_symbol(
+            "0", "12", {"SAGAUSDT": "12"}, held={"SAGAUSDT"})
+        self._guard(app, self.DAY_START + 60)
+        app.futures_market.pilot_status.return_value = self._status_by_symbol("0", "0", {})
+        app.futures_executor.income.return_value = [
+            {"symbol": "SAGAUSDT", "incomeType": "REALIZED_PNL", "income": "12.2"},
+            {"symbol": "SAGAUSDT", "incomeType": "COMMISSION", "income": "-0.02"},
+            {"symbol": "BNBUSDT", "incomeType": "REALIZED_PNL", "income": "-30"}]  # a hand trade
+        result, send = self._guard(app, self.DAY_START + 3 * 3600)
+        self.assertIsNone(result)
+        send.assert_not_called()
+        app.futures_market.live_positions.assert_not_called()
+
+    def test_a_loser_closed_by_hand_now_counts(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status_by_symbol(
+            "0", "-1", {"LTCUSDT": "-1"}, held={"LTCUSDT"})
+        self._guard(app, self.DAY_START + 60)
+        app.futures_market.pilot_status.return_value = self._status_by_symbol("0", "0", {})
+        app.futures_executor.income.return_value = [
+            {"symbol": "LTCUSDT", "incomeType": "REALIZED_PNL", "income": "-9"}]
+        app.futures_market.live_positions.return_value = []
+        result, _ = self._guard(app, self.DAY_START + 3 * 3600)
+        self.assertEqual(result["status"], "daily_stop")  # -9 - (-1) = -8 of 7.8
+
+    def test_positions_our_own_orders_closed_are_not_counted_twice(self):
+        app = self._app()
+        app.futures_market.pilot_status.return_value = self._status_by_symbol(
+            "0", "0", {"OPUSDT": "0"}, held={"OPUSDT"})
+        self._guard(app, self.DAY_START + 60)
+        app.futures_market.pilot_status.return_value = self._status_by_symbol("-2", "0", {}, closed={"OPUSDT"})
+        result, _ = self._guard(app, self.DAY_START + 3 * 3600)
+        self.assertIsNone(result)
+        app.futures_executor.income.assert_not_called()
+
     def test_the_halt_survives_a_restart(self):
         app = self._app()
         app.futures_market.pilot_status.return_value = self._status("0", "0")
@@ -1462,3 +1545,104 @@ class SharedTickLockTests(unittest.TestCase):
             self.assertEqual(two.tick()["status"], "busy")
         finally:
             four._tick_lock.release()
+
+
+class PilotLimitAlertTests(unittest.TestCase):
+    """Audit A1: the 40% limit stopped all buying without a word."""
+
+    def _app(self):
+        config = {"signal_confirmation_expiry_minutes": 10}
+        app = LiveApp(config, {}, {}, short_config=config, short_strategy_config={}, tag="4")
+        app.futures_market = MagicMock()
+        app.futures_market.pilot_status.return_value = {"equity": Decimal("27"), "pilot_baseline": Decimal("45.9")}
+        return app
+
+    def test_one_alert_per_day(self):
+        app = self._app()
+        candidate = {"symbol": "ADAUSDT", "created_at": 1}
+        with patch("crypto_v1.render_web.send_message") as send:
+            app._record(candidate, "long", {"status": "rejected", "reason": "pilot_loss_limit"})
+            app._record(dict(candidate, symbol="SOLUSDT"), "long",
+                        {"status": "rejected", "reason": "pilot_loss_limit"})
+        send.assert_called_once()
+        self.assertIn("TOPLAM ZARAR SINIRI", send.call_args.args[0])
+
+    def test_a_trade_skipped_for_size_is_reported_once(self):
+        app = self._app()
+        candidate = {"symbol": "LTCUSDT", "created_at": 1}
+        with patch("crypto_v1.render_web.send_message") as send:
+            for _ in range(3):
+                app._record(candidate, "long", {"status": "rejected",
+                                                "reason": "risk target below Binance minimum"})
+        send.assert_called_once()
+        self.assertIn("minimum", send.call_args.args[0])
+
+
+class AlertingTests(unittest.TestCase):
+    """Audit C2 (25 Sep 2026): a start, a run of failed exit scans and a
+    morning summary now reach Telegram."""
+
+    def test_start_notices_are_throttled_and_count_the_restarts(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp, patch("crypto_v1.render_web.send_message") as send:
+            self.assertTrue(render_web.announce_start(tmp, "abcdef123", now=lambda: 1000))
+            self.assertFalse(render_web.announce_start(tmp, "abcdef123", now=lambda: 1015))
+            self.assertFalse(render_web.announce_start(tmp, "abcdef123", now=lambda: 1030))
+            self.assertTrue(render_web.announce_start(tmp, "abcdef123", now=lambda: 1700))
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("abcdef1", send.call_args_list[0].args[0])
+        self.assertIn("2 kez", send.call_args_list[1].args[0])
+
+    def _app(self):
+        config = {"signal_confirmation_expiry_minutes": 10}
+        return LiveApp(config, {}, {}, short_config=config, short_strategy_config={}, tag="2")
+
+    def test_five_failed_scans_in_a_row_alert_once_and_recovery_is_reported(self):
+        app = self._app()
+        failed = [{"status": "scan_failed", "side": "futures", "symbol": "NILUSDT", "error": "-2011"}]
+        with patch("crypto_v1.render_web.send_message") as send:
+            for _ in range(7):
+                app._watch_scan_failures(failed)
+            self.assertEqual(send.call_count, 1)
+            self.assertIn("UYARI", send.call_args.args[0])
+            app._watch_scan_failures([])
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("DUZELDI", send.call_args.args[0])
+
+    def test_a_single_failed_scan_is_not_reported(self):
+        app = self._app()
+        with patch("crypto_v1.render_web.send_message") as send:
+            app._watch_scan_failures([{"status": "scan_failed", "side": "futures", "error": "timeout"}])
+            app._watch_scan_failures([])
+        send.assert_not_called()
+
+    def _summary(self, tmp, now_s):
+        executor = MagicMock()
+        executor.account.return_value = {"totalMarginBalance": "171.43", "positions": [
+            {"symbol": "ONDOUSDT", "positionAmt": "17.7", "unrealizedProfit": "0.47"},
+            {"symbol": "LTCUSDT", "positionAmt": "0.29", "unrealizedProfit": "-0.25"},
+            {"symbol": "BTCUSDT", "positionAmt": "0", "unrealizedProfit": "0"}]}
+        executor.income.return_value = [{"incomeType": "REALIZED_PNL", "income": "3"},
+                                        {"incomeType": "COMMISSION", "income": "-0.1"},
+                                        {"incomeType": "TRANSFER", "income": "50"}]
+        market = MagicMock()
+        market.net_deposits.return_value = Decimal("152.88")
+        with patch("crypto_v1.render_web.send_message") as send:
+            sent = render_web.daily_summary(executor, market, tmp, now=lambda: now_s)
+        return sent, send
+
+    def test_the_morning_summary_is_sent_once_a_day(self):
+        import tempfile
+        morning = 1_790_316_000  # 2026-09-25 06:00 UTC, 09:00 Turkey
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(self._summary(tmp, morning - 3600)[0])
+            sent, send = self._summary(tmp, morning + 60)
+            self.assertTrue(sent)
+            text = send.call_args.args[0]
+            self.assertIn("171.43", text)
+            self.assertIn("+18.55", text)
+            self.assertIn("+2.90", text)  # transfers are not trading results
+            self.assertIn("ONDO +0.47", text)
+            self.assertNotIn("BTC", text)
+            self.assertFalse(self._summary(tmp, morning + 7200)[0])
+            self.assertTrue(self._summary(tmp, morning + 86_400)[0])

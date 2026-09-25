@@ -200,6 +200,18 @@ class LivePositionsTests(unittest.TestCase):
         market._raw_pilot_data = lambda: ({"positions": positions}, [], [])
         return market
 
+    def test_the_quantity_is_what_is_really_open_not_the_stop_s(self):
+        # Audit A6: after a partial close by hand the stop still carried the
+        # old quantity, and every moved stop copied it.
+        executor = MagicMock()
+        executor.open_orders.return_value = [
+            {"symbol": "NILUSDT", "clientOrderId": "kv1fq41", "side": "SELL", "stopPrice": "0.11",
+             "origQty": "40"}]
+        executor.query.return_value = {"executedQty": "40", "cumQuote": "4", "time": 1790193700000}
+        market = self._market(executor)
+        market._raw_pilot_data = lambda: ({"positions": [{"symbol": "NILUSDT", "positionAmt": "25"}]}, [], [])
+        self.assertEqual(market.live_positions()[0]["quantity"], "25")
+
     def test_a_moved_stop_is_paired_with_its_opening_order(self):
         # 24 Sep 2026: a stop id with the "t<time>" ending of a moved stop
         # matched no opening order, so the entry time fell back to Binance's
@@ -525,8 +537,8 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         market._raw_pilot_data = lambda: ({"positions": positions}, [], orders)
         return market
 
-    OPEN_4H = {"symbol": "BCHUSDT", "clientOrderId": "kv1fl41790107200000",
-               "status": "FILLED", "side": "BUY", "time": 1790107200000}
+    OPEN_4H = {"symbol": "BCHUSDT", "clientOrderId": "kv1fl41790107200000", "orderId": 1,
+               "status": "FILLED", "side": "BUY", "executedQty": "0.261", "time": 1790107200000}
 
     def test_adopts_a_long_opened_by_this_system(self):
         market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "336"}],
@@ -555,8 +567,8 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         self.assertEqual(market.unprotected_positions({"BCHUSDT"}), [])
 
     def test_a_short_is_adopted_with_its_own_prefixes(self):
-        opened = {"symbol": "SOLUSDT", "clientOrderId": "kv1fs41790107200000",
-                  "status": "FILLED", "side": "SELL", "time": 1790107200000}
+        opened = {"symbol": "SOLUSDT", "clientOrderId": "kv1fs41790107200000", "orderId": 1,
+                  "status": "FILLED", "side": "SELL", "executedQty": "3", "time": 1790107200000}
         market = self._market([{"symbol": "SOLUSDT", "positionAmt": "-3", "entryPrice": "100"}], [opened])
         position = market.unprotected_positions()[0]
         self.assertEqual(position["side"], "short")
@@ -567,6 +579,60 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0", "entryPrice": "336"}],
                               [self.OPEN_4H])
         self.assertEqual(market.unprotected_positions(), [])
+
+    # Audit A4 (25 Sep 2026): a symbol the bot traded is not enough; the
+    # bot's own fills must add up to what is open now.
+    CLOSED_BY_STOP = {"symbol": "BCHUSDT", "clientOrderId": "kv1fq41790107200000", "orderId": 2,
+                      "status": "FILLED", "side": "SELL", "executedQty": "0.261", "time": 1790110000000}
+
+    def _foreign(self, positions, orders):
+        market = self._market(positions, orders)
+        with patch("crypto_v1.live_short_market.send_message") as send:
+            BinanceFuturesMarket._foreign_noted.clear()
+            adopted = market.unprotected_positions()
+        return adopted, send
+
+    def test_a_hand_bought_position_after_the_bot_s_trade_ended_is_left_alone(self):
+        hand = {"symbol": "BCHUSDT", "clientOrderId": "web_abc", "orderId": 3, "status": "FILLED",
+                "side": "BUY", "executedQty": "0.5", "time": 1790120000000}
+        adopted, send = self._foreign([{"symbol": "BCHUSDT", "positionAmt": "0.5", "entryPrice": "340"}],
+                                      [self.OPEN_4H, self.CLOSED_BY_STOP, hand])
+        self.assertEqual(adopted, [])
+        self.assertIn("ELLE ACILMIS POZISYON", send.call_args.args[0])
+
+    def test_the_same_quantity_bought_by_hand_later_is_still_not_the_bot_s(self):
+        hand = {"symbol": "BCHUSDT", "clientOrderId": "web_abc", "orderId": 3, "status": "FILLED",
+                "side": "BUY", "executedQty": "0.261", "time": 1790120000000}
+        adopted, _ = self._foreign([{"symbol": "BCHUSDT", "positionAmt": "0.261", "entryPrice": "340"}],
+                                   [self.OPEN_4H, self.CLOSED_BY_STOP, hand])
+        self.assertEqual(adopted, [])
+
+    def test_a_position_added_to_by_hand_is_left_to_the_user(self):
+        hand = {"symbol": "BCHUSDT", "clientOrderId": "web_abc", "orderId": 3, "status": "FILLED",
+                "side": "BUY", "executedQty": "0.2", "time": 1790120000000}
+        adopted, send = self._foreign([{"symbol": "BCHUSDT", "positionAmt": "0.461", "entryPrice": "338"}],
+                                      [self.OPEN_4H, hand])
+        self.assertEqual(adopted, [])
+        send.assert_called_once()
+
+    def test_a_partly_closed_bot_position_is_still_the_bot_s(self):
+        part = {"symbol": "BCHUSDT", "clientOrderId": "web_tp", "orderId": 3, "status": "FILLED",
+                "side": "SELL", "executedQty": "0.1", "time": 1790120000000}
+        adopted, send = self._foreign([{"symbol": "BCHUSDT", "positionAmt": "0.161", "entryPrice": "336"}],
+                                      [self.OPEN_4H, part])
+        self.assertEqual([p["quantity"] for p in adopted], ["0.161"])
+        send.assert_not_called()
+
+    def test_one_notice_per_position(self):
+        hand = {"symbol": "BCHUSDT", "clientOrderId": "web_abc", "orderId": 3, "status": "FILLED",
+                "side": "BUY", "executedQty": "0.5", "time": 1790120000000}
+        market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.5", "entryPrice": "340"}],
+                              [self.OPEN_4H, self.CLOSED_BY_STOP, hand])
+        BinanceFuturesMarket._foreign_noted.clear()
+        with patch("crypto_v1.live_short_market.send_message") as send:
+            market.unprotected_positions()
+            market.unprotected_positions()
+        send.assert_called_once()
 
 
 class SymbolCodeTests(unittest.TestCase):
@@ -639,6 +705,132 @@ class CapitalFractionTests(unittest.TestCase):
     def test_without_the_fraction_the_old_fixed_capital_is_used(self):
         config = dict(C, pilot_capital_usdt=34.55)
         self.assertEqual(self._summary(80, config=config)["equity"], Decimal("34.55"))
+
+
+class DepositBaselineTests(unittest.TestCase):
+    """Audit A1 (25 Sep 2026): the 40% limit's baseline is this system's
+    share of the money actually deposited, not a frozen config number --
+    a deposit no longer pushes the limit out of reach, nor a withdrawal
+    trip it."""
+
+    CONFIG = dict(C, pilot_capital_usdt=46.8, pilot_capital_fraction=0.3, pilot_loss_limit_fraction=0.4)
+
+    def _summary(self, wallet, deposits):
+        account = {"availableBalance": str(wallet), "totalMarginBalance": str(wallet)}
+        return summarize_short_pilot(account, [], [], self.CONFIG, 0, tag="4", net_deposits=deposits)
+
+    def test_the_baseline_is_the_system_s_share_of_net_deposits(self):
+        result = self._summary(150, Decimal("200"))
+        self.assertEqual(result["pilot_baseline"], Decimal("60.0"))
+        self.assertEqual(result["pilot_drawdown"], Decimal("15.0"))  # 60 - 0.3 * 150
+
+    def test_a_deposit_raises_the_baseline_with_the_wallet(self):
+        # 500 more in: the old frozen 46.8 baseline would sit far under the
+        # new 0.3 * 656 share, and the limit could never be reached.
+        result = self._summary(656, Decimal("652.88"))
+        self.assertLess(result["pilot_drawdown"], 1)
+        self.assertAlmostEqual(float(result["pilot_baseline"]), 195.864, places=3)
+
+    def test_a_withdrawal_is_not_a_loss(self):
+        # 50 taken out of 150 deposited, nothing lost trading.
+        self.assertEqual(self._summary(100, Decimal("100"))["pilot_drawdown"], Decimal("0"))
+
+    def test_unknown_deposits_fall_back_to_the_configured_baseline(self):
+        self.assertEqual(self._summary(150, None)["pilot_baseline"], Decimal("46.8"))
+
+    def test_the_limit_is_measured_from_that_baseline(self):
+        from crypto_v1.live_limits import may_open
+        config = dict(self.CONFIG, live_trading_enabled=True, max_open_positions=6, max_buys_per_day=10,
+                      daily_loss_limit_usdt=100)
+        self.assertEqual(may_open(config, 0, 0, 0, Decimal("23.9"), baseline=Decimal("60")),
+                         (True, "allowed"))
+        self.assertEqual(may_open(config, 0, 0, 0, Decimal("24"), baseline=Decimal("60")),
+                         (False, "pilot_loss_limit"))
+
+
+class NetDepositsTests(unittest.TestCase):
+    """The transfer total is read once back ~3 months, then only what is
+    new; it lives on disk so a restart does not read it all again."""
+
+    NOW = 1_790_300_000
+
+    def _market(self, tmp, rows):
+        executor = MagicMock()
+        executor.income.side_effect = lambda start, end, income_type=None: [
+            r for r in rows if start <= r["time"] <= end]
+        market = BinanceFuturesMarket(C, {}, {}, executor, now=lambda: self.NOW)
+        market.store_dir = tmp
+        BinanceFuturesMarket._deposits_cache = None
+        self.addCleanup(setattr, BinanceFuturesMarket, "_deposits_cache", None)
+        return market, executor
+
+    def test_sums_transfers_in_and_out(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = [{"time": self.NOW * 1000 - 10 * 86_400_000, "income": "100", "asset": "USDT"},
+                    {"time": self.NOW * 1000 - 2 * 86_400_000, "income": "-20", "asset": "USDT"},
+                    {"time": self.NOW * 1000 - 86_400_000, "income": "5", "asset": "BNB"}]
+            market, executor = self._market(tmp, rows)
+            self.assertEqual(market.net_deposits(), Decimal("80"))
+            self.assertTrue(all(c.kwargs.get("income_type") == "TRANSFER"
+                                for c in executor.income.call_args_list))
+
+    def test_a_restart_reads_only_what_is_new(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = [{"time": self.NOW * 1000 - 10 * 86_400_000, "income": "100", "asset": "USDT"}]
+            market, _ = self._market(tmp, rows)
+            market.net_deposits()
+            later = self.NOW + 3600
+            rows.append({"time": later * 1000 - 60_000, "income": "31", "asset": "USDT"})
+            market2, executor2 = self._market(tmp, rows)
+            market2._now = lambda: later
+            self.assertEqual(market2.net_deposits(), Decimal("131"))
+            self.assertEqual(executor2.income.call_count, 1)
+
+    def test_a_failed_read_keeps_the_last_known_total(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = [{"time": self.NOW * 1000 - 86_400_000, "income": "100", "asset": "USDT"}]
+            market, _ = self._market(tmp, rows)
+            market.net_deposits()
+            market2, executor2 = self._market(tmp, rows)
+            market2._now = lambda: self.NOW + 3600
+            executor2.income.side_effect = RuntimeError("timeout")
+            self.assertEqual(market2.net_deposits(), Decimal("100"))
+
+    def test_without_a_store_nothing_is_read(self):
+        market = BinanceFuturesMarket(C, {}, {}, MagicMock())
+        self.assertIsNone(market.net_deposits())
+
+
+class OrderStoreTests(unittest.TestCase):
+    """Audit A7: allOrders returns 7 days only, so a position held longer
+    lost its opening order. Our own filled orders are kept on disk."""
+
+    def test_an_opening_order_survives_binance_forgetting_it(self):
+        import tempfile
+        opened = {"symbol": "NEARUSDT", "orderId": 7, "clientOrderId": "kv1fl21790000000000", "side": "BUY",
+                  "status": "FILLED", "executedQty": "2", "cumQuote": "10", "time": 1790000000000,
+                  "updateTime": 1790000000000}
+        hand = {"symbol": "NEARUSDT", "orderId": 8, "clientOrderId": "web_x", "side": "BUY",
+                "status": "FILLED", "executedQty": "1", "time": 1790000100000}
+        with tempfile.TemporaryDirectory() as tmp:
+            market = BinanceFuturesMarket(C, {}, {}, MagicMock(), now=lambda: 1790100000)
+            market.store_dir = tmp
+            self.assertEqual(len(market._with_stored_orders([opened, hand])), 2)
+            later = market._with_stored_orders([])  # a week on: Binance returns nothing
+            self.assertEqual([o["orderId"] for o in later], [7])  # hand orders are not kept
+
+    def test_orders_older_than_the_keep_window_are_dropped(self):
+        import tempfile
+        old = {"symbol": "X", "orderId": 1, "clientOrderId": "kv1fl2", "status": "FILLED",
+               "time": 1000, "updateTime": 1000}
+        with tempfile.TemporaryDirectory() as tmp:
+            market = BinanceFuturesMarket(C, {}, {}, MagicMock(), now=lambda: 1790100000)
+            market.store_dir = tmp
+            market._with_stored_orders([old])
+            self.assertEqual(market._with_stored_orders([]), [])
 
 
 if __name__ == '__main__':

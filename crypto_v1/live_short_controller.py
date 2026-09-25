@@ -48,6 +48,23 @@ def _already_open(executor, market, symbol):
     return False
 
 
+def _already_used(executor, symbol, client_id):
+    """This signal's opening order already filled once. Called only after
+    _already_open found nothing open, so that position has since been
+    closed -- by the emergency close right after it, typically. Without
+    this check (audit A8) the next tick's _known_or_place found the old
+    filled order, took it for a fresh open, and "emergency-closed" it again
+    on every tick for the signal's whole 30-minute window: a Telegram alert
+    each time, and a slot of the day's entries used up."""
+    try:
+        prior = executor.query(symbol, client_id)
+    except OrderRejected as error:
+        if error.code != -2013:  # Binance: order does not exist.
+            raise
+        return False
+    return (prior or {}).get("status") == "FILLED"
+
+
 def _opened(market):
     # A fill changes positions, margin and held_symbols for BOTH systems:
     # drop the shared pilot cache so the next decision sees it.
@@ -73,7 +90,7 @@ def approve_short(update_id, command, now_ms, saved, config, environment, market
                                status["open_positions"], status["opens_today"],
                                status["realized_loss_today"], status["pilot_drawdown"],
                                symbol=signal["symbol"], held_symbols=status.get("held_symbols", ()),
-                               equity=status.get("equity"))
+                               equity=status.get("equity"), baseline=status.get("pilot_baseline"))
     if not allowed:
         return {"status": "rejected", "reason": reason}
     price = Decimal(str(market.price(signal["symbol"])))
@@ -98,9 +115,11 @@ def approve_short(update_id, command, now_ms, saved, config, environment, market
     symbol = signal["symbol"]
     if _already_open(executor, market, symbol):
         return {"status": "rejected", "reason": "already_holding_symbol"}
+    open_id = f"kv1fs{int(update_id)}"
+    if _already_used(executor, symbol, open_id):
+        return {"status": "rejected", "reason": "already_attempted"}
     executor.set_isolated_margin(symbol)
     executor.set_leverage(symbol, plan["leverage"])
-    open_id = f"kv1fs{int(update_id)}"
     opened = _known_or_place(executor, symbol, open_id,
                              lambda: executor.market_open_short(symbol, plan["quantity"], open_id))
     opened = _settle_fill(executor, symbol, open_id, opened)
@@ -159,7 +178,7 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
                                status["open_positions"], status["opens_today"],
                                status["realized_loss_today"], status["pilot_drawdown"],
                                symbol=signal["symbol"], held_symbols=status.get("held_symbols", ()),
-                               equity=status.get("equity"))
+                               equity=status.get("equity"), baseline=status.get("pilot_baseline"))
     if not allowed:
         return {"status": "rejected", "reason": reason}
     price = Decimal(str(market.price(signal["symbol"])))
@@ -185,9 +204,11 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
     symbol = signal["symbol"]
     if _already_open(executor, market, symbol):
         return {"status": "rejected", "reason": "already_holding_symbol"}
+    open_id = f"kv1fl{int(update_id)}"
+    if _already_used(executor, symbol, open_id):
+        return {"status": "rejected", "reason": "already_attempted"}
     executor.set_isolated_margin(symbol)
     executor.set_leverage(symbol, plan["leverage"])
-    open_id = f"kv1fl{int(update_id)}"
     opened = _known_or_place(executor, symbol, open_id,
                              lambda: executor.market_open_long(symbol, plan["quantity"], open_id))
     opened = _settle_fill(executor, symbol, open_id, opened)

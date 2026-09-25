@@ -108,8 +108,9 @@ class ProportionalRiskTests(unittest.TestCase):
         for config in (four, two):
             self.assertEqual(config["quality_risk_multipliers"], [1.5, 0.5])
             self.assertEqual(config["risk_per_trade_fraction"], 0.0075)
-            # The breakout size stays under the hard per-trade ceiling.
-            self.assertLessEqual(config["risk_per_trade_fraction"] * 1.5, config["max_risk_per_trade_fraction"])
+            # No rounding up to Binance's minimum (audit A5, 25 Sep 2026): a
+            # trade whose size falls under it is skipped, as simulated.
+            self.assertNotIn("max_risk_per_trade_fraction", config)
 
     def test_fixed_risk_is_used_without_the_fraction_or_equity(self):
         from decimal import Decimal

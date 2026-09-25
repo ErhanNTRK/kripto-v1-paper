@@ -71,7 +71,7 @@ class LiveShortControllerTests(unittest.TestCase):
 
     def test_enabled_mode_opens_once_sets_leverage_and_places_stop(self):
         executor = Mock()
-        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013)]
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013), OrderRejected(-2013)]
         executor.market_open_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "-0.068",
                                                  "liquidationPrice": "150"}]
@@ -88,7 +88,7 @@ class LiveShortControllerTests(unittest.TestCase):
 
     def test_liquidation_too_close_triggers_emergency_close_not_a_resting_stop(self):
         executor = Mock()
-        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013)]
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013), OrderRejected(-2013)]
         executor.market_open_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         # liquidation at 106 is inside the required 20% buffer beyond the 105 stop.
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "-0.068",
@@ -105,7 +105,7 @@ class LiveShortControllerTests(unittest.TestCase):
 
     def test_rejected_stop_immediately_closes_the_fill(self):
         executor = Mock()
-        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013),
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013), OrderRejected(-2013),
                                       OrderRejected(-2013)]
         executor.market_open_short.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "-0.068",
@@ -202,9 +202,22 @@ class ApproveLongLeveragedTests(unittest.TestCase):
         self.assertEqual(result, {"status": "rejected", "reason": "already_holding_symbol"})
         executor.market_open_long.assert_not_called()
 
+    def test_a_signal_whose_open_already_filled_and_closed_is_not_reused(self):
+        # Audit A8: after an emergency close the same signal's filled open
+        # order was taken for a fresh one on every tick of its window.
+        executor = Mock()
+        executor.position_risk.return_value = []
+        executor.query.return_value = {"status": "FILLED", "executedQty": "0.068"}
+        result = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, dict(C_LONG, live_trading_enabled=True),
+                                        {"LIVE_TRADING_CONFIRMATION": LIVE_PHRASE}, Market(), executor)
+        self.assertEqual(result, {"status": "rejected", "reason": "already_attempted"})
+        executor.market_open_long.assert_not_called()
+        executor.market_close_long.assert_not_called()
+        executor.set_leverage.assert_not_called()
+
     def test_enabled_mode_opens_once_sets_leverage_and_places_stop(self):
         executor = Mock()
-        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013)]
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013), OrderRejected(-2013)]
         executor.market_open_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "0.068",
                                                  "liquidationPrice": "50"}]
@@ -221,7 +234,7 @@ class ApproveLongLeveragedTests(unittest.TestCase):
 
     def test_liquidation_too_close_triggers_emergency_close_not_a_resting_stop(self):
         executor = Mock()
-        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013)]
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013), OrderRejected(-2013)]
         executor.market_open_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         # liquidation at 94 is inside the required 20% buffer below the 95 stop.
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "0.068",
@@ -238,7 +251,7 @@ class ApproveLongLeveragedTests(unittest.TestCase):
 
     def test_rejected_stop_immediately_closes_the_fill(self):
         executor = Mock()
-        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013),
+        executor.query.side_effect = [OrderRejected(-2013), OrderRejected(-2013), OrderRejected(-2013),
                                       OrderRejected(-2013)]
         executor.market_open_long.return_value = {"status": "FILLED", "executedQty": "0.068"}
         executor.position_risk.return_value = [{"symbol": "SOLUSDT", "positionAmt": "0.068",

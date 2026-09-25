@@ -119,13 +119,14 @@ def leveraged_order_plan(side, entry, stop, free_usdt, risk_usdt, leverage, rule
         # all be skipped. Round UP to the exchange minimum instead -- but
         # only while the resulting loss at the stop stays within this hard
         # ceiling and the margin fits; past it the trade is still skipped.
-        if max_risk_usdt is None:
-            raise ValueError("order is below Binance minimums")
-        max_risk_usdt = Decimal(str(max_risk_usdt))
         floor_qty = _up(max(rules["min_qty"], min_value / entry), rules["step_size"])
-        if floor_qty * abs(entry - stop_price) > max_risk_usdt                 or floor_qty * entry / leverage > free_usdt * Decimal("0.9"):
+        if floor_qty * entry / leverage > free_usdt * Decimal("0.9"):
             raise ValueError("order is below Binance minimums")
-        qty, budget = floor_qty, max_risk_usdt
+        # The margin would fit; it is the risk size that falls short. Its
+        # own reason, so the user hears of a trade skipped for size alone.
+        if max_risk_usdt is None or floor_qty * abs(entry - stop_price) > Decimal(str(max_risk_usdt)):
+            raise ValueError("risk target below Binance minimum")
+        qty, budget = floor_qty, Decimal(str(max_risk_usdt))
     planned_loss = qty * abs(entry - stop_price)
     if planned_loss > budget * Decimal("1.05"):
         raise ValueError("rounded plan exceeds risk budget")

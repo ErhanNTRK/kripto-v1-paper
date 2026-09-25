@@ -73,8 +73,13 @@ def _close_then_cancel(position, reason, executor, side):
         closed = _known_or_place(executor, symbol, exit_id,
                                  lambda: close(symbol, format(amount, "f"), exit_id))
     except OrderRejected as error:
-        if error.code != -2022:  # Binance: ReduceOnly order rejected -> nothing left to reduce.
+        if error.code != -2022:  # Binance: ReduceOnly order rejected
             raise
+        # Usually nothing is left to reduce -- but -2022 has other causes
+        # too, and the stop used to be cancelled on the assumption (audit
+        # A6). Only a fresh look at the position decides.
+        if open_amount(executor, symbol, side) > 0:
+            raise RuntimeError("close refused (-2022) while the position is still open; stop kept")
         cancel_quietly(executor, symbol, stop_id)
         return {"status": "already_stopped", "reason": reason}
     cancel_quietly(executor, symbol, stop_id)

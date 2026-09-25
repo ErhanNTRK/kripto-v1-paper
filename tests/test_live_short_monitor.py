@@ -117,11 +117,22 @@ class ExecuteLongFuturesExitTests(unittest.TestCase):
         self.assertEqual(execute_long_futures_exit(P_LONG, "trailing_profit", e)["status"], "already_stopped")
         e.market_close_long.assert_not_called()
 
-    def test_reduce_only_rejection_means_it_was_already_closed(self):
+    def test_reduce_only_rejection_after_the_position_closed_cancels_the_stop(self):
         e = self._executor()
+        e.position_risk.side_effect = [[{"symbol": "ADAUSDT", "positionAmt": "50"}],
+                                       [{"symbol": "ADAUSDT", "positionAmt": "0"}]]
         e.market_close_long.side_effect = OrderRejected(-2022, "ReduceOnly Order is rejected.")
         self.assertEqual(execute_long_futures_exit(P_LONG, "trailing_profit", e)["status"], "already_stopped")
         e.cancel.assert_called_once_with("ADAUSDT", "kv1fq7")
+
+    def test_reduce_only_rejection_with_the_position_still_open_keeps_the_stop(self):
+        # Audit A6: -2022 was taken to mean "already closed" and the stop
+        # went, even when the position was still there.
+        e = self._executor()
+        e.market_close_long.side_effect = OrderRejected(-2022, "ReduceOnly Order is rejected.")
+        with self.assertRaises(RuntimeError):
+            execute_long_futures_exit(P_LONG, "trailing_profit", e)
+        e.cancel.assert_not_called()
 
     def test_any_other_rejection_is_raised(self):
         e = self._executor()

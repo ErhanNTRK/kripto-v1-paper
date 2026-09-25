@@ -254,6 +254,8 @@ class LiveApp:
         # attempts themselves.
         self.recent_entries = collections.deque(maxlen=30)
         self._notified_skips = set()
+        self._pilot_alert_day = None
+        self._scan_failures = 0
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor, tag=tag)
         self.short_config = short_config
@@ -413,7 +415,7 @@ class LiveApp:
     _QUIET_REJECTIONS = {"already_holding_symbol", "pending_signal_count", "signal_expired",
                          "position_limit", "daily_buy_limit", "daily_loss_limit", "pilot_loss_limit",
                          "order is below Binance minimums", "plan exceeds available margin",
-                         "awaiting_approval"}
+                         "awaiting_approval", "already_attempted"}
 
     # ---- Coins outside the automatic list: ask on Telegram first ----------
 
@@ -456,7 +458,7 @@ class LiveApp:
                                    status["open_positions"], status["opens_today"],
                                    status["realized_loss_today"], status["pilot_drawdown"],
                                    symbol=symbol, held_symbols=status.get("held_symbols", ()),
-                                   equity=status.get("equity"))
+                                   equity=status.get("equity"), baseline=status.get("pilot_baseline"))
         if not allowed:
             return {"status": "rejected", "reason": reason}
         expires_ms = candidate["created_at"] + self.short_config["signal_confirmation_expiry_minutes"] * 60_000
@@ -506,6 +508,8 @@ class LiveApp:
         "pilot_loss_limit": "toplam zarar limiti doldu",
         "stop_too_wide_for_safe_leverage": "stop, guvenli kaldirac icin fazla uzak",
         "order is below Binance minimums": "kalan teminatla Binance minimum islem tutarina ulasilamiyor",
+        "risk target below Binance minimum": "islem buyuklugu Binance minimum tutarinin altinda kaliyor; "
+                                             "minimuma yuvarlamak riski hedefin ustune cikaracagi icin atlandi",
         "rounded plan exceeds risk budget": "yuvarlama sonrasi risk butcesi asiliyor",
         "plan exceeds available margin": "yeterli teminat yok",
     }
@@ -521,6 +525,8 @@ class LiveApp:
         # yok" is never again a silent mystery. "failed" already alerts
         # from _attempt.
         key = (side, candidate["symbol"], candidate["created_at"])
+        if reason == "pilot_loss_limit":
+            self._alert_pilot_limit()
         if status != "rejected" or reason in self._QUIET_REJECTIONS or key in self._notified_skips:
             return
         self._notified_skips.add(key)
@@ -531,6 +537,22 @@ class LiveApp:
                          f"{candidate['symbol']} | {text}. Sinyal suresi dolana kadar tekrar denenecek.")
         except Exception as exc:
             print(f"Telegram skip notice failed: {exc}", flush=True)
+
+    def _alert_pilot_limit(self):
+        """The 40% loss limit used to stop all buying without a word (audit
+        A1). One Telegram line per system per UTC day while it holds."""
+        day = _utc_day(time.time())
+        if self._pilot_alert_day == day:
+            return
+        self._pilot_alert_day = day
+        label = f"[{self.tag}] " if self.tag else ""
+        try:
+            status = self.futures_market.pilot_status()
+            send_message(f"{label}TOPLAM ZARAR SINIRI: bu sistemin sermayesi {status['equity']:.2f} USDT, "
+                         f"yatirilan paydaki payi {status['pilot_baseline']:.2f} USDT. Kayip %40 sinirina "
+                         "ulasti; yeni alim durdu. Acik pozisyonlar kendi stop ve cikislariyla yonetilmeye devam ediyor.")
+        except Exception as exc:
+            print(f"Telegram pilot-limit notice failed: {exc}", flush=True)
 
     def _order_id(self, candidate):
         """tag + per-symbol code + the candidate's own signal time. The
@@ -703,7 +725,35 @@ class LiveApp:
                 print(f"Futures exit scan failed: {exc}", flush=True)
                 results.append({"status": "scan_failed", "side": "futures", "error": str(exc)})
                 _note_if_rate_limited(exc)
+        self._watch_scan_failures(results)
         return {"status": "scanned", "results": results}
+
+    # Consecutive failed exit scans before the user is told (a loop is ~2
+    # minutes, so ~10 minutes). One bad tick is normal network noise.
+    SCAN_FAILURE_ALERT = 5
+
+    def _watch_scan_failures(self, results):
+        """On 24 Sep 2026 the exit scan failed on every tick for 17 minutes
+        and only the log knew (audit C2). A Telegram line once it has failed
+        SCAN_FAILURE_ALERT times in a row, and one when it recovers."""
+        failed = [r for r in results if r.get("status") == "scan_failed"]
+        label = f"[{self.tag}] " if self.tag else ""
+        if not failed:
+            if self._scan_failures >= self.SCAN_FAILURE_ALERT:
+                try:
+                    send_message(f"{label}DUZELDI: cikis kontrolu yeniden calisiyor.")
+                except Exception as exc:
+                    print(f"Telegram recovery notice failed: {exc}", flush=True)
+            self._scan_failures = 0
+            return
+        self._scan_failures += 1
+        if self._scan_failures == self.SCAN_FAILURE_ALERT:
+            try:
+                send_message(f"{label}UYARI: cikis kontrolu {self._scan_failures} turdur hata veriyor "
+                             f"({failed[0].get('symbol') or failed[0].get('side')}: {failed[0].get('error')}). "
+                             "Stoplar Binance'te duruyor; iz suren cikislar calismiyor olabilir.")
+            except Exception as exc:
+                print(f"Telegram scan-failure notice failed: {exc}", flush=True)
 
     def _manage_futures_position(self, position, futures_sell):
         """Protect or ratchet, then check the exit, for one futures position.
@@ -720,14 +770,24 @@ class LiveApp:
             feature, btc, extreme = self.futures_market.analysis(position, symmetric_features, self.interval)
         else:
             feature, btc, extreme = self.futures_market.analysis(position, ShortWindowLongModel.features, self.interval)
+        breached = False
         if position.get("unprotected"):
-            results.append(self._protect(position, feature, extreme))
+            protected = self._protect(position, feature, extreme)
+            results.append(protected)
+            # The price is already past where the lost stop would have sold
+            # (audit A3): no stop can be placed there any more, and the exit
+            # rules below never compare the price with the stop, so until 25
+            # Sep 2026 such a position just sat with nothing but liquidation
+            # behind it. The stop would have closed it; close it now.
+            breached = protected.get("reason") == "stop_already_breached"
         else:
             moved = self._ratchet(position, feature, extreme)
             if moved:
                 results.append(moved)
         judged = _decision_view(position)
-        if position["side"] == "short":
+        if breached:
+            reason = "stop_loss"
+        elif position["side"] == "short":
             reason = short_exit_decision(judged, feature, btc, extreme, self.short_config)
         else:
             reason = exit_decision(judged, feature, btc, extreme,
@@ -947,7 +1007,10 @@ class LiveApp:
         if not guard or guard.get("day") != day:
             status = self.futures_market.pilot_status()
             self._guard = {"day": day, "equity": str(status["equity"]),
-                           "unrealized": str(status.get("own_unrealized", 0)), "halted": False, "bar": None}
+                           "unrealized": str(status.get("own_unrealized", 0)),
+                           "unrealized_by_symbol": {k: str(v) for k, v in
+                                                    (status.get("own_unrealized_by_symbol") or {}).items()},
+                           "halted": False, "bar": None}
             self._save_guard()
             return None
         if guard.get("halted"):
@@ -959,7 +1022,7 @@ class LiveApp:
         guard["bar"] = bar
         equity = Decimal(guard["equity"])
         change = (Decimal(str(status.get("realized_pnl_today", 0))) + Decimal(str(status.get("own_unrealized", 0)))
-                  - Decimal(guard["unrealized"]))
+                  - Decimal(guard["unrealized"]) + self._closed_elsewhere(guard, status, now))
         if equity <= 0 or change > -Decimal(str(fraction)) * equity:
             self._save_guard()
             return None
@@ -973,6 +1036,27 @@ class LiveApp:
         except Exception as exc:
             print(f"Telegram daily stop notice failed: {exc}", flush=True)
         return self._close_all("daily_loss_limit")
+
+    def _closed_elsewhere(self, guard, status, now):
+        """Today's result of this system's positions that closed without an
+        order of ours -- by hand, nearly always (audit A2). Their open result
+        at the day's start is in the baseline, but they are no longer open
+        and no close of ours booked them: until 25 Sep 2026 a winner closed
+        by hand read as a loss of its whole open profit (had SAGA's +12 USDT
+        been closed two hours later, the 4H side would have read -12 and sold
+        NIL, OP and LINK), and a loser closed by hand did not count at all.
+        Binance's own realized P&L and fees for those coins since the day
+        began stand in for the close we did not make."""
+        seen = set(guard.get("unrealized_by_symbol") or {}) | set(status.get("opened_symbols_today") or ())
+        gone = (seen - set(status.get("held_symbols") or ()) - set(status.get("own_unrealized_by_symbol") or {})
+                - set(status.get("closed_symbols_today") or ()))
+        if not gone:
+            return Decimal("0")
+        day_start_ms = int(datetime.strptime(guard["day"], "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+        rows = self.futures_executor.income(day_start_ms, int(now * 1000))
+        return sum((Decimal(str(r.get("income", "0"))) for r in rows
+                    if r.get("symbol") in gone and r.get("incomeType") in ("REALIZED_PNL", "COMMISSION")),
+                   Decimal("0"))
 
     def _close_all(self, reason):
         if not execution_enabled(self.short_config, self.environment):
@@ -1242,9 +1326,82 @@ def watch_loop(limit=WATCHDOG_SECONDS, check_every=30, now=time.time, sleep=time
                 pass
             try:
                 dump()
+                # Nobody used to hear of it (audit C2); the bot is down
+                # until the launcher has it up again.
+                try:
+                    send_message(f"DONMA: bot {int(stalled) // 60} dakikadir ilerlemiyor; kendini kapatip "
+                                 "yeniden baslatiyor. Stoplar Binance'te duruyor.")
+                except Exception as exc:
+                    print(f"Telegram stall notice failed: {exc}", flush=True)
             finally:
                 exit_process()
             return
+
+
+START_NOTICE_SECONDS = 600
+
+
+def announce_start(runtime_dir, commit, now=time.time):
+    """A Telegram line when the bot starts (audit C2): after a crash, a
+    freeze or a reboot, the user learns it is back. At most one per 10
+    minutes, so a startup crash loop cannot flood the chat; the restarts in
+    between are counted into the next one."""
+    path = Path(runtime_dir) / "starts.json"
+    state = _read_json(path, {}) or {}
+    suppressed = int(state.get("suppressed", 0))
+    if now() - float(state.get("announced_at", 0)) < START_NOTICE_SECONDS:
+        state["suppressed"] = suppressed + 1
+        _write_json(path, state)
+        return False
+    text = f"BULUTLARIN EFENDISI CALISIYOR (surum {str(commit)[:7]})."
+    if suppressed:
+        text += f" Son bildirimden beri {suppressed} kez daha yeniden basladi; bot.log incelenmeli."
+    try:
+        send_message(text)
+    except Exception as exc:
+        print(f"Telegram start notice failed: {exc}", flush=True)
+        return False
+    _write_json(path, {"announced_at": now(), "suppressed": 0})
+    return True
+
+
+SUMMARY_HOUR_UTC = 6  # 09:00 Turkey
+
+
+def daily_summary(executor, market, runtime_dir, now=time.time):
+    """One morning message (audit C2): the balance against the money put in,
+    what is open and how it stands, and what the last 24 hours realized.
+    Once per UTC day, from SUMMARY_HOUR_UTC on; remembered on disk so a
+    restart does not send it again."""
+    moment = datetime.fromtimestamp(now(), timezone.utc)
+    day = moment.date().isoformat()
+    path = Path(runtime_dir) / "summary.json"
+    if moment.hour < SUMMARY_HOUR_UTC or (_read_json(path, {}) or {}).get("day") == day:
+        return False
+    account = executor.account()
+    balance = Decimal(str(account.get("totalMarginBalance") or "0"))
+    deposits = market.net_deposits() if market is not None else None
+    open_positions = sorted(((p["symbol"].removesuffix("USDT"), Decimal(str(p.get("unrealizedProfit") or "0")))
+                             for p in account.get("positions", []) if Decimal(str(p.get("positionAmt") or "0")) != 0),
+                            key=lambda x: x[1], reverse=True)
+    end_ms = int(now() * 1000)
+    rows = executor.income(end_ms - 86_400_000, end_ms)
+    realized = sum((Decimal(str(r.get("income", "0"))) for r in rows
+                    if r.get("incomeType") in ("REALIZED_PNL", "COMMISSION", "FUNDING_FEE")), Decimal("0"))
+    lines = [f"GUNLUK OZET: bakiye {balance:.2f} USDT"]
+    if deposits:
+        result = balance - deposits
+        lines[0] += f" | yatirilan {deposits:.2f} -> {result:+.2f} USDT (%{result / deposits * 100:+.1f})"
+    lines.append(f"Son 24 saatte gerceklesen: {realized:+.2f} USDT")
+    if open_positions:
+        total = sum((u for _, u in open_positions), Decimal("0"))
+        lines.append(f"Acik {len(open_positions)} pozisyon, acik K/Z {total:+.2f} USDT: "
+                     + ", ".join(f"{s} {u:+.2f}" for s, u in open_positions))
+    else:
+        lines.append("Acik pozisyon yok.")
+    send_message("\n".join(lines))
+    _write_json(path, {"day": day})
+    return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1377,6 +1534,9 @@ def main():
     # detected -- never on a stale or hours-delayed remote fetch.
     runtime_dir = Path(os.environ.get("CRYPTO_STORAGE", "runtime")).resolve()
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    # Our own orders past Binance's 7-day window and the transfer total
+    # (audit A1/A7) are kept here.
+    BinanceFuturesMarket.store_dir = runtime_dir
     def local_url(name):
         # Path.as_uri(), not an f-string: on Windows (the PC deployment
         # target) an absolute path uses backslashes and no drive-letter
@@ -1409,6 +1569,7 @@ def main():
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ), commit=_running_commit())
     print("Binance connected; orders_enabled=" + str(STATUS["orders_enabled"]), flush=True)
+    announce_start(runtime_dir, STATUS["commit"])
     threading.Thread(target=watch_loop, daemon=True).start()
     if telegram_ready:
         # "AL <COIN>" replies for coins outside the automatic list. Polled,
@@ -1419,6 +1580,10 @@ def main():
     # its USDT result, refreshed hourly into ~/kripto/islem-kayitlari.
     ledger_state = {"at": 0.0}
     def refresh_ledger():
+        try:
+            daily_summary(APP.futures_executor, APP.futures_market, runtime_dir)
+        except Exception as exc:
+            print(f"Daily summary failed: {exc}", flush=True)
         if time.time() - ledger_state["at"] < 3600:
             return
         ledger_state["at"] = time.time()

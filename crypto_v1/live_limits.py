@@ -40,21 +40,23 @@ def max_trade_risk_usdt(config, equity):
     return None
 
 
-def loss_limits(config, equity):
+def loss_limits(config, equity, baseline=None):
     """(daily, pilot) loss limits in USDT. The *_fraction forms scale with
     the system: daily as a share of current equity, pilot drawdown as a
-    share of the pilot_capital_usdt baseline it is measured from."""
+    share of the baseline it is measured from -- the pilot status's
+    deposit-based one when given, else pilot_capital_usdt."""
     daily = Decimal(str(config.get("daily_loss_limit_usdt", 0)))
     pilot = Decimal(str(config.get("pilot_loss_limit_usdt", 0)))
     if config.get("daily_loss_limit_fraction") and equity:
         daily = Decimal(str(equity)) * Decimal(str(config["daily_loss_limit_fraction"]))
     if config.get("pilot_loss_limit_fraction"):
-        pilot = Decimal(str(config["pilot_capital_usdt"])) * Decimal(str(config["pilot_loss_limit_fraction"]))
+        base = Decimal(str(baseline)) if baseline else Decimal(str(config["pilot_capital_usdt"]))
+        pilot = base * Decimal(str(config["pilot_loss_limit_fraction"]))
     return daily, pilot
 
 
 def may_open(config, open_positions, buys_today, realized_loss_today, pilot_drawdown,
-            symbol=None, held_symbols=(), equity=None):
+            symbol=None, held_symbols=(), equity=None, baseline=None):
     """symbol/held_symbols (default: no check, for backward compatibility
     with any caller that hasn't been updated) guard against opening a
     SECOND position in a symbol we already hold. Needed once entries are
@@ -71,7 +73,7 @@ def may_open(config, open_positions, buys_today, realized_loss_today, pilot_draw
         return False, "position_limit"
     if buys_today >= config["max_buys_per_day"]:
         return False, "daily_buy_limit"
-    daily_limit, pilot_limit = loss_limits(config, equity)
+    daily_limit, pilot_limit = loss_limits(config, equity, baseline)
     if Decimal(str(realized_loss_today)) >= daily_limit:
         return False, "daily_loss_limit"
     if Decimal(str(pilot_drawdown)) >= pilot_limit:

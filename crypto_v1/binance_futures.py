@@ -268,10 +268,13 @@ class FuturesExecutor:
         return self.request("GET", {"symbol": symbol, "startTime": int(start_time), "endTime": int(end_time),
                                     "limit": 1000}, path="/fapi/v1/userTrades")
 
-    def income(self, start_time, end_time):
-        """Realized P&L, commission, funding and transfer events."""
-        return self.request("GET", {"startTime": int(start_time), "endTime": int(end_time), "limit": 1000},
-                            path="/fapi/v1/income")
+    def income(self, start_time, end_time, income_type=None):
+        """Realized P&L, commission, funding and transfer events; one kind
+        only when income_type (e.g. "TRANSFER") is given."""
+        params = {"startTime": int(start_time), "endTime": int(end_time), "limit": 1000}
+        if income_type:
+            params["incomeType"] = income_type
+        return self.request("GET", params, path="/fapi/v1/income")
 
     def account(self):
         return self.request("GET", {}, path="/fapi/v2/account")
