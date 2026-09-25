@@ -7,8 +7,8 @@ from pathlib import Path
 from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
-from . import ledger
-from .data import universe
+from . import ledger, shadow
+from .data import candles, universe
 from .github_worker import local_tick
 from .live_controller import _known_or_place
 from .live_execution import _down, _up, execution_enabled
@@ -255,6 +255,8 @@ class LiveApp:
         self.recent_entries = collections.deque(maxlen=30)
         self._notified_skips = set()
         self._pilot_alert_day = None
+        # Where capital-skipped signals are kept (shadow.py); main() sets it.
+        self.shadow_path = None
         self._scan_failures = 0
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor, tag=tag)
@@ -527,14 +529,24 @@ class LiveApp:
         key = (side, candidate["symbol"], candidate["created_at"])
         if reason == "pilot_loss_limit":
             self._alert_pilot_limit()
+        tracked = False
+        if status == "rejected" and reason in shadow.CAPITAL_REASONS:
+            # Skipped for lack of capital: kept to be played out, so the user
+            # sees what a bigger account would have made (25 Sep 2026).
+            try:
+                tracked = shadow.record(self.shadow_path, self.tag, candidate, side, reason, int(time.time() * 1000))
+            except Exception as exc:
+                print(f"Shadow trade not recorded ({candidate['symbol']}): {exc}", flush=True)
         if status != "rejected" or reason in self._QUIET_REJECTIONS or key in self._notified_skips:
             return
         self._notified_skips.add(key)
         label = f"[{self.tag}] " if self.tag else ""
         text = self._REJECTION_TEXT.get(reason, reason)
+        after = ("Bu sinyal atlandi; 'alsaydik ne olurdu' diye takibe aldim." if tracked
+                 else "Sinyal suresi dolana kadar tekrar denenecek.")
         try:
             send_message(f"{label}GIRIS YAPILAMADI ({'LONG' if side == 'long' else 'SHORT'}): "
-                         f"{candidate['symbol']} | {text}. Sinyal suresi dolana kadar tekrar denenecek.")
+                         f"{candidate['symbol']} | {text}. {after}")
         except Exception as exc:
             print(f"Telegram skip notice failed: {exc}", flush=True)
 
@@ -1368,7 +1380,7 @@ def announce_start(runtime_dir, commit, now=time.time):
 SUMMARY_HOUR_UTC = 6  # 09:00 Turkey
 
 
-def daily_summary(executor, market, runtime_dir, now=time.time):
+def daily_summary(executor, market, runtime_dir, now=time.time, shadow_systems=None):
     """One morning message (audit C2): the balance against the money put in,
     what is open and how it stands, and what the last 24 hours realized.
     Once per UTC day, from SUMMARY_HOUR_UTC on; remembered on disk so a
@@ -1399,6 +1411,14 @@ def daily_summary(executor, market, runtime_dir, now=time.time):
                      + ", ".join(f"{s} {u:+.2f}" for s, u in open_positions))
     else:
         lines.append("Acik pozisyon yok.")
+    if shadow_systems:
+        try:
+            skipped = shadow.summary_line(shadow.evaluate(Path(runtime_dir) / "shadow_trades.json", candles,
+                                                          shadow_systems, int(now() * 1000)))
+            if skipped:
+                lines.append(skipped)
+        except Exception as exc:
+            print(f"Shadow summary failed: {exc}", flush=True)
     send_message("\n".join(lines))
     _write_json(path, {"day": day})
     return True
@@ -1565,6 +1585,10 @@ def main():
                      interval=TWO_HOUR, manifest_path=manifest_path,
                      guard_path=runtime_dir / "daily_guard_2.json", universe_fn=manifest_symbols)
     APPS = [APP, app_2h]
+    for app in APPS:
+        app.shadow_path = runtime_dir / "shadow_trades.json"
+    shadow_systems = {"4": (strategy, short_config.get("resting_stop_trail_multiple", 1), FOUR_HOUR),
+                      "2": (strategy_2h, short_config_2h.get("resting_stop_trail_multiple", 1), TWO_HOUR)}
     telegram_ready = all(os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"))
     STATUS.update(ready=True, binance_connected=True, telegram_ready=telegram_ready,
                   orders_enabled=execution_enabled(config, os.environ), commit=_running_commit())
@@ -1581,7 +1605,7 @@ def main():
     ledger_state = {"at": 0.0}
     def refresh_ledger():
         try:
-            daily_summary(APP.futures_executor, APP.futures_market, runtime_dir)
+            daily_summary(APP.futures_executor, APP.futures_market, runtime_dir, shadow_systems=shadow_systems)
         except Exception as exc:
             print(f"Daily summary failed: {exc}", flush=True)
         if time.time() - ledger_state["at"] < 3600:

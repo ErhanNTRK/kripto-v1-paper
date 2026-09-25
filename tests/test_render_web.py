@@ -1646,3 +1646,29 @@ class AlertingTests(unittest.TestCase):
             self.assertNotIn("BTC", text)
             self.assertFalse(self._summary(tmp, morning + 7200)[0])
             self.assertTrue(self._summary(tmp, morning + 86_400)[0])
+
+
+class ShadowRecordingTests(unittest.TestCase):
+    """A signal skipped for lack of capital is kept for replay and the
+    Telegram line says so instead of promising a retry."""
+
+    def test_a_size_skip_is_recorded_and_announced_as_tracked(self):
+        import tempfile
+        from pathlib import Path
+        config = {"signal_confirmation_expiry_minutes": 10}
+        app = LiveApp(config, {}, {}, short_config=config, short_strategy_config={}, tag="4")
+        with tempfile.TemporaryDirectory() as tmp:
+            app.shadow_path = Path(tmp) / "shadow.json"
+            candidate = {"symbol": "FETUSDT", "created_at": 1790352000000, "close": 0.2393, "stop": 0.2185}
+            with patch("crypto_v1.render_web.send_message") as send:
+                app._record(candidate, "long", {"status": "rejected", "reason": "risk target below Binance minimum"})
+            self.assertEqual(len(render_web.shadow._load(app.shadow_path)), 1)
+        self.assertIn("takibe aldim", send.call_args.args[0])
+
+    def test_other_skips_keep_the_retry_wording(self):
+        config = {"signal_confirmation_expiry_minutes": 10}
+        app = LiveApp(config, {}, {}, short_config=config, short_strategy_config={}, tag="4")
+        with patch("crypto_v1.render_web.send_message") as send:
+            app._record({"symbol": "SEIUSDT", "created_at": 1}, "long",
+                        {"status": "rejected", "reason": "entry_price_moved"})
+        self.assertIn("tekrar denenecek", send.call_args.args[0])
