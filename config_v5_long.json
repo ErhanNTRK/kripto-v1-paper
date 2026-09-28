@@ -11,7 +11,7 @@
   "min_breaks": 1,
   "btc_filter": "loose",
   "atr_multiplier": 2.0,
-  "trailing_atr": 4.0,
+  "trailing_atr": 6.0,
   "volume_multiple": 1.5,
   "rsi_min": 55,
   "rsi_max": 70,
@@ -43,7 +43,7 @@
   "first_time_high_bars": 200,
   "max_extension_atr": 1.0,
   "regime_ma_days": 200,
-  "entry_mode": "breakout+momentum",
+  "entry_mode": "breakout",
   "short_regime_only": true,
   "max_week_gain": 0.5,
   "ichimoku_filter": true
