@@ -189,6 +189,33 @@ def _write_json(path, value):
     tmp.replace(path)
 
 
+def ethbtc_trend_ok(ema_days, now_ms, fetch=None):
+    """ETH/BTC regime gate for the safe (4H) sleeve (29 Sep 2026, user's
+    decision after the multi-start test): new longs only while ETH/BTC's
+    last CLOSED daily close is above its ema_days EMA -- altcoin appetite.
+    Across 45 twelve-month windows it cut the worst year from -83% to -43%
+    in the 2021-23 alt bleed. Same arithmetic as the research
+    (pit_multistart.py): EMA seeded with the first close, alpha 2/(n+1),
+    today's still-open daily candle ignored. Returns (ok, ratio, ema)."""
+    fetch = fetch or (lambda symbol: _get_klines(symbol, "1d", max(300, 6 * int(ema_days))))
+    eth, btc = fetch("ETHUSDT"), fetch("BTCUSDT")
+    eth = {int(r[0]): float(r[4]) for r in eth if int(r[6]) < now_ms}
+    btc = {int(r[0]): float(r[4]) for r in btc if int(r[6]) < now_ms}
+    days = sorted(set(eth) & set(btc))
+    if len(days) < 2 * int(ema_days):
+        raise ValueError(f"only {len(days)} closed ETH/BTC days")
+    alpha, ema = 2 / (int(ema_days) + 1), None
+    for d in days:
+        ratio = eth[d] / btc[d]
+        ema = ratio if ema is None else ema + (ratio - ema) * alpha
+    return ratio > ema, ratio, ema
+
+
+def _get_klines(symbol, interval, limit):
+    from .data import get
+    return get("klines", {"symbol": symbol, "interval": interval, "limit": limit})
+
+
 class LiveApp:
     # See auto_enter's docstring: bounds Binance API weight per automatic
     # tick so a burst of simultaneous candidates can never itself trip a
@@ -257,6 +284,10 @@ class LiveApp:
         self._pilot_alert_day = None
         # Where capital-skipped signals are kept (shadow.py); main() sets it.
         self.shadow_path = None
+        # ETH/BTC gate (ethbtc_filter_ema_days in short_config), re-read once
+        # per UTC day: {"day", "ok"}; its last known answer is kept to tell
+        # the user on Telegram when it flips.
+        self._ethbtc = None
         self._scan_failures = 0
         self.executor = SpotExecutor(config, environment)
         self.market = BinanceMarket(config, strategy_config, environment, self.executor, tag=tag)
@@ -280,6 +311,13 @@ class LiveApp:
         # instead of self.config/market/executor (Spot) -- an
         # already-open Spot long from before this change still exits
         # through the unmodified Spot path in scan() below, untouched.
+        # The ETH/BTC gate also covers a hand-typed "AL" (this is the one
+        # path every long entry goes through).
+        if self._longs_gated(int(time.time() * 1000)):
+            label = f"[{tag}] " if tag else ""
+            send_message(f"{label}AL yapilmadi: ETH/BTC filtresi kapali (ETH, BTC karsisinda 50 gunluk "
+                         "ortalamasinin altinda). Bu sistem filtre acilana kadar yeni alim yapmiyor.")
+            return {"status": "rejected", "reason": "ethbtc_filter"}
         result = approve_long_leveraged(update_id, "AL", int(time.time() * 1000),
                                         saved, self.short_config, self.environment,
                                         self.futures_market, self.futures_executor)
@@ -372,9 +410,15 @@ class LiveApp:
         # symbol (e.g. its price had moved too far) was retried every tick
         # while every candidate sorted after it was never even looked at.
         taken = 0
+        longs_closed = self._longs_gated(now_ms)
         for candidate in long_pending:
             if taken >= self.ENTRIES_PER_TICK:
                 break
+            if longs_closed:
+                result = {"status": "rejected", "reason": "ethbtc_filter"}
+                self._record(candidate, "long", result)
+                results.append({"symbol": candidate["symbol"], "side": "long", "result": result})
+                continue
             if not self._cleared(candidate, gate, now_ms):
                 result = self._attempt(candidate, "long", lambda: self._ask_approval(candidate, "long", gate, now_ms))
                 self._record(candidate, "long", result)
@@ -417,7 +461,37 @@ class LiveApp:
     _QUIET_REJECTIONS = {"already_holding_symbol", "pending_signal_count", "signal_expired",
                          "position_limit", "daily_buy_limit", "daily_loss_limit", "pilot_loss_limit",
                          "order is below Binance minimums", "plan exceeds available margin",
-                         "awaiting_approval", "already_attempted"}
+                         "awaiting_approval", "already_attempted", "ethbtc_filter"}
+
+    def _longs_gated(self, now_ms):
+        """True while this system's ETH/BTC gate blocks NEW longs. Off (False)
+        when short_config has no ethbtc_filter_ema_days -- the aggressive 2H
+        sleeve. An unreadable market blocks: fail closed, like the 200-day
+        regime line. Open positions, stops and exits are never affected."""
+        days = (self.short_config or {}).get("ethbtc_filter_ema_days")
+        if not days:
+            return False
+        day = _utc_day(now_ms / 1000)
+        if self._ethbtc and self._ethbtc["day"] == day and self._ethbtc["ok"] is not None:
+            return not self._ethbtc["ok"]
+        previous = self._ethbtc["ok"] if self._ethbtc else None
+        try:
+            ok, ratio, ema = ethbtc_trend_ok(days, now_ms)
+            note = f"ETH/BTC {ratio:.5f}, {days} gunluk ortalama {ema:.5f}"
+        except Exception as exc:
+            print(f"ETH/BTC filter unreadable, longs blocked: {exc}", flush=True)
+            self._ethbtc = {"day": None, "ok": previous}   # retried on the next tick
+            return True
+        self._ethbtc = {"day": day, "ok": ok}
+        if previous is not None and previous != ok:
+            label = f"[{self.tag}] " if self.tag else ""
+            text = ("ACILDI: altcoin istahi dondu, yeni alimlar serbest" if ok else
+                    "KAPANDI: ETH, BTC karsisinda zayif; yeni alim yok, acik pozisyonlar normal yonetiliyor")
+            try:
+                send_message(f"{label}ETH/BTC FILTRESI {text} ({note}).")
+            except Exception as exc:
+                print(f"Telegram ETH/BTC notice failed: {exc}", flush=True)
+        return not ok
 
     # ---- Coins outside the automatic list: ask on Telegram first ----------
 

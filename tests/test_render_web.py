@@ -1672,3 +1672,111 @@ class ShadowRecordingTests(unittest.TestCase):
             app._record({"symbol": "SEIUSDT", "created_at": 1}, "long",
                         {"status": "rejected", "reason": "entry_price_moved"})
         self.assertIn("tekrar denenecek", send.call_args.args[0])
+
+
+class EthBtcGateTests(unittest.TestCase):
+    """ETH/BTC regime gate for the safe 4H sleeve (29 Sep 2026): new longs
+    only while ETH/BTC's last closed daily close is above its EMA; the
+    aggressive 2H sleeve (no ethbtc_filter_ema_days) is never gated."""
+
+    DAY = 86_400_000
+    NOW_S = 1_700_000_000
+
+    def _klines(self, closes, now_ms, open_last=True):
+        # Daily candles ending at now; the last one still open when open_last.
+        first = (now_ms // self.DAY - len(closes) + (1 if open_last else 0)) * self.DAY
+        return [[first + i * self.DAY, "0", "0", "0", str(c), "0", first + (i + 1) * self.DAY - 1]
+                for i, c in enumerate(closes)]
+
+    def _fetch(self, eth_closes, now_ms):
+        btc = self._klines([1.0] * len(eth_closes), now_ms)
+        eth = self._klines(eth_closes, now_ms)
+        return lambda symbol: eth if symbol == "ETHUSDT" else btc
+
+    def test_rising_ratio_is_open_and_falling_ratio_is_closed(self):
+        now_ms = self.NOW_S * 1000
+        up = [1.0 + i * 0.01 for i in range(120)]
+        ok, ratio, ema = render_web.ethbtc_trend_ok(50, now_ms, fetch=self._fetch(up, now_ms))
+        self.assertTrue(ok)
+        self.assertGreater(ratio, ema)
+        down = list(reversed(up))
+        ok, _, _ = render_web.ethbtc_trend_ok(50, now_ms, fetch=self._fetch(down, now_ms))
+        self.assertFalse(ok)
+
+    def test_the_still_open_daily_candle_is_ignored(self):
+        # A big jump in today's unfinished candle must not open the gate.
+        now_ms = self.NOW_S * 1000
+        closes = [2.0 - i * 0.01 for i in range(119)] + [50.0]
+        ok, ratio, _ = render_web.ethbtc_trend_ok(50, now_ms, fetch=self._fetch(closes, now_ms))
+        self.assertFalse(ok)
+        self.assertAlmostEqual(ratio, closes[-2])
+
+    def test_too_little_history_raises(self):
+        now_ms = self.NOW_S * 1000
+        with self.assertRaises(ValueError):
+            render_web.ethbtc_trend_ok(50, now_ms, fetch=self._fetch([1.0] * 60, now_ms))
+
+    def _app(self, days=50):
+        config = {"signal_confirmation_expiry_minutes": 10}
+        if days:
+            config["ethbtc_filter_ema_days"] = days
+        return LiveApp(config, {}, {"TELEGRAM_CHAT_ID": "123"}, short_config=config,
+                       short_strategy_config={}, tag="4")
+
+    def test_closed_gate_skips_longs_but_not_shorts(self):
+        app = self._app()
+        saved_long = LiveAppAutoEntryTests.LONG_SAVED
+        saved_short = LiveAppAutoEntryTests.SHORT_SAVED
+        with patch("crypto_v1.render_web.time.time", return_value=self.NOW_S), \
+             patch("crypto_v1.render_web.ethbtc_trend_ok", return_value=(False, 0.03, 0.031)), \
+             patch("crypto_v1.render_web.fetch_runtime_state", return_value=saved_long), \
+             patch("crypto_v1.render_web.fetch_runtime_state_short", return_value=saved_short), \
+             patch("crypto_v1.render_web.send_message") as send, \
+             patch.object(LiveApp, "_approve_long") as long_mock, \
+             patch.object(LiveApp, "_approve_short", return_value={"status": "ok"}) as short_mock:
+            result = app.auto_enter()
+        long_mock.assert_not_called()
+        self.assertEqual(short_mock.call_count, 1)
+        self.assertEqual(result["results"][0]["result"], {"status": "rejected", "reason": "ethbtc_filter"})
+        send.assert_not_called()   # quiet: no Telegram line per skipped candidate
+
+    def test_open_gate_and_ungated_sleeve_buy_as_before(self):
+        for app, gate in ((self._app(), (True, 0.032, 0.031)), (self._app(days=None), None)):
+            with patch("crypto_v1.render_web.time.time", return_value=self.NOW_S), \
+                 patch("crypto_v1.render_web.ethbtc_trend_ok", return_value=gate) as gate_mock, \
+                 patch("crypto_v1.render_web.fetch_runtime_state", return_value=LiveAppAutoEntryTests.LONG_SAVED), \
+                 patch("crypto_v1.render_web.fetch_runtime_state_short", return_value={"state": {}}), \
+                 patch.object(LiveApp, "_approve_long", return_value={"status": "ok"}) as long_mock:
+                app.auto_enter()
+            self.assertEqual(long_mock.call_count, 1)
+            if gate is None:
+                gate_mock.assert_not_called()   # the 2H sleeve never even asks
+
+    def test_unreadable_market_blocks_longs_and_retries_next_tick(self):
+        app = self._app()
+        now_ms = self.NOW_S * 1000
+        with patch("crypto_v1.render_web.ethbtc_trend_ok", side_effect=[OSError("down"), (True, 1, 0)]):
+            self.assertTrue(app._longs_gated(now_ms))
+            self.assertFalse(app._longs_gated(now_ms))
+
+    def test_checked_once_per_day_and_a_flip_is_announced(self):
+        app = self._app()
+        now_ms = self.NOW_S * 1000
+        with patch("crypto_v1.render_web.ethbtc_trend_ok", side_effect=[(True, 1, 0), (False, 0.9, 1)]) as gate, \
+             patch("crypto_v1.render_web.send_message") as send:
+            self.assertFalse(app._longs_gated(now_ms))
+            self.assertFalse(app._longs_gated(now_ms + 3600_000))      # same UTC day: cached
+            self.assertEqual(gate.call_count, 1)
+            send.assert_not_called()
+            self.assertTrue(app._longs_gated(now_ms + self.DAY))        # next day: re-read, flipped
+        self.assertIn("ETH/BTC FILTRESI KAPANDI", send.call_args.args[0])
+
+    def test_a_hand_typed_al_is_gated_too(self):
+        app = self._app()
+        with patch("crypto_v1.render_web.ethbtc_trend_ok", return_value=(False, 0.9, 1)), \
+             patch("crypto_v1.render_web.send_message") as send, \
+             patch("crypto_v1.render_web.approve_long_leveraged") as approve:
+            result = app._approve_long(1, {}, tag="4")
+        approve.assert_not_called()
+        self.assertEqual(result, {"status": "rejected", "reason": "ethbtc_filter"})
+        self.assertIn("ETH/BTC filtresi kapali", send.call_args.args[0])

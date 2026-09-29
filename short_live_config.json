@@ -1,7 +1,7 @@
 {
   "live_trading_enabled": true,
-  "pilot_capital_usdt": 46.8,
-  "pilot_capital_fraction": 0.3,
+  "pilot_capital_usdt": 54.6,
+  "pilot_capital_fraction": 0.35,
   "risk_per_trade_usdt": 5.0,
   "daily_loss_limit_usdt": 12,
   "pilot_loss_limit_usdt": 15,
@@ -23,5 +23,6 @@
   "auto_entry_top_n": 30,
   "resting_stop_trail_multiple": 2.0,
   "daily_equity_stop_fraction": 0.1,
-  "quality_risk_multipliers": [1.5, 0.5]
+  "quality_risk_multipliers": [1.5, 0.5],
+  "ethbtc_filter_ema_days": 50
 }

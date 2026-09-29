@@ -95,16 +95,20 @@ class ProportionalRiskTests(unittest.TestCase):
         del config["quality_risk_multipliers"]
         self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=0), Decimal("0.75"))
 
-    def test_live_configs_split_30_70_with_quality_sizing(self):
-        # 25 Sep 2026 decision: 4H 30% / 2H 70% of the wallet; loss-limit
-        # baselines are the same split of the 156 USDT the systems started from.
+    def test_live_configs_split_35_65_with_quality_sizing(self):
+        # 29 Sep 2026 decision: 4H (safe sleeve, ETH/BTC gate) 35% / 2H
+        # (aggressive sleeve, no gate) 65% of the wallet; loss-limit baselines
+        # are the same split of the 156 USDT the systems started from.
         import json
         from pathlib import Path
         four = json.loads(Path("short_live_config.json").read_text(encoding="utf-8"))
         two = json.loads(Path("short_live_config_2h.json").read_text(encoding="utf-8"))
-        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.3, 0.7))
+        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.35, 0.65))
         self.assertAlmostEqual(four["pilot_capital_usdt"] + two["pilot_capital_usdt"], 156.0)
-        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.3)
+        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.35)
+        # Only the safe sleeve waits for ETH/BTC above its 50-day average.
+        self.assertEqual(four.get("ethbtc_filter_ema_days"), 50)
+        self.assertIsNone(two.get("ethbtc_filter_ema_days"))
         for config in (four, two):
             self.assertEqual(config["quality_risk_multipliers"], [1.5, 0.5])
             self.assertEqual(config["risk_per_trade_fraction"], 0.01)  # user's choice, 26 Sep 2026
