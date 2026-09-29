@@ -533,8 +533,10 @@ class TwoHourStrategyFileTests(unittest.TestCase):
         two = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
         self.assertEqual(two["donchian_windows"], [2 * w for w in four.get("donchian_windows", [10, 20, 40])])
         self.assertEqual(two["first_time_high_bars"], 2 * four["first_time_high_bars"])
+        # atr_multiplier differs on purpose since 29 Sep 2026: the 2H sleeve's
+        # first stop is 3 ATR (package test), the 4H one stays at 2.
         shared = {k for k in four if k not in ("donchian_windows", "first_time_high_bars", "trailing_atr",
-                                                "max_week_gain")}
+                                                "max_week_gain", "atr_multiplier")}
         self.assertEqual({k: two[k] for k in shared}, {k: four[k] for k in shared})
 
     def test_short_sides_follow_the_24_sep_2026_decision(self):

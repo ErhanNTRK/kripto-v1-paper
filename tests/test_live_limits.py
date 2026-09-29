@@ -95,17 +95,23 @@ class ProportionalRiskTests(unittest.TestCase):
         del config["quality_risk_multipliers"]
         self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=0), Decimal("0.75"))
 
-    def test_live_configs_split_35_65_with_quality_sizing(self):
-        # 29 Sep 2026 decision: 4H (safe sleeve, ETH/BTC gate) 35% / 2H
-        # (aggressive sleeve, no gate) 65% of the wallet; loss-limit baselines
-        # are the same split of the 156 USDT the systems started from.
+    def test_live_configs_split_30_70_with_quality_sizing(self):
+        # 29 Sep 2026 decision (package test): 4H (safe sleeve, ETH/BTC gate)
+        # 30% / 2H (aggressive sleeve, no gate, 3-ATR stop) 70% of the wallet;
+        # loss-limit baselines are the same split of the 156 USDT the systems
+        # started from.
         import json
         from pathlib import Path
         four = json.loads(Path("short_live_config.json").read_text(encoding="utf-8"))
         two = json.loads(Path("short_live_config_2h.json").read_text(encoding="utf-8"))
-        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.35, 0.65))
+        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.3, 0.7))
         self.assertAlmostEqual(four["pilot_capital_usdt"] + two["pilot_capital_usdt"], 156.0)
-        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.35)
+        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.3)
+        # The 2H sleeve's first stop sits 3 ATR below entry (stop hunts; the
+        # 2021-23 blind test: 12-month median -44% -> -9%), the 4H one stays at 2.
+        strat4 = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
+        strat2 = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
+        self.assertEqual((strat4["atr_multiplier"], strat2["atr_multiplier"]), (2.0, 3.0))
         # Only the safe sleeve waits for ETH/BTC above its 50-day average.
         self.assertEqual(four.get("ethbtc_filter_ema_days"), 50)
         self.assertIsNone(two.get("ethbtc_filter_ema_days"))
