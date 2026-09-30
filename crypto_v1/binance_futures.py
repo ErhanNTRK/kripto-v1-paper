@@ -95,9 +95,11 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
         raise RuntimeError("Binance Futures order query failed") from None
 
 
-# Our protective-stop client ids (short kv1fp, long kv1fq). Everything
+# Our conditional-order client ids, which live in the Algo service:
+# protective stops (short kv1fp, long kv1fq) and the dip-catcher's
+# triggered buy (kv1fd), take-profit (kv1fg) and stop (kv1fz). Everything
 # else we send is a plain MARKET order on /fapi/v1/order.
-ALGO_STOP_PREFIXES = ("kv1fp", "kv1fq")
+ALGO_STOP_PREFIXES = ("kv1fp", "kv1fq", "kv1fd", "kv1fg", "kv1fz")
 
 _ALGO_STATUS = {"NEW": "NEW", "TRIGGERED": "FILLED", "FILLED": "FILLED", "FINISHED": "FILLED",
                 "CANCELLED": "CANCELED", "CANCELED": "CANCELED", "EXPIRED": "EXPIRED"}
@@ -185,6 +187,28 @@ class FuturesExecutor:
             "POST", {"algoType": "CONDITIONAL", "symbol": symbol, "side": side,
                      "type": "STOP_MARKET", "quantity": quantity,
                      "triggerPrice": stop_price, "reduceOnly": "true",
+                     "clientAlgoId": client_id},
+            path="/fapi/v1/algoOrder"))
+
+    def triggered_open_long(self, symbol, quantity, trigger_price, client_id):
+        """Buys at market once the LAST price falls to trigger_price (the
+        dip-catcher's order under the market). A plain limit buy that deep is
+        refused by Binance's PERCENT_PRICE filter (5-15% below the mark,
+        checked 30 Sep 2026); a conditional order is not, and ties up no
+        margin until it fires."""
+        return normalize_algo_order(self.request(
+            "POST", {"algoType": "CONDITIONAL", "symbol": symbol, "side": "BUY",
+                     "type": "TAKE_PROFIT_MARKET", "quantity": quantity,
+                     "triggerPrice": trigger_price, "workingType": "CONTRACT_PRICE",
+                     "clientAlgoId": client_id},
+            path="/fapi/v1/algoOrder"))
+
+    def take_profit_for_long(self, symbol, quantity, trigger_price, client_id):
+        """Sells at market once price rises to trigger_price; reduce-only."""
+        return normalize_algo_order(self.request(
+            "POST", {"algoType": "CONDITIONAL", "symbol": symbol, "side": "SELL",
+                     "type": "TAKE_PROFIT_MARKET", "quantity": quantity,
+                     "triggerPrice": trigger_price, "reduceOnly": "true",
                      "clientAlgoId": client_id},
             path="/fapi/v1/algoOrder"))
 

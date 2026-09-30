@@ -9,6 +9,7 @@ from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
 from . import ledger, shadow
 from .dip_catcher import DipCatcher
+from .dip_live import LiveDipCatcher
 from .data import candles, universe
 from .github_worker import local_tick
 from .live_controller import _known_or_place
@@ -1683,8 +1684,15 @@ def main():
     def held_symbols():
         return {p["symbol"] for p in APP.futures_executor.account().get("positions", [])
                 if Decimal(str(p.get("positionAmt") or "0")) != 0}
-    dip = DipCatcher(short_config_2h.get("dip_catcher"), runtime_dir / "dip_paper.json", manifest_path,
-                     equity_fn=lambda: app_2h.futures_market.pilot_status()["equity"], held_fn=held_symbols)
+    dip_config = short_config_2h.get("dip_catcher") or {}
+    sleeve_equity = lambda: app_2h.futures_market.pilot_status()["equity"]
+    if dip_config.get("mode") == "live":
+        # Real orders (user's decision, 30 Sep 2026); see crypto_v1.dip_live.
+        dip = LiveDipCatcher(dip_config, runtime_dir / "dip_live.json", manifest_path,
+                             app_2h.futures_executor, app_2h.futures_market, equity_fn=sleeve_equity)
+    else:
+        dip = DipCatcher(dip_config, runtime_dir / "dip_paper.json", manifest_path,
+                         equity_fn=sleeve_equity, held_fn=held_symbols)
     def refresh_ledger():
         try:
             dip.tick()

@@ -516,6 +516,15 @@ class UnprotectedPositionTests(unittest.TestCase):
         self.assertEqual(result["open_positions"], 1)
         self.assertEqual(result["free_usdt"], Decimal("79"))  # 100 - 21 margin
 
+    def test_dip_catcher_protective_orders_hold_their_coin_but_its_resting_buys_do_not(self):
+        # 30 Sep 2026: while the dip-catcher's reduce-only take-profit/stop rest
+        # on a coin, a trend buy there would merge into its position. Its
+        # resting limit buys do not block: the dip side cancels them instead.
+        result = self._summary([], [{"symbol": "SOLUSDT", "clientOrderId": "kv1fz12341790640000000"},
+                                    {"symbol": "XRPUSDT", "clientOrderId": "kv1fg56781790640000000"},
+                                    {"symbol": "ETHUSDT", "clientOrderId": "kv1fd90121790640000000"}])
+        self.assertEqual(result["held_symbols"], {"SOLUSDT", "XRPUSDT"})
+
     def test_a_short_position_counts_too(self):
         result = self._summary([{"symbol": "SOLUSDT", "positionAmt": "-3", "leverage": "3",
                                  "positionInitialMargin": "10"}])

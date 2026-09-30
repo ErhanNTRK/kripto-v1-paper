@@ -108,6 +108,7 @@ _SHORT_STOP_PREFIX = "kv1fp"
 _SHORT_CLOSE_PREFIXES = ("kv1fp", "kv1fe", "kv1fx")  # protective stop, emergency close, normal trend/emergency exit
 _LONG_OPEN_PREFIX = "kv1fl"
 _LONG_STOP_PREFIX = "kv1fq"
+_DIP_PROTECT_PREFIXES = ("kv1fg", "kv1fz")  # dip-catcher take-profit / stop (crypto_v1.dip_catcher)
 _LONG_CLOSE_PREFIXES = ("kv1fq", "kv1fk", "kv1fy")  # protective stop, emergency close, normal trend/emergency exit
 
 
@@ -206,6 +207,11 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     # would merge into its position and tangle both systems' stops.
     held_symbols = own_symbols | {p["symbol"] for p in account.get("positions", [])
                                   if abs(_decimal(p.get("positionAmt"))) > 0}
+    # The dip-catcher's reduce-only take-profit/stop (30 Sep 2026): while
+    # they rest, a trend buy of the same coin would merge into its position
+    # and could be sold by them.
+    held_symbols |= {o["symbol"] for o in open_orders
+                     if str(o.get("clientOrderId", "")).startswith(_DIP_PROTECT_PREFIXES)}
     # Capital a leveraged position actually ties up is its isolated MARGIN
     # (notional / leverage), not the whole notional -- counting notional
     # (as this did until 22 Sep 2026) let one ~70-90 USDT position "use up"
