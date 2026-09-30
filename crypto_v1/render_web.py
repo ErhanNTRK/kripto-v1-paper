@@ -11,6 +11,7 @@ from . import ledger, shadow
 from .dip_catcher import DipCatcher
 from .dip_live import LiveDipCatcher
 from .spike_rule import LiveSpikeRule
+from .side_methods import SideScanner, SignalTrader
 from .data import candles, universe
 from .github_worker import local_tick
 from .live_controller import _known_or_place
@@ -1698,11 +1699,29 @@ def main():
     spike = LiveSpikeRule(short_config_2h.get("spike_rule"), runtime_dir / "spike_live.json",
                           runtime_dir / "spike_state.json", app_2h.futures_executor, app_2h.futures_market,
                           equity_fn=sleeve_equity)
+    # The daily cup and the 4H short cup (30 Sep 2026), also in the 2H sleeve.
+    side_scanner = SideScanner(manifest_path, runtime_dir / "cup_daily_state.json", runtime_dir / "cup_short_state.json")
+    cup_daily = SignalTrader(short_config_2h.get("daily_cup"), "CANAK", {"open": "kv1fm", "stop": "kv1fn", "exit": "kv1fo"},
+                             runtime_dir / "cup_daily_live.json", runtime_dir / "cup_daily_state.json",
+                             app_2h.futures_executor, app_2h.futures_market, equity_fn=sleeve_equity)
+    cup_short = SignalTrader(short_config_2h.get("short_cup"), "KISA-CANAK",
+                             {"open": "kv1fa", "stop": "kv1fb", "tp": "kv1fi", "exit": "kv1ft"},
+                             runtime_dir / "cup_short_live.json", runtime_dir / "cup_short_state.json",
+                             app_2h.futures_executor, app_2h.futures_market, equity_fn=sleeve_equity)
     def refresh_ledger():
         try:
             spike.tick()
         except Exception as exc:
             print(f"Spike rule failed: {exc}", flush=True)
+        try:
+            side_scanner.tick()
+        except Exception as exc:
+            print(f"Cup scan failed: {exc}", flush=True)
+        for trader in (cup_daily, cup_short):
+            try:
+                trader.tick()
+            except Exception as exc:
+                print(f"{trader.label} failed: {exc}", flush=True)
         try:
             dip.tick()
         except Exception as exc:

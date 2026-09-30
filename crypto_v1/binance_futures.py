@@ -100,7 +100,7 @@ def signed_futures_request(method, path, params, api_key, private_pem, clock=Non
 # triggered buy (kv1fd), take-profit (kv1fg) and stop (kv1fz), and the
 # big-candle rule's stop (kv1fj). Everything else we send is a plain MARKET
 # order on /fapi/v1/order.
-ALGO_STOP_PREFIXES = ("kv1fp", "kv1fq", "kv1fd", "kv1fg", "kv1fz", "kv1fj")
+ALGO_STOP_PREFIXES = ("kv1fp", "kv1fq", "kv1fd", "kv1fg", "kv1fz", "kv1fj", "kv1fn", "kv1fb", "kv1fi")
 
 _ALGO_STATUS = {"NEW": "NEW", "TRIGGERED": "FILLED", "FILLED": "FILLED", "FINISHED": "FILLED",
                 "CANCELLED": "CANCELED", "CANCELED": "CANCELED", "EXPIRED": "EXPIRED"}

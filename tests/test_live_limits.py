@@ -95,18 +95,18 @@ class ProportionalRiskTests(unittest.TestCase):
         del config["quality_risk_multipliers"]
         self.assertEqual(trade_risk_usdt(config, Decimal("100"), breaks_up=0), Decimal("0.75"))
 
-    def test_live_configs_split_30_70_with_quality_sizing(self):
-        # 29 Sep 2026 decision (package test): 4H (safe sleeve, ETH/BTC gate)
-        # 30% / 2H (aggressive sleeve, no gate, 3-ATR stop) 70% of the wallet;
+    def test_live_configs_split_25_75_with_quality_sizing(self):
+        # 30 Sep 2026 decision: 4H (safe sleeve, ETH/BTC gate) 25% / 2H sleeve
+        # (2H trend with a 3-ATR stop plus every side method) 75% of the wallet;
         # loss-limit baselines are the same split of the 156 USDT the systems
         # started from.
         import json
         from pathlib import Path
         four = json.loads(Path("short_live_config.json").read_text(encoding="utf-8"))
         two = json.loads(Path("short_live_config_2h.json").read_text(encoding="utf-8"))
-        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.3, 0.7))
+        self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.25, 0.75))
         self.assertAlmostEqual(four["pilot_capital_usdt"] + two["pilot_capital_usdt"], 156.0)
-        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.3)
+        self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.25)
         # The 2H sleeve's first stop sits 3 ATR below entry (stop hunts; the
         # 2021-23 blind test: 12-month median -44% -> -9%), the 4H one stays at 2.
         strat4 = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))

@@ -25,7 +25,8 @@ TR = timezone(timedelta(hours=3))
 CLOSE_KIND = {"kv1fq": "stop", "kv1fp": "stop", "kv1fy": "cikis kurali", "kv1fx": "cikis kurali",
               "kv1fk": "acil kapatma", "kv1fe": "acil kapatma",
               "kv1fg": "hedef", "kv1fz": "stop", "kv1fw": "sure doldu",
-              "kv1fj": "stop", "kv1fv": "sure doldu"}
+              "kv1fj": "stop", "kv1fv": "sure doldu",
+              "kv1fn": "stop", "kv1fo": "sure doldu", "kv1fb": "stop", "kv1fi": "hedef", "kv1ft": "sure doldu"}
 OPEN_PREFIXES = ("kv1fl", "kv1fs")
 
 
@@ -126,6 +127,10 @@ def _system(client):
         return "igne"
     if client.startswith("kv1fh"):
         return "mum"
+    if client.startswith("kv1fm"):
+        return "canak"
+    if client.startswith("kv1fa"):
+        return "kisa-canak"
     if client.startswith(OPEN_PREFIXES) and len(client) > 5:
         return {"4": "4H", "2": "2H"}.get(client[5], "?")
     return "elle"
@@ -166,7 +171,7 @@ def write_reports(store, folder, open_marks=None):
              f"Toplam net K/Z: {total:+.4f} USDT (komisyon ve fonlama dusulmus)",
              f"  brut {sum(r['brut_kz_usdt'] for r in rows):+.4f} | komisyon -{sum(r['komisyon_usdt'] for r in rows):.4f}"
              f" | fonlama {sum(r['fonlama_usdt'] for r in rows):+.4f}", ""]
-    for system in ("4H", "2H", "igne", "mum", "elle"):
+    for system in ("4H", "2H", "igne", "mum", "canak", "kisa-canak", "elle"):
         part = [r for r in rows if r["sistem"] == system]
         if part:
             lines.append(f"  {system}: {len(part)} islem, net {sum(r['net_kz_usdt'] for r in part):+.4f} USDT, "

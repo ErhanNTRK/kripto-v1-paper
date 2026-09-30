@@ -110,7 +110,9 @@ _LONG_OPEN_PREFIX = "kv1fl"
 _LONG_STOP_PREFIX = "kv1fq"
 # Reduce-only orders of the side methods: dip-catcher take-profit / stop
 # (crypto_v1.dip_live) and the big-candle rule's stop (crypto_v1.spike_rule).
-_DIP_PROTECT_PREFIXES = ("kv1fg", "kv1fz", "kv1fj")
+# Plus the daily cup's stop (kv1fn) and the 4H short cup's stop and
+# take-profit (kv1fb, kv1fi), crypto_v1.side_methods (30 Sep 2026).
+_DIP_PROTECT_PREFIXES = ("kv1fg", "kv1fz", "kv1fj", "kv1fn", "kv1fb", "kv1fi")
 _LONG_CLOSE_PREFIXES = ("kv1fq", "kv1fk", "kv1fy")  # protective stop, emergency close, normal trend/emergency exit
 
 
@@ -201,6 +203,11 @@ def summarize_short_pilot(account, open_orders, orders, config, day_start_ms=0, 
     other_systems = ({o["symbol"] for o in open_orders
                       if str(o.get("clientOrderId", "")).startswith((_SHORT_STOP_PREFIX, _LONG_STOP_PREFIX))}
                      - {o["symbol"] for o in protective})
+    # The side methods' positions (dip-catcher, big-candle rule, cups) are
+    # theirs, not either trend system's: counting them used up the trend
+    # systems' position slots (30 Sep 2026). They stay HELD below.
+    other_systems |= {o["symbol"] for o in open_orders
+                      if str(o.get("clientOrderId", "")).startswith(_DIP_PROTECT_PREFIXES)}
     account_positions = {p["symbol"]: p for p in account.get("positions", [])
                          if abs(_decimal(p.get("positionAmt"))) > 0 and p["symbol"] not in other_systems}
     own_symbols = {o["symbol"] for o in protective} | set(account_positions)
