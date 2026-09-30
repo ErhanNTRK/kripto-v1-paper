@@ -1,26 +1,26 @@
-"""The dip-catcher with REAL orders (user's decision, 30 Sep 2026: "canliya al").
+"""The dip-catcher with real orders, version 2 (user's decision, 30 Sep 2026).
 
-Same rules as the paper version (crypto_v1.dip_catcher), on Binance USD-M
-Futures, run from the loop's housekeeping step (a failure never touches the
-trend systems):
-  * each UTC day: cancel yesterday's unfilled buys, then rest a conditional
-    market buy (kv1fd, TAKE_PROFIT_MARKET BUY: fires when the last price
-    falls to the level) on each of the day's top-N coins not already held,
-    at yesterday's daily close x (1 - depth), 3x isolated leverage so the
-    liquidation price stays under the -25% stop, sized at size_fraction of
-    the 2H sleeve. Not a limit order: Binance refuses a limit buy more than
-    5-15% under the mark (PERCENT_PRICE), checked 30 Sep 2026;
-  * a fill gets a reduce-only STOP_MARKET (kv1fz) at -25% and
-    TAKE_PROFIT_MARKET (kv1fg) at +8% right away; a stop that cannot be
-    placed closes the position at market (kv1fw);
-  * once one of them fires the other is cancelled; after hold_hours both are
-    cancelled and the position is sold at market (kv1fw);
-  * a resting buy on a coin a trend system has just bought is cancelled
-    (one-way account), and the trend systems will not buy a coin while
-    kv1fg/kv1fz rest on it (live_short_market.summarize_short_pilot).
-Every order carries a deterministic client id (prefix + symbol code + day),
-so an unknown order result is settled by querying it, never by sending it
-twice."""
+Version 1 rested conditional buys 15% under yesterday's close on the top-10
+coins. The user pointed out that the top coins all falling 15% at once is a
+market crash, where every order would fill together and keep falling. The
+5-minute test (research/pit/frequent_dip_5m.py) agreed: only buying when
+the market itself is calm was consistent in both 12-month eras.
+
+Version 2, checked on every loop (~2 minutes) from the housekeeping step:
+  * each UTC day: watch the day's top-N coins at yesterday's close x
+    (1 - depth); nothing rests on Binance;
+  * a watched coin at or under its level is bought at market (kv1fc) ONLY
+    while BTC's lowest price so far today is at most btc_calm under its own
+    yesterday close, at most once per coin per day, and not when the
+    account holds the coin or another of our orders rests on it;
+  * the buy gets a reduce-only STOP_MARKET (kv1fz) and TAKE_PROFIT_MARKET
+    (kv1fg) right away (a stop that cannot be placed closes it at market);
+    once one fires the other is cancelled; after hold_hours both are
+    cancelled and it is sold at market (kv1fw);
+  * 3x isolated, so liquidation stays under the stop; sized at
+    size_fraction of the 2H sleeve (notional).
+Version 1's resting buys (kv1fd) are cancelled on the first tick. Every
+order carries a deterministic client id (prefix + symbol code + day)."""
 import time
 from decimal import Decimal
 
@@ -36,7 +36,7 @@ class LiveDipCatcher:
     LEVERAGE = 3
 
     def __init__(self, config, state_path, manifest_path, executor, market, send=None, clock=time.time,
-                 equity_fn=None, klines=None):
+                 equity_fn=None, klines=None, price_fn=None):
         self.config = dict(config or {})
         self.state_path, self.manifest_path = state_path, manifest_path
         self.executor, self.market = executor, market
@@ -44,6 +44,7 @@ class LiveDipCatcher:
             from .telegram import send_message as send
         self.send, self.clock, self.equity_fn = send, clock, equity_fn
         self.klines = klines or _public_klines
+        self.price_fn = price_fn or (lambda symbol: market.price(symbol))
 
     @property
     def enabled(self):
@@ -64,136 +65,156 @@ class LiveDipCatcher:
             return None
         now_ms = int(self.clock() * 1000)
         state = _read(self.state_path, {}) or {}
-        for key, default in (("orders", {}), ("positions", {}), ("closed", [])):
+        for key, default in (("orders", {}), ("positions", {}), ("closed", []), ("watch", {}), ("bought", [])):
             state.setdefault(key, default)
         account = self.executor.account()
         amounts = {p["symbol"]: Decimal(str(p.get("positionAmt") or "0")) for p in account.get("positions", [])}
         self.entries = {p["symbol"]: Decimal(str(p.get("entryPrice") or "0")) for p in account.get("positions", [])}
-        open_ids = {str(o.get("clientOrderId", "")) for o in self.executor.open_orders()}
-        self._reconcile_orders(state, amounts, open_ids)
+        open_orders = self.executor.open_orders()
+        open_ids = {str(o.get("clientOrderId", "")) for o in open_orders}
+        busy = {o.get("symbol") for o in open_orders if str(o.get("clientOrderId", "")).startswith("kv1f")}
+        self._cancel_legacy(state, amounts)
         day = now_ms // DAY_MS * DAY_MS
         if state.get("day") != day:
-            self._expire_orders(state)
-            state["day"] = day
+            state["day"], state["bought"] = day, []
+            state["watch"], state["btc_prev"] = self._levels(day, now_ms)
             _write(self.state_path, state)
-            self._place_orders(state, day, now_ms, amounts)
         self._manage_positions(state, amounts, open_ids, now_ms)
+        self._check_watch(state, amounts, busy, day, now_ms)
         _write(self.state_path, state)
         return state
 
-    # ---- resting buys ------------------------------------------------------------------------------
-    def _reconcile_orders(self, state, amounts, open_ids):
+    # ---- version 1 leftovers ------------------------------------------------------------------------
+    def _cancel_legacy(self, state, amounts):
+        """Version 1's resting conditional buys: cancel, and protect anything one already bought."""
         for symbol, order in list(state["orders"].items()):
-            if order["id"] in open_ids:
-                if amounts.get(symbol, ZERO) != 0 and symbol not in state["positions"]:
-                    self._cancel_order(state, symbol, order, "baska sistem aldi")
+            try:
+                self.executor.cancel(symbol, order["id"])
+            except OrderRejected as error:
+                if error.code not in (-2011, -2013):
+                    print(f"Dip-catcher legacy cancel failed ({symbol}): {error}", flush=True)
+                    continue
+            except Exception as exc:
+                print(f"Dip-catcher legacy cancel failed ({symbol}): {exc}", flush=True)
                 continue
-            self._settle_order(state, symbol, order, amounts)
+            try:
+                info = self.executor.query(symbol, order["id"])
+            except OrderRejected:
+                info = {}
+            if info.get("status") == "FILLED" and amounts.get(symbol, ZERO) > 0 and symbol not in state["positions"]:
+                qty = min(amounts[symbol], Decimal(order["qty"]))
+                entry = self.entries.get(symbol) or Decimal(order["price"])
+                self._protect(state, symbol, qty, entry, int(self.clock() * 1000))
+            state["orders"].pop(symbol, None)
+            print(f"Dip-catcher v1 order cancelled: {symbol}", flush=True)
 
-    def _settle_order(self, state, symbol, order, amounts=None):
-        """The buy is no longer resting (or was just cancelled). If it fired, what it bought is
-        the account's long in that coin: no other system holds it (the trend systems skip coins
-        where our take-profit/stop rest, and a resting buy is cancelled when they buy) -- so the
-        position is protected as ours."""
-        try:
-            info = self.executor.query(symbol, order["id"])
-        except OrderRejected as error:
-            if error.code == -2013:        # never reached Binance
-                state["orders"].pop(symbol, None)
-                return
-            raise
-        status = info.get("status")
-        if status == "NEW":
-            return                          # still resting (the open-orders list lagged)
-        state["orders"].pop(symbol, None)
-        held = (amounts or {}).get(symbol, ZERO)
-        if status == "FILLED" and held > 0 and symbol not in state["positions"]:
-            entry = getattr(self, "entries", {}).get(symbol) or Decimal(order["price"])
-            # Never more than we bought: if a trend buy slipped in first (one-way account), our
-            # stop/take-profit/time exit must only ever close our own part.
-            qty = min(held, Decimal(order["qty"]))
-            self._protect(state, symbol, qty, entry, int(info.get("updateTime") or self.clock() * 1000))
+    # ---- watching ----------------------------------------------------------------------------------
+    def _prev_close(self, symbol, day, now_ms):
+        daily = self.klines(symbol, "1d", None, 3)
+        prev = [r for r in daily if int(r[0]) == day - DAY_MS and int(r[6]) < now_ms]
+        return Decimal(str(prev[0][4])) if prev else None
 
-    def _cancel_order(self, state, symbol, order, why):
-        try:
-            self.executor.cancel(symbol, order["id"])
-        except OrderRejected as error:
-            if error.code not in (-2011, -2013):   # already filled / cancelled / unknown: settle below
-                print(f"Dip-catcher cancel failed ({symbol}): {error}", flush=True)
-                return
-        except Exception as exc:
-            print(f"Dip-catcher cancel failed ({symbol}): {exc}", flush=True)
-            return
-        self._settle_order(state, symbol, order, self._amounts_now())
-        state["orders"].pop(symbol, None)
-        print(f"Dip-catcher order cancelled ({symbol}): {why}", flush=True)
-
-    def _amounts_now(self):
-        account = self.executor.account()
-        self.entries = {p["symbol"]: Decimal(str(p.get("entryPrice") or "0")) for p in account.get("positions", [])}
-        return {p["symbol"]: Decimal(str(p.get("positionAmt") or "0")) for p in account.get("positions", [])}
-
-    def _expire_orders(self, state):
-        for symbol, order in list(state["orders"].items()):
-            self._cancel_order(state, symbol, order, "gun bitti")
-
-    def _place_orders(self, state, day, now_ms, amounts):
+    def _levels(self, day, now_ms):
         top_n = int(self.config.get("top_n", 10))
-        depth = Decimal(str(self.config.get("depth", 0.15)))
+        depth = Decimal(str(self.config.get("depth", 0.10)))
         ranked = [s for s in (_read(self.manifest_path, {}) or {}).get("symbols", []) if s != "BTCUSDT"][:top_n]
-        try:
-            equity = Decimal(str(self.equity_fn())) if self.equity_fn else None
-        except Exception as exc:
-            print(f"Dip-catcher equity unreadable, no orders today: {exc}", flush=True)
-            return
-        if not equity or equity <= 0:
-            return
-        size = equity * Decimal(str(self.config.get("size_fraction", 0.10)))
-        placed, skipped = [], []
+        watch, shown = {}, []
         for symbol in ranked:
-            if symbol in state["positions"] or symbol in state["orders"] or amounts.get(symbol, ZERO) != 0:
-                continue
             try:
-                daily = self.klines(symbol, "1d", None, 3)
-                prev = [r for r in daily if int(r[0]) == day - DAY_MS and int(r[6]) < now_ms]
-                if not prev:
-                    continue
-                rules = self.market.rules(symbol)
-                price = _down(Decimal(str(prev[0][4])) * (1 - depth), rules["tick_size"])
-                qty = _down(size / price, rules["step_size"])
-                if qty < rules["min_qty"] or qty * price < rules["min_notional"] * MIN_NOTIONAL_HEADROOM:
-                    skipped.append(symbol.removesuffix("USDT"))
-                    continue
-                self.executor.set_isolated_margin(symbol)
-                self.executor.set_leverage(symbol, self.LEVERAGE)
+                close = self._prev_close(symbol, day, now_ms)
             except Exception as exc:
-                print(f"Dip-catcher could not prepare {symbol}: {exc}", flush=True)
+                print(f"Dip-catcher daily close unreadable ({symbol}): {exc}", flush=True)
                 continue
-            order = {"id": self._id("kv1fd", symbol, day), "price": format(price, "f"), "qty": format(qty, "f")}
-            state["orders"][symbol] = order        # recorded first: an unknown result is settled by query
-            _write(self.state_path, state)
+            if close:
+                watch[symbol] = format(close * (1 - depth), "f")
+                shown.append(f"{symbol.removesuffix('USDT')} {float(close * (1 - depth)):.6g}")
+        try:
+            btc = self._prev_close("BTCUSDT", day, now_ms)
+        except Exception as exc:
+            print(f"Dip-catcher BTC close unreadable: {exc}", flush=True)
+            btc = None
+        if shown:
+            calm = float(self.config.get("btc_calm", 0.02)) * 100
+            self._say(f"Bugun izlenen igne seviyeleri (dunku kapanisin %{depth * 100:.0f} alti; sadece BTC bugun "
+                      f"%{calm:.0f}'den fazla dusmemisse alinir): " + ", ".join(shown) + ".")
+        return watch, (format(btc, "f") if btc else None)
+
+    def _btc_calm(self, state, day, now_ms):
+        if not state.get("btc_prev"):
+            return False
+        rows = self.klines("BTCUSDT", "5m", day, 300)
+        lows = [Decimal(str(r[3])) for r in rows if int(r[0]) >= day]
+        if not lows:
+            return False
+        drop = 1 - min(lows) / Decimal(state["btc_prev"])
+        return drop <= Decimal(str(self.config.get("btc_calm", 0.02)))
+
+    def _check_watch(self, state, amounts, busy, day, now_ms):
+        todo = [s for s in state["watch"] if s not in state["bought"] and s not in state["positions"]
+                and amounts.get(s, ZERO) == 0 and s not in busy]
+        if not todo:
+            return
+        hits = []
+        for symbol in todo:
             try:
-                self.executor.triggered_open_long(symbol, order["qty"], order["price"], order["id"])
-            except OrderStateUnknown:
-                pass
+                price = Decimal(str(self.price_fn(symbol)))
             except Exception as exc:
-                state["orders"].pop(symbol, None)
-                print(f"Dip-catcher order rejected ({symbol}): {exc}", flush=True)
+                print(f"Dip-catcher price unreadable ({symbol}): {exc}", flush=True)
                 continue
-            placed.append(f"{symbol.removesuffix('USDT')} {order['price']}")
-        if placed:
-            text = (f"Bugunun bekleyen alim emirleri (dunku kapanisin %{depth * 100:.0f} alti, her biri "
-                    f"~{size:.2f} USDT, {self.LEVERAGE}x): " + ", ".join(placed) + ".")
-            if skipped:
-                text += " Binance minimumu yuzunden atlanan: " + ", ".join(skipped) + "."
-            self._say(text)
+            if price <= Decimal(state["watch"][symbol]):
+                hits.append((symbol, price))
+        if not hits:
+            return
+        try:
+            calm = self._btc_calm(state, day, now_ms)
+        except Exception as exc:
+            print(f"Dip-catcher BTC check failed, no buy: {exc}", flush=True)
+            return
+        if not calm:
+            for symbol, _ in hits:
+                if symbol not in state.setdefault("told_btc", []):
+                    state["told_btc"].append(symbol)
+                    self._say(f"{symbol.removesuffix('USDT')} seviyeye indi ama BTC de bugun sert dustu; alinmadi.")
+            return
+        for symbol, price in hits:
+            self._buy(state, symbol, price, day)
+
+    def _buy(self, state, symbol, price, day):
+        try:
+            equity = Decimal(str(self.equity_fn()))
+            rules = self.market.rules(symbol)
+            size = equity * Decimal(str(self.config.get("size_fraction", 0.10)))
+            qty = _down(size / price, rules["step_size"])
+            if qty < rules["min_qty"] or qty * price < rules["min_notional"] * MIN_NOTIONAL_HEADROOM:
+                state["bought"].append(symbol)
+                self._say(f"{symbol.removesuffix('USDT')} seviyeye indi ama tutar Binance minimumunun altinda; atlandi.")
+                return
+            self.executor.set_isolated_margin(symbol)
+            self.executor.set_leverage(symbol, self.LEVERAGE)
+        except Exception as exc:
+            print(f"Dip-catcher could not prepare {symbol}: {exc}", flush=True)
+            return
+        buy_id = self._id("kv1fc", symbol, day)
+        state["bought"].append(symbol)          # once per coin per day, even if the result is unknown
+        _write(self.state_path, state)
+        try:
+            result = self.executor.market_open_long(symbol, format(qty, "f"), buy_id)
+        except OrderStateUnknown:
+            result = self.executor.query(symbol, buy_id)
+        except Exception as exc:
+            print(f"Dip-catcher buy rejected ({symbol}): {exc}", flush=True)
+            return
+        filled = Decimal(str(result.get("executedQty") or "0"))
+        if filled > 0:
+            entry = Decimal(str(result.get("avgPrice") or "0")) or price
+            self._protect(state, symbol, filled, entry, int(self.clock() * 1000))
 
     # ---- positions ---------------------------------------------------------------------------------
     def _protect(self, state, symbol, qty, entry, filled_ms):
         day = state.get("day") or filled_ms // DAY_MS * DAY_MS
         rules = self.market.rules(symbol)
-        stop = _down(entry * (1 - Decimal(str(self.config.get("stop", 0.25)))), rules["tick_size"])
-        tp = _up(entry * (1 + Decimal(str(self.config.get("take_profit", 0.08)))), rules["tick_size"])
+        stop = _down(entry * (1 - Decimal(str(self.config.get("stop", 0.10)))), rules["tick_size"])
+        tp = _up(entry * (1 + Decimal(str(self.config.get("take_profit", 0.03)))), rules["tick_size"])
         hold_ms = int(float(self.config.get("hold_hours", 24)) * 3_600_000)
         pos = {"qty": format(qty, "f"), "entry": format(entry, "f"), "stop": format(stop, "f"), "tp": format(tp, "f"),
                "stop_id": self._id("kv1fz", symbol, day), "tp_id": self._id("kv1fg", symbol, day),
@@ -211,8 +232,8 @@ class LiveDipCatcher:
         except Exception as exc:
             print(f"Dip-catcher take-profit failed ({symbol}): {exc}", flush=True)
         self._say(f"ALDIM: {symbol.removesuffix('USDT')} {pos['qty']} @ {pos['entry']} | hedef {pos['tp']} "
-                  f"(+%{float(self.config.get('take_profit', 0.08)) * 100:.0f}), stop {pos['stop']} "
-                  f"(-%{float(self.config.get('stop', 0.25)) * 100:.0f}), en gec {hold_ms // 3_600_000} saat.")
+                  f"(+%{float(self.config.get('take_profit', 0.03)) * 100:.0f}), stop {pos['stop']} "
+                  f"(-%{float(self.config.get('stop', 0.10)) * 100:.0f}), en gec {hold_ms // 3_600_000} saat.")
 
     def _manage_positions(self, state, amounts, open_ids, now_ms):
         for symbol, pos in list(state["positions"].items()):

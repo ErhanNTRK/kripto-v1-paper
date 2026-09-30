@@ -108,7 +108,9 @@ _SHORT_STOP_PREFIX = "kv1fp"
 _SHORT_CLOSE_PREFIXES = ("kv1fp", "kv1fe", "kv1fx")  # protective stop, emergency close, normal trend/emergency exit
 _LONG_OPEN_PREFIX = "kv1fl"
 _LONG_STOP_PREFIX = "kv1fq"
-_DIP_PROTECT_PREFIXES = ("kv1fg", "kv1fz")  # dip-catcher take-profit / stop (crypto_v1.dip_catcher)
+# Reduce-only orders of the side methods: dip-catcher take-profit / stop
+# (crypto_v1.dip_live) and the big-candle rule's stop (crypto_v1.spike_rule).
+_DIP_PROTECT_PREFIXES = ("kv1fg", "kv1fz", "kv1fj")
 _LONG_CLOSE_PREFIXES = ("kv1fq", "kv1fk", "kv1fy")  # protective stop, emergency close, normal trend/emergency exit
 
 

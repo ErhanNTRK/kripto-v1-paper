@@ -292,6 +292,15 @@ def write_2h_signal_state(strategy_config, runtime, now_2h):
                                          breaks_down=c["breaks_down"], score=c["volume_ratio"])
                       for c in short_candidates}
     _write_candidate_state(runtime / "short_state_2h.json", now_2h, short_events, pending_shorts, "pending_shorts")
+    # The user's big-candle-then-red rule (30 Sep 2026, crypto_v1.spike_rule):
+    # its candidates from these same closed 2H candles, taken by the
+    # housekeeping step right after the trend systems had their turn.
+    try:
+        from .spike_rule import spike_candidates
+        write_json(runtime / "spike_state.json",
+                   {"window": now_2h, "candidates": spike_candidates(data, long_symbols, strategy_config)})
+    except Exception as exc:
+        print(f"Spike rule scan failed: {exc}", flush=True)
     print(f"2H tarama: {len(long_symbols)} sembol kontrol edildi, "
          f"{len(long_candidates)} AL_ADAYI, {len(short_candidates)} SHORT_ADAYI bulundu.", flush=True)
 

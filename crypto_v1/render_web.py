@@ -10,6 +10,7 @@ from .binance_trade import OrderRejected, SpotExecutor
 from . import ledger, shadow
 from .dip_catcher import DipCatcher
 from .dip_live import LiveDipCatcher
+from .spike_rule import LiveSpikeRule
 from .data import candles, universe
 from .github_worker import local_tick
 from .live_controller import _known_or_place
@@ -1693,7 +1694,15 @@ def main():
     else:
         dip = DipCatcher(dip_config, runtime_dir / "dip_paper.json", manifest_path,
                          equity_fn=sleeve_equity, held_fn=held_symbols)
+    # The user's big-candle-then-red rule (30 Sep 2026), in the 2H sleeve.
+    spike = LiveSpikeRule(short_config_2h.get("spike_rule"), runtime_dir / "spike_live.json",
+                          runtime_dir / "spike_state.json", app_2h.futures_executor, app_2h.futures_market,
+                          equity_fn=sleeve_equity)
     def refresh_ledger():
+        try:
+            spike.tick()
+        except Exception as exc:
+            print(f"Spike rule failed: {exc}", flush=True)
         try:
             dip.tick()
         except Exception as exc:
