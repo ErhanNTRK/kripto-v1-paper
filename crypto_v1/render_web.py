@@ -8,6 +8,7 @@ from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
 from . import ledger, shadow
+from .dip_catcher import DipCatcher
 from .data import candles, universe
 from .github_worker import local_tick
 from .live_controller import _known_or_place
@@ -1677,7 +1678,18 @@ def main():
     # Trade ledger (user's request, 24 Sep 2026): every buy and sell with
     # its USDT result, refreshed hourly into ~/kripto/islem-kayitlari.
     ledger_state = {"at": 0.0}
+    # Dip-catcher, paper only for now (user's decision, 30 Sep 2026): sized
+    # from the 2H sleeve it will belong to, skipping coins the account holds.
+    def held_symbols():
+        return {p["symbol"] for p in APP.futures_executor.account().get("positions", [])
+                if Decimal(str(p.get("positionAmt") or "0")) != 0}
+    dip = DipCatcher(short_config_2h.get("dip_catcher"), runtime_dir / "dip_paper.json", manifest_path,
+                     equity_fn=lambda: app_2h.futures_market.pilot_status()["equity"], held_fn=held_symbols)
     def refresh_ledger():
+        try:
+            dip.tick()
+        except Exception as exc:
+            print(f"Dip-catcher failed: {exc}", flush=True)
         try:
             daily_summary(APP.futures_executor, APP.futures_market, runtime_dir, shadow_systems=shadow_systems)
         except Exception as exc:
