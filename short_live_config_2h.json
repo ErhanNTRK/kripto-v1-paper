@@ -25,6 +25,7 @@
   "min_stop_fraction": 0.03,
   "pump_filter_24h": 0.20,
   "breakeven_at": 0.02,
+  "ethbtc_filter_ema_days": 50,
   "daily_equity_stop_fraction": 0.1,
   "quality_risk_multipliers": [1.5, 0.5],
   "dip_catcher": {"mode": "live", "top_n": 10, "depth": 0.10, "take_profit": 0.03,

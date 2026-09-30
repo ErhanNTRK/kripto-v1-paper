@@ -112,9 +112,9 @@ class ProportionalRiskTests(unittest.TestCase):
         strat4 = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
         strat2 = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
         self.assertEqual((strat4["atr_multiplier"], strat2["atr_multiplier"]), (2.0, 3.0))
-        # Only the safe sleeve waits for ETH/BTC above its 50-day average.
-        self.assertEqual(four.get("ethbtc_filter_ema_days"), 50)
-        self.assertIsNone(two.get("ethbtc_filter_ema_days"))
+        # Both sleeves wait for ETH/BTC above its 50-day average: the 2H one too since 30 Sep 2026
+        # (user: "stop automatic longs in a bad period"; research/pit/regime_gate_test.py).
+        self.assertEqual((four.get("ethbtc_filter_ema_days"), two.get("ethbtc_filter_ema_days")), (50, 50))
         for config in (four, two):
             self.assertEqual(config["quality_risk_multipliers"], [1.5, 0.5])
             self.assertEqual(config["risk_per_trade_fraction"], 0.01)  # user's choice, 26 Sep 2026

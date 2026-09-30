@@ -194,24 +194,26 @@ VARIANTS = (("simdiki kurallar", {}),
             ("1+2+3b hepsi (kar al +%3)", dict(min_stop=0.03, pump=0.20, tp=0.03)),
             ("1+2+3c hepsi (stop girise)", dict(min_stop=0.03, pump=0.20, be=0.02)))
 
-out = {}
-C4 = validate_config(json.loads(Path("config_v5_long.json").read_text(encoding="utf-8")))
-D4 = prepare("4h", dict(C4, entry_mode="breakout"), 2.0)
-for name, kw in VARIANTS:
-    key = "4H " + name
-    out[key] = windows(D4, trail=6.0, maxpos=6, gate=True, **kw); print(line(key, *out[key]), flush=True)
-del D4
-D2 = prepare("2h", dict(load_2h_strategy(relax=False), entry_mode="breakout"), 3.0)
-for name, kw in VARIANTS:
-    key = "2H " + name
-    out[key] = windows(D2, **kw); print(line(key, *out[key]), flush=True)
 
-print(f"\n=== {TAG}: TUM SISTEM 25/75 (ayni kural iki kasada) ===")
-for name, _ in VARIANTS:
-    a, b = out["4H " + name], out["2H " + name]
-    rets = [0.25 * x + 0.75 * y for x, y in zip(a[0], b[0])]
-    st = {"hafta": a[1]["hafta"] + b[1]["hafta"],
-          "kazanan": (a[1]["kazanan"] * a[1]["hafta"] + b[1]["kazanan"] * b[1]["hafta"]) / max(1e-9, a[1]["hafta"] + b[1]["hafta"])}
-    print(line(name, rets, st), flush=True)
-json.dump({k: v[0] for k, v in out.items()}, open(Path(__file__).parent / f"rule_fix_{TAG}.json", "w"))
-print("BITTI", flush=True)
+if __name__ == "__main__":
+    out = {}
+    C4 = validate_config(json.loads(Path("config_v5_long.json").read_text(encoding="utf-8")))
+    D4 = prepare("4h", dict(C4, entry_mode="breakout"), 2.0)
+    for name, kw in VARIANTS:
+        key = "4H " + name
+        out[key] = windows(D4, trail=6.0, maxpos=6, gate=True, **kw); print(line(key, *out[key]), flush=True)
+    del D4
+    D2 = prepare("2h", dict(load_2h_strategy(relax=False), entry_mode="breakout"), 3.0)
+    for name, kw in VARIANTS:
+        key = "2H " + name
+        out[key] = windows(D2, **kw); print(line(key, *out[key]), flush=True)
+
+    print(f"\n=== {TAG}: TUM SISTEM 25/75 (ayni kural iki kasada) ===")
+    for name, _ in VARIANTS:
+        a, b = out["4H " + name], out["2H " + name]
+        rets = [0.25 * x + 0.75 * y for x, y in zip(a[0], b[0])]
+        st = {"hafta": a[1]["hafta"] + b[1]["hafta"],
+              "kazanan": (a[1]["kazanan"] * a[1]["hafta"] + b[1]["kazanan"] * b[1]["hafta"]) / max(1e-9, a[1]["hafta"] + b[1]["hafta"])}
+        print(line(name, rets, st), flush=True)
+    json.dump({k: v[0] for k, v in out.items()}, open(Path(__file__).parent / f"rule_fix_{TAG}.json", "w"))
+    print("BITTI", flush=True)
