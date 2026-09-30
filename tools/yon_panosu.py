@@ -172,7 +172,7 @@ def render(btc, ethbtc, rows):
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta http-equiv="refresh" content="60">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Yon Panosu</title><style>
 body{{background:#101418;color:#e6e6e6;font:13px system-ui,Segoe UI,sans-serif;margin:16px}}
-h1{{font-size:18px;margin:0 0 6px}} .note{{color:#8a96a3;margin:4px 0 10px}}
+h1{{font-size:18px;margin:0 0 6px}} h2{{font-size:15px;margin:8px 0 6px}} table.card td{{text-align:left}} .note{{color:#8a96a3;margin:4px 0 10px}}
 .btc{{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}}
 .chip{{background:#1c232b;border-radius:6px;padding:3px 8px}}
 table{{border-collapse:collapse;width:100%}} th,td{{padding:4px 6px;border-bottom:1px solid #222a33;text-align:right;white-space:nowrap}}
@@ -183,22 +183,130 @@ th{{position:sticky;top:0;background:#161c22;cursor:pointer;color:#aab4be}} td.s
 <div class="note">Sadece bilgi: bot bu sayfadan islem acmaz. Her 5 dakikada yenilenir (sayfa her dakika kendini yeniler).
 Oklar: fiyat EMA200 ustu/alti + EMA50/EMA200 + Ichimoku bulutu (3 oyun 2'si ayni yondeyse ok). Puan: 1g ve 4s cift sayilir,
 1s ve 5dk tek, BTC'ye gore guc +-2. Basliga tiklayinca siralar.</div>
-{head}<div class="wrap"><table id="t"><thead><tr>{ths}</tr></thead><tbody>{''.join(body)}</tbody></table></div>
+{head}<!--CARD--><div class="wrap"><table id="t"><thead><tr>{ths}</tr></thead><tbody>{''.join(body)}</tbody></table></div>
 <script>function sortBy(i){{const t=document.getElementById('t').tBodies[0];const r=[...t.rows];
 const v=x=>{{const s=x.cells[i].innerText.replace(/[x%,]/g,'');const n=parseFloat(s);return isNaN(n)?s:n}};
 const d=t.dataset.s==i?-1:1;t.dataset.s=d==1?i:'';r.sort((a,b)=>{{const p=v(a),q=v(b);return (p>q?1:p<q?-1:0)*-d}});
 r.forEach(x=>t.appendChild(x))}}</script></body></html>"""
 
 
+# ---- Prediction report card (user, 30 Sep 2026: "assume unlimited money, take every long and short the board
+# gives at once, and see how many are right after 15 / 30 / 60 minutes"). Every scan's verdict and price go to
+# tahminler.jsonl; once 15/30/60 minutes have passed, the 1-minute close at that moment decides it.
+LOG, DONE = OUT.parent / "tahminler.jsonl", OUT.parent / "sonuclar.jsonl"
+HORIZONS = (15, 30, 60)
+COST = 0.10          # % per round trip (market orders), taken off every trade's move
+CLASSES = ("GUCLU LONG", "LONG", "NOTR", "SHORT", "GUCLU SHORT")
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
+
+
+def record(rows, t_ms):
+    with LOG.open("a", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps({"t": t_ms, "s": r["s"] + "USDT", "v": r["verdict"], "p": r["price"]}) + "\n")
+
+
+def evaluate(preds, done, now_ms):
+    """Settle every prediction whose horizon has passed; returns the new results."""
+    keys = {(d["t"], d["s"], d["h"]) for d in done}
+    todo = {}
+    for p in preds:
+        for h in HORIZONS:
+            at = p["t"] + h * 60_000
+            if at <= now_ms - 60_000 and (p["t"], p["s"], h) not in keys:
+                todo.setdefault(p["s"], []).append((p, h, at))
+    new = []
+    for sym, items in todo.items():
+        start = min(at for _, _, at in items) // 60_000 * 60_000
+        k = _safe(lambda: get("klines", {"symbol": sym, "interval": "1m", "startTime": start, "limit": 1000}))
+        closes = {int(r[0]): float(r[4]) for r in (k or [])}
+        for p, h, at in items:
+            c = closes.get(at // 60_000 * 60_000)
+            if c is None:
+                if now_ms - at > 900 * 60_000:          # too old to fetch in one go: give up on it
+                    new.append({"t": p["t"], "s": sym, "h": h, "v": p["v"], "move": None})
+                continue
+            new.append({"t": p["t"], "s": sym, "h": h, "v": p["v"], "move": (c / p["p"] - 1) * 100})
+    if new:
+        with DONE.open("a", encoding="utf-8") as f:
+            for d in new:
+                f.write(json.dumps(d) + "\n")
+    return new
+
+
+def report_card(done):
+    """{(class, horizon): (n, right %, mean move in the predicted direction %, net after costs %)}"""
+    card = {}
+    for cls in CLASSES + ("HEPSI",):
+        side = 1 if "LONG" in cls else -1 if "SHORT" in cls else 0
+        for h in HORIZONS:
+            moves = [d["move"] for d in done if d["h"] == h and d["move"] is not None and (cls == "HEPSI" or d["v"] == cls)]
+            if not moves:
+                continue
+            if side:
+                directed = [side * m for m in moves]
+                card[(cls, h)] = (len(moves), 100 * sum(m > 0 for m in directed) / len(moves),
+                                  sum(directed) / len(moves), sum(directed) / len(moves) - COST)
+            else:
+                card[(cls, h)] = (len(moves), 100 * sum(m > 0 for m in moves) / len(moves), sum(moves) / len(moves), None)
+    return card
+
+
+def render_card(card, since):
+    if not card:
+        return '<div class="note">Tahmin karnesi: ilk sonuclar 15 dakika sonra gelir.</div>'
+    head = "".join(f"<th>{h} dk</th>" for h in HORIZONS)
+    body = []
+    for cls in CLASSES + ("HEPSI",):
+        cells = []
+        for h in HORIZONS:
+            c = card.get((cls, h))
+            if not c:
+                cells.append("<td>-</td>"); continue
+            n, right, mean, net = c
+            if net is None:
+                cells.append(f'<td class="flat">{n} olcum &middot; yukselen %{right:.0f} &middot; ort {mean:+.2f}%</td>')
+            else:
+                cls_ = "up" if net > 0 else "down"
+                cells.append(f'<td class="{cls_}">{n} islem &middot; dogru %{right:.0f} &middot; ort {mean:+.2f}% '
+                             f'&middot; masraf sonrasi {net:+.2f}%</td>')
+        label = {"NOTR": "NOTR (karsilastirma)", "HEPSI": "TUM COINLER (piyasa)"}.get(cls, cls)
+        body.append(f'<tr><td class="sym">{label}</td>{"".join(cells)}</tr>')
+    return (f'<h2>Tahmin karnesi <span class="note">({since} tarihinden beri; her tahmin aninda fiyat, 15/30/60 dk sonraki '
+            f'1 dakikalik kapanisla karsilastirilir; LONG yukselirse, SHORT duserse dogru; masraf %{COST:.2f})</span></h2>'
+            f'<div class="wrap"><table class="card"><thead><tr><th>Yorum</th>{head}</tr></thead>'
+            f'<tbody>{"".join(body)}</tbody></table></div><br>')
+
+
 def main():
     once = "--once" in sys.argv
     OUT.parent.mkdir(parents=True, exist_ok=True)
     opened = False
+    preds, done = _read_jsonl(LOG), _read_jsonl(DONE)
     while True:
         t0 = time.time()
         try:
             btc, ethbtc, rows = scan()
-            OUT.write_text(render(btc, ethbtc, rows), encoding="utf-8")
+            now_ms = int(time.time() * 1000)
+            done += evaluate(preds, done, now_ms)
+            settled = {(d["t"], d["s"]) for d in done if d["h"] == HORIZONS[-1]}
+            preds = [p for p in preds if (p["t"], p["s"]) not in settled]
+            new = [{"t": now_ms, "s": r["s"] + "USDT", "v": r["verdict"], "p": r["price"]} for r in rows]
+            record(rows, now_ms); preds += new
+            first = min([d["t"] for d in done] + [now_ms])
+            card = render_card(report_card(done), datetime.fromtimestamp(first / 1000).strftime("%d.%m %H:%M"))
+            OUT.write_text(render(btc, ethbtc, rows).replace("<!--CARD-->", card), encoding="utf-8")
             print(f"{datetime.now():%H:%M:%S} pano yenilendi: {len(rows)} coin ({time.time()-t0:.0f} sn) -> {OUT}", flush=True)
             if not opened and not once:
                 webbrowser.open(OUT.as_uri()); opened = True
