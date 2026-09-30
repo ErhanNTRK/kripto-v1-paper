@@ -141,6 +141,31 @@ class ApproveLongLeveragedTests(unittest.TestCase):
     candidate (2H's fixed 2x) wins; otherwise it's computed from
     "breaks_up" (4H's 3x/5x tiering, via leverage_for_signal)."""
 
+    def test_a_tight_stop_is_widened_to_the_minimum_distance(self):
+        # 30 Sep 2026 (TRXUSDT): an ATR stop 1% away made a position bigger than the wallet.
+        tight = {"state": {"pending_buys": {"SOLUSDT": {"stop": 99, "leverage": 2}},
+                           "events": SAVED_LONG_FIXED["state"]["events"]}}
+        result = approve_long_leveraged(7, "AL", 501000, tight, dict(C_LONG, min_stop_fraction=0.03), {},
+                                        Market(), Mock())
+        self.assertEqual(Decimal(result["plan"]["stop_price"]), Decimal("97"))
+        wide = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, dict(C_LONG, min_stop_fraction=0.03), {},
+                                      Market(), Mock())
+        self.assertEqual(Decimal(wide["plan"]["stop_price"]), Decimal("95"))     # already wider: unchanged
+
+    def test_a_coin_that_pumped_in_the_last_24_hours_is_not_bought(self):
+        # 30 Sep 2026 (QNTUSDT): +25% in a day with a wick to a new high.
+        class PumpMarket(Market):
+            low = 80
+            def low_24h(self, symbol): return self.low
+        executor = Mock()
+        config = dict(C_LONG, pump_filter_24h=0.20)
+        result = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, config, {}, PumpMarket(), executor)
+        self.assertEqual(result, {"status": "rejected", "reason": "pumped_24h"})
+        executor.assert_not_called()
+        PumpMarket.low = 90                                                        # +11%: allowed
+        self.assertEqual(approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, config, {}, PumpMarket(),
+                                                Mock())["status"], "preview")
+
     def test_an_explicit_leverage_on_the_candidate_is_used_as_is(self):
         executor = Mock()
         result = approve_long_leveraged(7, "AL", 501000, SAVED_LONG_FIXED, C_LONG, {}, Market(), executor)

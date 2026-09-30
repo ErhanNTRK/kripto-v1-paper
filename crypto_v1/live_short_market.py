@@ -340,6 +340,10 @@ class BinanceFuturesMarket:
         self._universe_fn = universe_fn or (lambda: universe(self.strategy_config))
         self._rules_cache = {}
 
+    def low_24h(self, symbol):
+        """The lowest traded price of the last 24 hours (public ticker), for the pump filter."""
+        return Decimal(str(futures_get("ticker/24hr", {"symbol": symbol}).get("lowPrice", "0")))
+
     def price(self, symbol):
         """Public mark price. positionRisk (used until 22 Sep 2026) reports
         markPrice "0" for a symbol with NO open position -- i.e. for every

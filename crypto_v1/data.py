@@ -65,7 +65,7 @@ FUTURES_BASE = 'https://fapi.binance.com'
 
 
 def futures_get(path, params=None):
-    if path not in ('exchangeInfo', 'premiumIndex'):
+    if path not in ('exchangeInfo', 'premiumIndex', 'ticker/24hr'):
         raise ValueError('Only public futures market-data endpoints allowed')
     url = FUTURES_BASE + '/fapi/v1/' + path + '?' + urllib.parse.urlencode(params or {})
     for attempt in range(5):

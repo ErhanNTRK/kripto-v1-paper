@@ -1073,6 +1073,16 @@ class RatchetTests(unittest.TestCase):
         self.assertEqual(new_id.count("t"), 1)
         self.assertLessEqual(len(new_id), 36)
 
+    def test_break_even_once_the_trade_has_been_two_percent_up(self):
+        # 30 Sep 2026: 16 of the bot's 32 own closes had been +2% up before turning into losses.
+        app = self._app(price=102)
+        app.short_config = dict(self.CONFIG, breakeven_at=0.02)
+        position = self._position()
+        with patch("crypto_v1.render_web.send_message"):
+            result = app._ratchet(position, {"atr": 2.0}, extreme=102.5)     # not 1R ahead yet
+        self.assertEqual(result["to"], "100.15")                               # entry + costs
+        self.assertIsNone(self._app(price=101)._ratchet(self._position(), {"atr": 2.0}, extreme=101.5))
+
     def test_does_nothing_before_the_trade_is_1r_ahead(self):
         app = self._app(price=105)
         self.assertIsNone(app._ratchet(self._position(), {"atr": 2.0}, extreme=105))

@@ -986,6 +986,8 @@ class LiveApp:
     # A resting stop is only moved when the new level is at least this much
     # better, so ordinary noise does not cancel/replace an order every tick.
     RATCHET_MIN_IMPROVEMENT = Decimal("0.003")
+    # Fees and slippage both ways, so a break-even stop really closes at about zero.
+    BREAKEVEN_COSTS = Decimal("0.0015")
 
     def _ratchet(self, position, feature, extreme):
         """Move the RESTING protective stop in the profitable direction as
@@ -1012,12 +1014,23 @@ class LiveApp:
             return None
         risk = entry - stop if side == "long" else stop - entry
         armed = risk <= 0 or (best >= entry + risk if side == "long" else best <= entry - risk)
-        if not armed:
+        # Break-even (30 Sep 2026, research/pit/rule_fix_test.py): once the trade has been
+        # breakeven_at in front, the stop goes to the entry plus costs. Live, 16 of the bot's 32
+        # own closes had been +2% up before they turned into losses.
+        be = Decimal(str((self.short_config or {}).get("breakeven_at") or 0))
+        be_hit = be > 0 and (best >= entry * (1 + be) if side == "long" else best <= entry * (1 - be))
+        if not armed and not be_hit:
             return None
         distance = self._resting_distance(atr)
         rules = self.futures_market.rules(position["symbol"])
-        moved = (_down(best - distance, rules["tick_size"]) if side == "long"
-                 else _up(best + distance, rules["tick_size"]))
+        levels = []
+        if armed:
+            levels.append(_down(best - distance, rules["tick_size"]) if side == "long"
+                          else _up(best + distance, rules["tick_size"]))
+        if be_hit:
+            levels.append(_up(entry * (1 + self.BREAKEVEN_COSTS), rules["tick_size"]) if side == "long"
+                          else _down(entry * (1 - self.BREAKEVEN_COSTS), rules["tick_size"]))
+        moved = max(levels) if side == "long" else min(levels)
         if side == "long":
             threshold = stop * (Decimal("1") + self.RATCHET_MIN_IMPROVEMENT)
         else:

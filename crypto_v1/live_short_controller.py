@@ -187,6 +187,18 @@ def approve_long_leveraged(update_id, command, now_ms, saved, config, environmen
     drift = Decimal(str(config.get("max_entry_drift_fraction", 0.005)))
     if price <= stop or price > close * (Decimal("1") + drift):
         return {"status": "rejected", "reason": "entry_price_moved"}
+    # Two fixes from the live audit and research/pit/rule_fix_test.py (30 Sep 2026):
+    # - no entry after a 24-hour pump (QNTUSDT: +25% in a day with a wick to a new high);
+    # - the stop at least min_stop_fraction under the price (TRXUSDT: an ATR stop 1% away made a
+    #   235 USDT position, bigger than the whole wallet, that ordinary noise would stop out).
+    pump = config.get("pump_filter_24h")
+    if pump and hasattr(market, "low_24h"):
+        low = Decimal(str(market.low_24h(signal["symbol"])))
+        if low > 0 and close / low - 1 > Decimal(str(pump)):
+            return {"status": "rejected", "reason": "pumped_24h"}
+    min_stop = config.get("min_stop_fraction")
+    if min_stop:
+        stop = min(stop, price * (Decimal("1") - Decimal(str(min_stop))))
     tier = signal.get("leverage")
     if tier is None:
         tier = leverage_for_signal(signal.get("breaks_up", 0))
