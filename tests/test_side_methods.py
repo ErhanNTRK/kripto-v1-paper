@@ -140,6 +140,27 @@ class SignalTraderTests(unittest.TestCase):
         self._trader().tick()
         self.assertFalse(any(c[0] == "buy" for c in self.ex.calls))
 
+    def test_an_unfilled_looking_response_is_still_protected(self):
+        # Live 30 Sep 2026: ASTERUSDT's buy filled but the response read NEW / 0 and no stop was placed.
+        buy = self.ex.market_open_long
+        self.ex.market_open_long = lambda s, q, c: (buy(s, q, c), {"status": "NEW", "executedQty": "0"})[1]
+        t = self._trader()
+        t.settle_sleep = lambda s: None
+        state = t.tick()
+        stop = next(c for c in self.ex.calls if c[0] == "stop")
+        self.assertEqual((stop[2], Decimal(stop[3])), ("1.5", Decimal("9")))
+        self.assertTrue(any(c[0] == "tp" for c in self.ex.calls))
+        self.assertIn("ASTERUSDT", state["positions"])
+
+    def test_a_buy_that_never_fills_is_reported_not_protected(self):
+        self.ex.market_open_long = lambda s, q, c: {"status": "NEW", "executedQty": "0"}
+        t = self._trader()
+        t.settle_sleep = lambda s: None
+        state = t.tick()
+        self.assertFalse(any(c[0] == "stop" for c in self.ex.calls))
+        self.assertEqual(state["positions"], {})
+        self.assertTrue(any("kontrol edin" in m for m in self.sent))
+
     def test_no_take_profit_when_not_configured(self):
         cfg = {"mode": "live", "stop_atr": 2.0, "hold_hours": 480, "risk_fraction": 0.015, "max_age_minutes": 30}
         self._trader(cfg).tick()

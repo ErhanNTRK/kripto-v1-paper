@@ -19,6 +19,7 @@ import time
 from decimal import Decimal
 
 from .dip_catcher import _read, _write
+from .side_methods import settle_buy
 
 TWO_HOUR_MS = 2 * 3_600_000
 
@@ -54,6 +55,7 @@ def spike_candidates(data, symbols, config, min_body_atr=3.0, lookback=50):
 
 class LiveSpikeRule:
     LEVERAGE = 3
+    settle_sleep = staticmethod(time.sleep)
 
     def __init__(self, config, state_path, signal_path, executor, market, send=None, clock=time.time,
                  equity_fn=None):
@@ -140,10 +142,12 @@ class LiveSpikeRule:
             except Exception as exc:
                 print(f"Spike rule buy rejected ({symbol}): {exc}", flush=True)
                 continue
-            filled = Decimal(str(result.get("executedQty") or "0"))
+            filled, avg = settle_buy(self.executor, symbol, ids["open"], result, sleep=self.settle_sleep)
             if filled <= 0:
+                self._say(f"{symbol.removesuffix('USDT')} alim emri gonderildi ama dolmus gorunmuyor; "
+                          f"Binance'te kontrol edin.")
                 continue
-            entry = Decimal(str(result.get("avgPrice") or "0")) or price
+            entry = avg or price
             hold_ms = int(float(self.config.get("hold_hours", 24)) * 3_600_000)
             pos = {"qty": format(filled, "f"), "entry": format(entry, "f"), "stop": format(stop, "f"),
                    "stop_id": ids["stop"], "exit_id": ids["exit"], "opened_at": now_ms, "until": bar_close + hold_ms}

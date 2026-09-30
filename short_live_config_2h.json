@@ -28,8 +28,8 @@
                   "stop": 0.10, "hold_hours": 24, "size_fraction": 0.10, "btc_calm": 0.02},
   "spike_rule": {"mode": "live", "stop_atr": 2.0, "hold_hours": 24, "risk_fraction": 0.015,
                  "max_age_minutes": 30},
-  "daily_cup": {"mode": "live", "stop_atr": 2.0, "hold_hours": 480, "risk_fraction": 0.015,
+  "daily_cup": {"mode": "off", "stop_atr": 2.0, "hold_hours": 480, "risk_fraction": 0.015,
                 "max_age_minutes": 360},
-  "short_cup": {"mode": "live", "stop_atr": 2.0, "hold_hours": 24, "take_profit": 0.03, "risk_fraction": 0.015,
+  "short_cup": {"mode": "off", "stop_atr": 2.0, "hold_hours": 24, "take_profit": 0.03, "risk_fraction": 0.015,
                 "max_age_minutes": 30}
 }

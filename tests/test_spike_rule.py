@@ -119,6 +119,16 @@ class LiveSpikeRuleTests(unittest.TestCase):
         self.assertIn("SOLUSDT", state["positions"])
         self.assertTrue(any("ALDIM" in m for m in self.sent))
 
+    def test_an_unfilled_looking_response_is_still_protected(self):
+        buy = self.ex.market_open_long
+        self.ex.market_open_long = lambda s, q, c: (buy(s, q, c), {"status": "NEW", "executedQty": "0"})[1]
+        rule = self._rule()
+        rule.settle_sleep = lambda s: None
+        state = rule.tick()
+        stop = next(c for c in self.ex.calls if c[0] == "stop")
+        self.assertEqual((stop[2], Decimal(stop[3])), ("2.2", Decimal("10.5")))
+        self.assertIn("SOLUSDT", state["positions"])
+
     def test_each_signal_is_taken_once(self):
         rule = self._rule()
         rule.tick(); rule.tick()

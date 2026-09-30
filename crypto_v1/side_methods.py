@@ -24,6 +24,40 @@ DAY_MS = 86_400_000
 FOUR_HOUR_MS = 4 * 3_600_000
 
 
+def _positive(value):
+    d = Decimal(str(value or "0"))
+    return d if d > 0 else None
+
+
+def settle_buy(executor, symbol, client_id, order, attempts=5, sleep=time.sleep):
+    """(filled qty, average price or None) of a MARKET buy. Its own response can read NEW with executedQty 0
+    although it fills a moment later: live 30 Sep 2026 the 4H short cup bought 72 ASTERUSDT at 15:29:58, the
+    response read unfilled, and the coin sat with no stop and no record (the 2H system learned this on
+    23 Sep with PROVEUSDT, live_short_controller._settle_fill). Asks Binance for the order again, then takes
+    the account's own position -- the caller only buys a coin the account does not hold."""
+    order = order or {}
+    for attempt in range(attempts + 1):
+        qty = Decimal(str(order.get("executedQty") or "0"))
+        if qty > 0 and order.get("status") in (None, "FILLED"):
+            return qty, _positive(order.get("avgPrice"))
+        if attempt == attempts:
+            break
+        sleep(0.5)
+        try:
+            order = executor.query(symbol, client_id) or {}
+        except Exception as exc:
+            print(f"Buy check failed ({symbol} {client_id}): {exc}", flush=True)
+    if qty > 0:
+        return qty, _positive(order.get("avgPrice"))
+    try:
+        for p in executor.account().get("positions", []):
+            if p.get("symbol") == symbol and Decimal(str(p.get("positionAmt") or "0")) > 0:
+                return Decimal(str(p["positionAmt"])), _positive(p.get("entryPrice"))
+    except Exception as exc:
+        print(f"Position check failed ({symbol}): {exc}", flush=True)
+    return Decimal("0"), None
+
+
 def _rows(klines, now_ms):
     return [{"t": int(r[0]), "o": float(r[1]), "h": float(r[2]), "l": float(r[3]), "c": float(r[4])}
             for r in klines if int(r[6]) < now_ms]
@@ -136,6 +170,7 @@ class SideScanner:
 
 class SignalTrader:
     LEVERAGE = 3
+    settle_sleep = staticmethod(time.sleep)
 
     def __init__(self, config, label, prefixes, state_path, signal_path, executor, market, send=None,
                  clock=time.time, equity_fn=None):
@@ -222,10 +257,12 @@ class SignalTrader:
             except Exception as exc:
                 print(f"{self.label} buy rejected ({symbol}): {exc}", flush=True)
                 continue
-            filled = Decimal(str(result.get("executedQty") or "0"))
+            filled, avg = settle_buy(self.executor, symbol, ids["open"], result, sleep=self.settle_sleep)
             if filled <= 0:
+                self._say(f"{symbol.removesuffix('USDT')} alim emri gonderildi ama dolmus gorunmuyor; "
+                          f"Binance'te kontrol edin.")
                 continue
-            entry = Decimal(str(result.get("avgPrice") or "0")) or price
+            entry = avg or price
             hold_ms = int(float(self.config.get("hold_hours", 24)) * 3_600_000)
             pos = {"qty": format(filled, "f"), "entry": format(entry, "f"), "stop": format(stop, "f"),
                    "stop_id": ids["stop"], "tp_id": ids.get("tp"), "exit_id": ids["exit"],

@@ -28,12 +28,14 @@ from .binance_trade import OrderRejected, OrderStateUnknown
 from .dip_catcher import DAY_MS, _public_klines, _read, _write
 from .live_execution import MIN_NOTIONAL_HEADROOM, _down, _up
 from .live_short_market import symbol_code
+from .side_methods import settle_buy
 
 ZERO = Decimal("0")
 
 
 class LiveDipCatcher:
     LEVERAGE = 3
+    settle_sleep = staticmethod(time.sleep)
 
     def __init__(self, config, state_path, manifest_path, executor, market, send=None, clock=time.time,
                  equity_fn=None, klines=None, price_fn=None):
@@ -204,10 +206,12 @@ class LiveDipCatcher:
         except Exception as exc:
             print(f"Dip-catcher buy rejected ({symbol}): {exc}", flush=True)
             return
-        filled = Decimal(str(result.get("executedQty") or "0"))
+        filled, avg = settle_buy(self.executor, symbol, buy_id, result, sleep=self.settle_sleep)
         if filled > 0:
-            entry = Decimal(str(result.get("avgPrice") or "0")) or price
-            self._protect(state, symbol, filled, entry, int(self.clock() * 1000))
+            self._protect(state, symbol, filled, avg or price, int(self.clock() * 1000))
+        else:
+            self._say(f"{symbol.removesuffix('USDT')} alim emri gonderildi ama dolmus gorunmuyor; "
+                      f"Binance'te kontrol edin.")
 
     # ---- positions ---------------------------------------------------------------------------------
     def _protect(self, state, symbol, qty, entry, filled_ms):

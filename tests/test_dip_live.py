@@ -109,6 +109,24 @@ class LiveDipCatcherTests(unittest.TestCase):
         self.assertEqual(len(self.sent), 1)
         self.assertIn("BTC", self.sent[0])
 
+    def test_an_unfilled_looking_response_is_checked_again_and_protected(self):
+        buy = self.ex.market_open_long
+
+        def late_fill(symbol, qty, cid):
+            buy(symbol, qty, cid)
+            self.ex.orders[cid] = {"status": "FILLED", "executedQty": qty, "avgPrice": "89.5"}
+            return {"status": "NEW", "executedQty": "0"}
+        self.ex.market_open_long = late_fill
+        dip = self._dip()
+        dip.settle_sleep = lambda s: None
+        dip.tick()
+        self.prices["SOLUSDT"] = 89.5
+        state = dip.tick()
+        stop = next(c for c in self.ex.calls if c[0] == "stop")
+        self.assertEqual(stop[2], "0.223")
+        self.assertIn("SOLUSDT", state["positions"])
+        self.assertEqual(state["positions"]["SOLUSDT"]["entry"], "89.5")
+
     def test_buys_at_market_when_a_coin_reaches_its_level_and_btc_is_calm(self):
         dip = self._dip()
         dip.tick()
