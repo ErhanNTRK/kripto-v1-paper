@@ -169,8 +169,7 @@ def render(btc, ethbtc, rows):
     cols = ["Coin", "Yorum", "Puan", "5dk", "1s", "4s", "1g", "Ichi 4s/1g", "BTC'ye gore 24s %", "BTC'ye gore 7g %",
             "Hacim (son 1s)", "RSI 1s", "Fiyat", "24s %", "24s dipten %", "Fonlama %", "Uyari"]
     ths = "".join(f'<th onclick="sortBy({i})">{c}</th>' for i, c in enumerate(cols))
-    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta http-equiv="refresh" content="60">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Yon Panosu</title><style>
+    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Yon Panosu</title><style>
 body{{background:#101418;color:#e6e6e6;font:13px system-ui,Segoe UI,sans-serif;margin:16px}}
 h1{{font-size:18px;margin:0 0 6px}} h2{{font-size:15px;margin:8px 0 6px}} table.card td{{text-align:left}} .note{{color:#8a96a3;margin:4px 0 10px}}
 .btc{{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}}
@@ -180,14 +179,16 @@ th{{position:sticky;top:0;background:#161c22;cursor:pointer;color:#aab4be}} td.s
 .up{{color:#3ecf8e}} .down{{color:#ff6b6b}} .flat{{color:#8a96a3}} .b{{font-weight:700}} .warn{{color:#f5b041;text-align:left}}
 .wrap{{overflow-x:auto}}</style></head><body>
 <h1>Yon Panosu &middot; {now}</h1>
-<div class="note">Sadece bilgi: bot bu sayfadan islem acmaz. Her 5 dakikada yenilenir (sayfa her dakika kendini yeniler).
+<div class="note">Sadece bilgi: bot bu sayfadan islem acmaz. Her 5 dakikada yenilenir (sayfa her dakika kendini yeniler, kaldiginiz yerde kalir; tahmin karnesi tablonun altinda).
 Oklar: fiyat EMA200 ustu/alti + EMA50/EMA200 + Ichimoku bulutu (3 oyun 2'si ayni yondeyse ok). Puan: 1g ve 4s cift sayilir,
 1s ve 5dk tek, BTC'ye gore guc +-2. Basliga tiklayinca siralar.</div>
-{head}<!--CARD--><div class="wrap"><table id="t"><thead><tr>{ths}</tr></thead><tbody>{''.join(body)}</tbody></table></div>
+{head}<div class="wrap"><table id="t"><thead><tr>{ths}</tr></thead><tbody>{''.join(body)}</tbody></table></div><br><!--CARD-->
 <script>function sortBy(i){{const t=document.getElementById('t').tBodies[0];const r=[...t.rows];
 const v=x=>{{const s=x.cells[i].innerText.replace(/[x%,]/g,'');const n=parseFloat(s);return isNaN(n)?s:n}};
 const d=t.dataset.s==i?-1:1;t.dataset.s=d==1?i:'';r.sort((a,b)=>{{const p=v(a),q=v(b);return (p>q?1:p<q?-1:0)*-d}});
-r.forEach(x=>t.appendChild(x))}}</script></body></html>"""
+r.forEach(x=>t.appendChild(x))}}
+const m=location.hash.match(/y=([0-9]+)/);if(m)window.scrollTo(0,+m[1]);
+setTimeout(()=>{{location.hash='y='+Math.round(window.scrollY);location.reload()}},60000);</script></body></html>"""
 
 
 # ---- Prediction report card (user, 30 Sep 2026: "assume unlimited money, take every long and short the board
