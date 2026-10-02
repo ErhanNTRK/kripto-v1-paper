@@ -201,6 +201,7 @@ def main():
     if cmd == "dongu":
         every = int(sys.argv[2]) if len(sys.argv) > 2 else 15
         while True:
+            state = load()  # re-read: a veto or call noted from another window must not be overwritten
             check(state); save(state); report(state); print(flush=True)
             time.sleep(every * 60)
     check(state); save(state); report(state)
