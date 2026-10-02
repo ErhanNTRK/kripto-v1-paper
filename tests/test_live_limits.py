@@ -107,11 +107,12 @@ class ProportionalRiskTests(unittest.TestCase):
         self.assertEqual((four["pilot_capital_fraction"], two["pilot_capital_fraction"]), (0.25, 0.75))
         self.assertAlmostEqual(four["pilot_capital_usdt"] + two["pilot_capital_usdt"], 156.0)
         self.assertAlmostEqual(four["pilot_capital_usdt"] / 156.0, 0.25)
-        # The 2H sleeve's first stop sits 3 ATR below entry (stop hunts; the
-        # 2021-23 blind test: 12-month median -44% -> -9%), the 4H one stays at 2.
+        # The 2H sleeve's first stop sits 5 ATR below entry since 2 Oct 2026 (user's choice;
+        # research/pit/stop_placement.py: worst 12 months 17->35$ bad era, 112->119$ good era,
+        # half the losing stops), the 4H one stays at 2.
         strat4 = json.loads(Path("config_v5_long.json").read_text(encoding="utf-8"))
         strat2 = json.loads(Path("config_v5_long_2h.json").read_text(encoding="utf-8"))
-        self.assertEqual((strat4["atr_multiplier"], strat2["atr_multiplier"]), (2.0, 3.0))
+        self.assertEqual((strat4["atr_multiplier"], strat2["atr_multiplier"]), (2.0, 5.0))
         # Both sleeves wait for ETH/BTC above its 50-day average: the 2H one too since 30 Sep 2026
         # (user: "stop automatic longs in a bad period"; research/pit/regime_gate_test.py).
         self.assertEqual((four.get("ethbtc_filter_ema_days"), two.get("ethbtc_filter_ema_days")), (50, 50))

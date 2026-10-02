@@ -10,7 +10,7 @@
   "cap_at_target": false,
   "min_breaks": 1,
   "btc_filter": "loose",
-  "atr_multiplier": 3.0,
+  "atr_multiplier": 5.0,
   "trailing_atr": 8.0,
   "volume_multiple": 1.5,
   "rsi_min": 55,
