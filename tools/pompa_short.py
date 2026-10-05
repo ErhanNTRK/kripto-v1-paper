@@ -1,10 +1,11 @@
 """Weekly pump fade, PAPER (5 Oct 2026): every Monday short the 10 top-100 USDT-M coins that rose most over the last
-30 days, while ETH/BTC is above its 50-day EMA; cover the next Monday 00:00 UTC or at +40% over the entry.
+30 days, while ETH/BTC is above its 50-day EMA and the top 100's median 30-day return is under +10% (the mania rule,
+research/pit/mania_and_pair.py: it turned 2021 from x0.23 into x0.97 and kept 2024-26); cover the next Monday 00:00 UTC or at +40% over the entry.
 Research: research/pit/pump_fade*.py. Public data only, no keys, no orders.
 
   python tools/pompa_short.py sec    this week's picks (entry = this Monday's 00:00 UTC open)
   python tools/pompa_short.py izle   mark the open week: stops on 1h highs, P&L at 1x per 10 USDT a coin"""
-import json, sys, time, urllib.parse, urllib.request
+import json, statistics, sys, time, urllib.parse, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -57,7 +58,8 @@ def pick():
         time.sleep(0.03)
     top100 = sorted(rows, key=lambda x: -x["vol30"])[:100]
     picks = sorted(top100, key=lambda x: -x["rise"])[:N]
-    state = dict(week=week, gate_open=is_open, ethbtc=r, ema50=m, picks=[dict(p, stop=p["entry"] * (1 + STOP), status="ACIK")
+    med30 = statistics.median(x["rise"] for x in top100)
+    state = dict(week=week, gate_open=is_open, med30=med30, ethbtc=r, ema50=m, picks=[dict(p, stop=p["entry"] * (1 + STOP), status="ACIK")
                                                                          for p in picks], checked=week)
     path.write_text(json.dumps(state, indent=1), encoding="utf-8")
     report(state)
@@ -76,8 +78,11 @@ def check(state):
 
 def report(state):
     w = datetime.fromtimestamp(state["week"] / 1000, timezone.utc)
-    lines = [f"POMPA SHORT (kagit) | hafta {w:%Y-%m-%d} | kapi {'ACIK -> sistem calisir' if state['gate_open'] else 'KAPALI -> bu hafta islem yok'} "
-             f"(ETH/BTC {state['ethbtc']:.5f}, EMA50 {state['ema50']:.5f})"]
+    med = state.get("med30")
+    live = state["gate_open"] and (med is None or med < 0.10)
+    lines = [f"POMPA SHORT (kagit) | hafta {w:%Y-%m-%d} | {'SISTEM CALISIR' if live else 'BU HAFTA ISLEM YOK'} | kapi "
+             f"{'acik' if state['gate_open'] else 'kapali'} (ETH/BTC {state['ethbtc']:.5f}, EMA50 {state['ema50']:.5f}) | "
+             f"cilginlik olcusu: ilk 100'un 30g ortanca getirisi %{100 * (med or 0):+.1f} (sinir +%10)"]
     tot = 0.0
     for p in state["picks"]:
         price = p.get("exit", p.get("last", p["entry"]))

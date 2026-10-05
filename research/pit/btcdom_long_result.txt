@@ -1,0 +1,6 @@
+BTCDOM long 1x, her zaman      : 100$ ->   165 | en derin dusus %42 | 2021:x0.73 2022:x1.00 2023:x1.42 2024:x1.37 2025:x1.15 2026:x1.00
+BTCDOM long 2x, her zaman      : 100$ ->   156 | en derin dusus %69 | 2021:x0.49 2022:x0.87 2023:x1.91 2024:x1.70 2025:x1.13 2026:x0.98
+BTCDOM long 1x, kapi kapaliyken: 100$ ->   192 | en derin dusus %27 | 2021:x0.89 2022:x1.13 2023:x1.12 2024:x1.16 2025:x1.47 2026:x1.00
+BTCDOM long 2x, kapi kapaliyken: 100$ ->   266 | en derin dusus %49 | 2021:x0.77 2022:x1.19 2023:x1.19 2024:x1.27 2025:x1.98 2026:x0.98
+BTCDOM long 1x, kapi acikken   : 100$ ->    76 | en derin dusus %44 | 2021:x0.81 2022:x0.87 2023:x1.23 2024:x1.14 2025:x0.76 2026:x0.99
+BTCDOM long 2x, kapi acikken   : 100$ ->    47 | en derin dusus %72 | 2021:x0.62 2022:x0.72 2023:x1.50 2024:x1.27 2025:x0.55 2026:x0.98
