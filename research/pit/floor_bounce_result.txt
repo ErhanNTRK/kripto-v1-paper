@@ -1,0 +1,140 @@
+301 coin, 1 saatlik mum; maliyet islem basi %0.20
+
+kontrol grubu: 23039 rastgele saat (dusen coinlerde, coin basina gunde en fazla 1)
+
+=== zemin 30 gun, giris zeminin en fazla %10 ustunde (17873 sinyal saati) ===
+ stop zemin-%1  hedef +%5    :  2388 islem | kazanan % 50 | islem basi %-1.06 | PF 0.68 | 1.yil %-1.12 2.yil %-0.99 | stop %39 (sonra girise donen %43) | 100$ ->     23 (en derin dusus %89)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 57 | islem basi %-0.47 | PF 0.85
+ stop zemin-%1  hedef +%10   :  2224 islem | kazanan % 40 | islem basi %-1.14 | PF 0.70 | 1.yil %-1.26 2.yil %-1.01 | stop %45 (sonra girise donen %44) | 100$ ->     20 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 45 | islem basi %-0.41 | PF 0.89
+ stop zemin-%1  hedef +%20   :  2196 islem | kazanan % 38 | islem basi %-1.07 | PF 0.72 | 1.yil %-1.11 2.yil %-1.03 | stop %46 (sonra girise donen %44) | 100$ ->     24 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 41 | islem basi %-0.45 | PF 0.89
+ stop zemin-%1  hedef 72s tut:  2195 islem | kazanan % 38 | islem basi %-1.13 | PF 0.71 | 1.yil %-1.10 2.yil %-1.16 | stop %46 (sonra girise donen %44) | 100$ ->     13 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 40 | islem basi %-0.51 | PF 0.87
+ stop zemin-%3  hedef +%5    :  2388 islem | kazanan % 52 | islem basi %-1.25 | PF 0.65 | 1.yil %-1.41 2.yil %-1.06 | stop %32 (sonra girise donen %36) | 100$ ->     16 (en derin dusus %91)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 60 | islem basi %-0.42 | PF 0.87
+ stop zemin-%3  hedef +%10   :  2224 islem | kazanan % 42 | islem basi %-1.30 | PF 0.68 | 1.yil %-1.54 2.yil %-1.03 | stop %36 (sonra girise donen %37) | 100$ ->     15 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 48 | islem basi %-0.34 | PF 0.91
+ stop zemin-%3  hedef +%20   :  2196 islem | kazanan % 40 | islem basi %-1.24 | PF 0.70 | 1.yil %-1.41 2.yil %-1.04 | stop %36 (sonra girise donen %37) | 100$ ->     15 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 44 | islem basi %-0.38 | PF 0.91
+ stop zemin-%3  hedef 72s tut:  2195 islem | kazanan % 40 | islem basi %-1.25 | PF 0.70 | 1.yil %-1.42 2.yil %-1.05 | stop %36 (sonra girise donen %37) | 100$ ->     11 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 43 | islem basi %-0.45 | PF 0.89
+ stop zemin-%5  hedef +%5    :  2388 islem | kazanan % 54 | islem basi %-1.38 | PF 0.63 | 1.yil %-1.54 2.yil %-1.19 | stop %25 (sonra girise donen %32) | 100$ ->     13 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 61 | islem basi %-0.40 | PF 0.87
+ stop zemin-%5  hedef +%10   :  2224 islem | kazanan % 43 | islem basi %-1.43 | PF 0.67 | 1.yil %-1.66 2.yil %-1.16 | stop %28 (sonra girise donen %32) | 100$ ->     13 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 49 | islem basi %-0.30 | PF 0.92
+ stop zemin-%5  hedef +%20   :  2196 islem | kazanan % 41 | islem basi %-1.38 | PF 0.69 | 1.yil %-1.57 2.yil %-1.15 | stop %28 (sonra girise donen %32) | 100$ ->     14 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.35 | PF 0.92
+ stop zemin-%5  hedef 72s tut:  2195 islem | kazanan % 41 | islem basi %-1.37 | PF 0.69 | 1.yil %-1.58 2.yil %-1.14 | stop %29 (sonra girise donen %32) | 100$ ->      8 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 45 | islem basi %-0.41 | PF 0.90
+ stop zemin-%10 hedef +%5    :  2388 islem | kazanan % 56 | islem basi %-1.45 | PF 0.63 | 1.yil %-1.18 2.yil %-1.75 | stop %14 (sonra girise donen %23) | 100$ ->      8 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 63 | islem basi %-0.33 | PF 0.90
+ stop zemin-%10 hedef +%10   :  2224 islem | kazanan % 45 | islem basi %-1.49 | PF 0.66 | 1.yil %-1.28 2.yil %-1.74 | stop %15 (sonra girise donen %23) | 100$ ->      9 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 51 | islem basi %-0.20 | PF 0.95
+ stop zemin-%10 hedef +%20   :  2196 islem | kazanan % 43 | islem basi %-1.48 | PF 0.68 | 1.yil %-1.25 2.yil %-1.75 | stop %16 (sonra girise donen %22) | 100$ ->      9 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.25 | PF 0.94
+ stop zemin-%10 hedef 72s tut:  2195 islem | kazanan % 43 | islem basi %-1.49 | PF 0.67 | 1.yil %-1.28 2.yil %-1.73 | stop %16 (sonra girise donen %22) | 100$ ->      9 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.33 | PF 0.92
+
+=== zemin 30 gun, giris zeminin en fazla %25 ustunde (38886 sinyal saati) ===
+ stop zemin-%1  hedef +%5    :  3599 islem | kazanan % 55 | islem basi %-0.70 | PF 0.78 | 1.yil %-0.37 2.yil %-1.15 | stop %30 (sonra girise donen %38) | 100$ ->     25 (en derin dusus %87)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 60 | islem basi %-0.41 | PF 0.87
+ stop zemin-%1  hedef +%10   :  3190 islem | kazanan % 43 | islem basi %-0.83 | PF 0.78 | 1.yil %-0.49 2.yil %-1.27 | stop %35 (sonra girise donen %39) | 100$ ->     25 (en derin dusus %89)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 48 | islem basi %-0.35 | PF 0.91
+ stop zemin-%1  hedef +%20   :  3111 islem | kazanan % 41 | islem basi %-0.90 | PF 0.77 | 1.yil %-0.56 2.yil %-1.34 | stop %36 (sonra girise donen %40) | 100$ ->     31 (en derin dusus %89)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 44 | islem basi %-0.38 | PF 0.91
+ stop zemin-%1  hedef 72s tut:  3101 islem | kazanan % 41 | islem basi %-0.98 | PF 0.75 | 1.yil %-0.66 2.yil %-1.40 | stop %36 (sonra girise donen %40) | 100$ ->     24 (en derin dusus %90)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 43 | islem basi %-0.45 | PF 0.89
+ stop zemin-%3  hedef +%5    :  3599 islem | kazanan % 57 | islem basi %-0.83 | PF 0.75 | 1.yil %-0.51 2.yil %-1.25 | stop %24 (sonra girise donen %31) | 100$ ->     12 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 61 | islem basi %-0.40 | PF 0.87
+ stop zemin-%3  hedef +%10   :  3190 islem | kazanan % 45 | islem basi %-0.94 | PF 0.76 | 1.yil %-0.63 2.yil %-1.34 | stop %28 (sonra girise donen %32) | 100$ ->     17 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 49 | islem basi %-0.30 | PF 0.92
+ stop zemin-%3  hedef +%20   :  3111 islem | kazanan % 43 | islem basi %-1.03 | PF 0.75 | 1.yil %-0.73 2.yil %-1.41 | stop %29 (sonra girise donen %33) | 100$ ->     21 (en derin dusus %91)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.35 | PF 0.92
+ stop zemin-%3  hedef 72s tut:  3101 islem | kazanan % 43 | islem basi %-1.08 | PF 0.74 | 1.yil %-0.84 2.yil %-1.39 | stop %29 (sonra girise donen %33) | 100$ ->     24 (en derin dusus %91)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 45 | islem basi %-0.42 | PF 0.90
+ stop zemin-%5  hedef +%5    :  3599 islem | kazanan % 58 | islem basi %-0.86 | PF 0.75 | 1.yil %-0.46 2.yil %-1.39 | stop %19 (sonra girise donen %27) | 100$ ->     12 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 62 | islem basi %-0.37 | PF 0.88
+ stop zemin-%5  hedef +%10   :  3190 islem | kazanan % 46 | islem basi %-0.98 | PF 0.76 | 1.yil %-0.60 2.yil %-1.48 | stop %21 (sonra girise donen %27) | 100$ ->     16 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 50 | islem basi %-0.26 | PF 0.93
+ stop zemin-%5  hedef +%20   :  3111 islem | kazanan % 44 | islem basi %-1.07 | PF 0.74 | 1.yil %-0.72 2.yil %-1.53 | stop %22 (sonra girise donen %27) | 100$ ->     18 (en derin dusus %91)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.31 | PF 0.93
+ stop zemin-%5  hedef 72s tut:  3101 islem | kazanan % 44 | islem basi %-1.12 | PF 0.74 | 1.yil %-0.82 2.yil %-1.50 | stop %22 (sonra girise donen %27) | 100$ ->     20 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.38 | PF 0.91
+ stop zemin-%10 hedef +%5    :  3565 islem | kazanan % 59 | islem basi %-0.97 | PF 0.73 | 1.yil %-0.26 2.yil %-1.90 | stop %11 (sonra girise donen %17) | 100$ ->      7 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 63 | islem basi %-0.31 | PF 0.90
+ stop zemin-%10 hedef +%10   :  3172 islem | kazanan % 47 | islem basi %-1.10 | PF 0.74 | 1.yil %-0.37 2.yil %-2.05 | stop %12 (sonra girise donen %18) | 100$ ->      7 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 51 | islem basi %-0.18 | PF 0.95
+ stop zemin-%10 hedef +%20   :  3102 islem | kazanan % 45 | islem basi %-1.22 | PF 0.72 | 1.yil %-0.51 2.yil %-2.13 | stop %12 (sonra girise donen %17) | 100$ ->      8 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.24 | PF 0.94
+ stop zemin-%10 hedef 72s tut:  3095 islem | kazanan % 45 | islem basi %-1.27 | PF 0.71 | 1.yil %-0.62 2.yil %-2.10 | stop %13 (sonra girise donen %17) | 100$ ->     11 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.30 | PF 0.93
+
+=== zemin 60 gun, giris zeminin en fazla %10 ustunde (12040 sinyal saati) ===
+ stop zemin-%1  hedef +%5    :  1699 islem | kazanan % 48 | islem basi %-1.31 | PF 0.61 | 1.yil %-1.40 2.yil %-1.23 | stop %41 (sonra girise donen %41) | 100$ ->     11 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 56 | islem basi %-0.47 | PF 0.85
+ stop zemin-%1  hedef +%10   :  1585 islem | kazanan % 39 | islem basi %-1.23 | PF 0.68 | 1.yil %-1.38 2.yil %-1.10 | stop %46 (sonra girise donen %42) | 100$ ->     16 (en derin dusus %91)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 45 | islem basi %-0.41 | PF 0.89
+ stop zemin-%1  hedef +%20   :  1562 islem | kazanan % 37 | islem basi %-1.19 | PF 0.70 | 1.yil %-1.25 2.yil %-1.13 | stop %47 (sonra girise donen %42) | 100$ ->     14 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 41 | islem basi %-0.45 | PF 0.89
+ stop zemin-%1  hedef 72s tut:  1562 islem | kazanan % 37 | islem basi %-1.25 | PF 0.68 | 1.yil %-1.13 2.yil %-1.36 | stop %47 (sonra girise donen %42) | 100$ ->      8 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 40 | islem basi %-0.51 | PF 0.87
+ stop zemin-%3  hedef +%5    :  1699 islem | kazanan % 50 | islem basi %-1.49 | PF 0.59 | 1.yil %-1.65 2.yil %-1.34 | stop %33 (sonra girise donen %34) | 100$ ->      8 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 60 | islem basi %-0.42 | PF 0.87
+ stop zemin-%3  hedef +%10   :  1585 islem | kazanan % 41 | islem basi %-1.43 | PF 0.66 | 1.yil %-1.62 2.yil %-1.25 | stop %37 (sonra girise donen %35) | 100$ ->     15 (en derin dusus %92)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 48 | islem basi %-0.35 | PF 0.91
+ stop zemin-%3  hedef +%20   :  1562 islem | kazanan % 39 | islem basi %-1.37 | PF 0.68 | 1.yil %-1.49 2.yil %-1.26 | stop %38 (sonra girise donen %34) | 100$ ->     13 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 44 | islem basi %-0.38 | PF 0.91
+ stop zemin-%3  hedef 72s tut:  1562 islem | kazanan % 39 | islem basi %-1.30 | PF 0.70 | 1.yil %-1.41 2.yil %-1.21 | stop %38 (sonra girise donen %34) | 100$ ->     14 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 43 | islem basi %-0.45 | PF 0.89
+ stop zemin-%5  hedef +%5    :  1699 islem | kazanan % 52 | islem basi %-1.71 | PF 0.57 | 1.yil %-1.83 2.yil %-1.59 | stop %27 (sonra girise donen %30) | 100$ ->      5 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 61 | islem basi %-0.40 | PF 0.87
+ stop zemin-%5  hedef +%10   :  1585 islem | kazanan % 42 | islem basi %-1.67 | PF 0.63 | 1.yil %-1.84 2.yil %-1.52 | stop %31 (sonra girise donen %30) | 100$ ->     10 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 49 | islem basi %-0.30 | PF 0.92
+ stop zemin-%5  hedef +%20   :  1562 islem | kazanan % 40 | islem basi %-1.62 | PF 0.65 | 1.yil %-1.73 2.yil %-1.52 | stop %31 (sonra girise donen %30) | 100$ ->      7 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.35 | PF 0.92
+ stop zemin-%5  hedef 72s tut:  1562 islem | kazanan % 40 | islem basi %-1.53 | PF 0.67 | 1.yil %-1.64 2.yil %-1.44 | stop %31 (sonra girise donen %30) | 100$ ->      6 (en derin dusus %98)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 45 | islem basi %-0.41 | PF 0.90
+ stop zemin-%10 hedef +%5    :  1699 islem | kazanan % 53 | islem basi %-1.97 | PF 0.54 | 1.yil %-1.78 2.yil %-2.15 | stop %17 (sonra girise donen %24) | 100$ ->      4 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 63 | islem basi %-0.33 | PF 0.90
+ stop zemin-%10 hedef +%10   :  1585 islem | kazanan % 45 | islem basi %-1.91 | PF 0.61 | 1.yil %-1.66 2.yil %-2.14 | stop %18 (sonra girise donen %23) | 100$ ->      8 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 51 | islem basi %-0.20 | PF 0.95
+ stop zemin-%10 hedef +%20   :  1562 islem | kazanan % 43 | islem basi %-1.89 | PF 0.62 | 1.yil %-1.58 2.yil %-2.18 | stop %19 (sonra girise donen %23) | 100$ ->      4 (en derin dusus %98)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.25 | PF 0.94
+ stop zemin-%10 hedef 72s tut:  1562 islem | kazanan % 42 | islem basi %-1.82 | PF 0.64 | 1.yil %-1.51 2.yil %-2.11 | stop %19 (sonra girise donen %23) | 100$ ->      5 (en derin dusus %98)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.33 | PF 0.92
+
+=== zemin 60 gun, giris zeminin en fazla %25 ustunde (26709 sinyal saati) ===
+ stop zemin-%1  hedef +%5    :  2596 islem | kazanan % 55 | islem basi %-0.80 | PF 0.75 | 1.yil %-0.37 2.yil %-1.23 | stop %31 (sonra girise donen %37) | 100$ ->     12 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 60 | islem basi %-0.41 | PF 0.87
+ stop zemin-%1  hedef +%10   :  2301 islem | kazanan % 44 | islem basi %-0.73 | PF 0.81 | 1.yil %-0.27 2.yil %-1.17 | stop %36 (sonra girise donen %39) | 100$ ->     13 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 48 | islem basi %-0.34 | PF 0.91
+ stop zemin-%1  hedef +%20   :  2231 islem | kazanan % 42 | islem basi %-0.80 | PF 0.79 | 1.yil %-0.30 2.yil %-1.27 | stop %37 (sonra girise donen %40) | 100$ ->     15 (en derin dusus %93)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 44 | islem basi %-0.38 | PF 0.91
+ stop zemin-%1  hedef 72s tut:  2224 islem | kazanan % 41 | islem basi %-1.01 | PF 0.74 | 1.yil %-0.42 2.yil %-1.58 | stop %37 (sonra girise donen %40) | 100$ ->      7 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 43 | islem basi %-0.45 | PF 0.89
+ stop zemin-%3  hedef +%5    :  2596 islem | kazanan % 56 | islem basi %-0.92 | PF 0.73 | 1.yil %-0.49 2.yil %-1.36 | stop %24 (sonra girise donen %30) | 100$ ->      6 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 61 | islem basi %-0.40 | PF 0.87
+ stop zemin-%3  hedef +%10   :  2301 islem | kazanan % 46 | islem basi %-0.86 | PF 0.79 | 1.yil %-0.36 2.yil %-1.33 | stop %29 (sonra girise donen %32) | 100$ ->     11 (en derin dusus %94)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 49 | islem basi %-0.30 | PF 0.92
+ stop zemin-%3  hedef +%20   :  2231 islem | kazanan % 44 | islem basi %-0.92 | PF 0.78 | 1.yil %-0.39 2.yil %-1.43 | stop %30 (sonra girise donen %32) | 100$ ->     12 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.34 | PF 0.92
+ stop zemin-%3  hedef 72s tut:  2224 islem | kazanan % 43 | islem basi %-1.05 | PF 0.75 | 1.yil %-0.53 2.yil %-1.55 | stop %30 (sonra girise donen %32) | 100$ ->      9 (en derin dusus %96)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 45 | islem basi %-0.41 | PF 0.90
+ stop zemin-%5  hedef +%5    :  2596 islem | kazanan % 57 | islem basi %-1.07 | PF 0.70 | 1.yil %-0.58 2.yil %-1.57 | stop %20 (sonra girise donen %26) | 100$ ->      6 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 62 | islem basi %-0.37 | PF 0.88
+ stop zemin-%5  hedef +%10   :  2301 islem | kazanan % 47 | islem basi %-1.05 | PF 0.75 | 1.yil %-0.52 2.yil %-1.55 | stop %24 (sonra girise donen %28) | 100$ ->     10 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 50 | islem basi %-0.26 | PF 0.93
+ stop zemin-%5  hedef +%20   :  2231 islem | kazanan % 44 | islem basi %-1.11 | PF 0.74 | 1.yil %-0.55 2.yil %-1.65 | stop %25 (sonra girise donen %27) | 100$ ->     10 (en derin dusus %95)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.31 | PF 0.93
+ stop zemin-%5  hedef 72s tut:  2224 islem | kazanan % 44 | islem basi %-1.23 | PF 0.72 | 1.yil %-0.69 2.yil %-1.74 | stop %25 (sonra girise donen %27) | 100$ ->      7 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 46 | islem basi %-0.38 | PF 0.91
+ stop zemin-%10 hedef +%5    :  2575 islem | kazanan % 58 | islem basi %-1.32 | PF 0.66 | 1.yil %-0.54 2.yil %-2.11 | stop %13 (sonra girise donen %20) | 100$ ->      4 (en derin dusus %98)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 63 | islem basi %-0.30 | PF 0.90
+ stop zemin-%10 hedef +%10   :  2293 islem | kazanan % 48 | islem basi %-1.31 | PF 0.71 | 1.yil %-0.39 2.yil %-2.17 | stop %15 (sonra girise donen %20) | 100$ ->      4 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 51 | islem basi %-0.17 | PF 0.96
+ stop zemin-%10 hedef +%20   :  2226 islem | kazanan % 46 | islem basi %-1.39 | PF 0.70 | 1.yil %-0.42 2.yil %-2.31 | stop %15 (sonra girise donen %20) | 100$ ->      5 (en derin dusus %97)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.24 | PF 0.94
+ stop zemin-%10 hedef 72s tut:  2220 islem | kazanan % 45 | islem basi %-1.52 | PF 0.68 | 1.yil %-0.57 2.yil %-2.42 | stop %15 (sonra girise donen %20) | 100$ ->      3 (en derin dusus %99)
+      kontrol (ayni dusen coinler, rastgele saat): 23039 islem | kazanan % 47 | islem basi %-0.30 | PF 0.93
+
