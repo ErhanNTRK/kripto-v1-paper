@@ -16,7 +16,7 @@ Tags (one trade can carry several):
   erken cikti      after the exit price went another 3%+ in the trade's direction within 24h
 Writes otopsi.csv and otopsi.txt next to the ledger.
 """
-import csv, json, sys, time, urllib.request
+import csv, json, sys, time, urllib.parse, urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -30,7 +30,7 @@ M5, H2, DAY = 300_000, 7_200_000, 86_400_000
 def klines(symbol, interval, start, end):
     out = []
     while start < end:
-        url = f"{API}?symbol={symbol}&interval={interval}&startTime={start}&endTime={end - 1}&limit=1500"
+        url = f"{API}?symbol={urllib.parse.quote(symbol)}&interval={interval}&startTime={start}&endTime={end - 1}&limit=1500"
         with urllib.request.urlopen(url, timeout=20) as r:
             batch = json.loads(r.read())
         if not batch: break
