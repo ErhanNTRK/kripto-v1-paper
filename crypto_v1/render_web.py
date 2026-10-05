@@ -7,7 +7,7 @@ from pathlib import Path
 from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
-from . import ledger, shadow
+from . import crash_alarm, ledger, shadow
 from .dip_catcher import DipCatcher
 from .dip_live import LiveDipCatcher
 from .spike_rule import LiveSpikeRule
@@ -1694,6 +1694,10 @@ def main():
     # Trade ledger (user's request, 24 Sep 2026): every buy and sell with
     # its USDT result, refreshed hourly into ~/kripto/islem-kayitlari.
     ledger_state = {"at": 0.0}
+    # Market-crash rebound alarm (user's choice, 5 Oct 2026): Telegram messages only, never an order;
+    # its own thread so the ~100 public requests per check never delay the exit scans.
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        threading.Thread(target=crash_alarm.run_forever, args=(runtime_dir / "crash_alarm.json",), daemon=True).start()
     # Dip-catcher, paper only for now (user's decision, 30 Sep 2026): sized
     # from the 2H sleeve it will belong to, skipping coins the account holds.
     def held_symbols():
