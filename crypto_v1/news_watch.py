@@ -8,10 +8,12 @@ Telegram messages only -- it never places an order. Own thread, every 5 minutes:
   [HAREKET]      BTC moved 3% or more within the last hour, with the latest headlines; then quiet for 2 hours
 
 The first pass only marks what is already in the feeds as seen, so a restart never floods the chat.
-Headlines are sent in their original English."""
+Headlines come in Turkish with the English original under them (MyMemory's free API, Google's free endpoint as
+the fallback; English only when both fail). Only the public headline text goes to the translator."""
 import json
 import re
 import time
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -43,6 +45,30 @@ def btc_hour():
     return float(k[-1][4]), float(k[-1][4]) / float(k[0][4]) - 1
 
 
+def translate_headline(text):
+    """Turkish translation of a headline, or None (MyMemory first, Google's free endpoint as the fallback)."""
+    def mymemory():
+        url = "https://api.mymemory.translated.net/get?" + urllib.parse.urlencode({"q": text, "langpair": "en|tr"})
+        with urllib.request.urlopen(url, timeout=15) as r:
+            out = json.loads(r.read())["responseData"]["translatedText"]
+        return None if "MYMEMORY WARNING" in out.upper() else out
+
+    def google():
+        url = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode(
+            {"client": "gtx", "sl": "en", "tl": "tr", "dt": "t", "q": text})
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=15) as r:
+            return "".join(part[0] for part in json.loads(r.read())[0] if part[0])
+
+    for service in (mymemory, google):
+        try:
+            out = (service() or "").strip()
+            if out and out.lower() != text.lower():
+                return out
+        except Exception as exc:
+            print(f"News watch: translation failed ({exc})", flush=True)
+    return None
+
+
 def parse_rss(text):
     """[(id, title, link, category)] newest first."""
     root = ET.fromstring(text.lstrip("﻿").strip())
@@ -67,8 +93,9 @@ def fomc_dates(html):
 
 
 class NewsWatch:
-    def __init__(self, state_path, fetch=fetch, btc=btc_hour, send=None, clock=time.time):
+    def __init__(self, state_path, fetch=fetch, btc=btc_hour, send=None, clock=time.time, translate=None):
         self.path, self.fetch, self.btc, self.clock = state_path, fetch, btc, clock
+        self.translate = translate or translate_headline
         if send is None:
             from .telegram import send_message as send
         self.send = send
@@ -89,6 +116,11 @@ class NewsWatch:
             self.send(text)
         except Exception as exc:
             print(f"News watch Telegram failed: {exc}", flush=True)
+
+    def _both(self, title):
+        """Turkish first, the English original under it."""
+        tr = self.translate(title)
+        return f"{tr}\n(EN: {title})" if tr else title
 
     def _new_items(self, state, name, url):
         """Items not seen before; on a feed's first read everything counts as seen."""
@@ -121,7 +153,7 @@ class NewsWatch:
         for _, title, link, category in self._new_items(state, "fed", FED_FEED):
             if category == "Monetary Policy" or "FOMC" in title:
                 tail = f"\nBTC su an {price:,.0f}. 15 dakika sonra tepkisini yazacagim." if price else ""
-                self._say(f"[FED] {title}\n{link}{tail}")
+                self._say(f"[FED] {self._both(title)}\n{link}{tail}")
                 if price:
                     state.setdefault("pending", []).append({"t": now, "btc": price, "title": title[:80]})
         for p in list(state.get("pending", [])):
@@ -136,7 +168,7 @@ class NewsWatch:
                 recent.insert(0, title)
                 low = " " + re.sub(r"[^a-z0-9]+", " ", title.lower()) + " "   # "SEC's" -> " sec s "
                 if any(k in low for k in KEYWORDS) and state["sent"] < DAILY_NEWS_LIMIT:
-                    self._say(f"[HABER] {title}\n{link}")
+                    self._say(f"[HABER] {self._both(title)}\n{link}")
                     state["sent"] += 1
         state["recent"] = recent[:10]
 

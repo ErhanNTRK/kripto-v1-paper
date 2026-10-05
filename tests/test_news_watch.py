@@ -34,7 +34,8 @@ class NewsWatchTest(unittest.TestCase):
         self.now = 1_792_900_000_000          # 2026-10-25 TR: two days before the decision
         self.feeds, self.sent, self.move = Feeds(), [], (86000.0, 0.0)
         self.watch = nw.NewsWatch(os.path.join(self.dir.name, "news.json"), fetch=self.feeds,
-                                  btc=lambda: self.move, send=self.sent.append, clock=lambda: self.now / 1000)
+                                  btc=lambda: self.move, send=self.sent.append, clock=lambda: self.now / 1000,
+                                  translate=lambda text: "TR: " + text)
 
     def tearDown(self):
         self.dir.cleanup()
@@ -65,12 +66,22 @@ class NewsWatchTest(unittest.TestCase):
         news = [m for m in self.sent if m.startswith("[HABER]")]
         self.assertEqual(len(news), 1)
         self.assertIn("SEC's", news[0])
+        self.assertTrue(news[0].startswith("[HABER] TR: SEC's"))
+        self.assertIn("(EN: SEC's new rule hits exchanges)", news[0])
 
     def test_btc_move_alert_then_quiet(self):
         self.watch.tick()
         self.move = (83000.0, -0.035)
         self.watch.tick(); self.now += H; self.watch.tick()
         self.assertEqual(sum(m.startswith("[HAREKET]") for m in self.sent), 1)
+
+    def test_untranslated_headline_still_sent(self):
+        self.watch.translate = lambda text: None
+        self.watch.tick()
+        self.feeds.cd = [(11, "Binance lists a new coin", "")]
+        self.watch.tick()
+        news = [m for m in self.sent if m.startswith("[HABER]")]
+        self.assertEqual(news, ["[HABER] Binance lists a new coin" + chr(10) + "https://x/11"])
 
     def test_fomc_calendar(self):
         self.assertEqual(nw.fomc_dates(CAL), ["2025-05-01", "2026-10-28", "2026-12-09"])
