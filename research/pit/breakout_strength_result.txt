@@ -1,0 +1,16 @@
+2021-23 4h: hazir 77 sn
+2021-23: 9422 sinyal, 2558 tanesi ilk-zirve kirilimi
+
+4H simdiki (1/3 kirilim, ilk-zirve alinmaz) | haftada  2.5 alim | karla kapanan % 58 | 100$ 12 ay sonra: tipik    83$  en kotu   73$  en iyi   129$ | zararli yil % 71
+4H 20 mum zirvesi kirilmali, ilk-zirve alinmaz | haftada  2.1 alim | karla kapanan % 55 | 100$ 12 ay sonra: tipik    83$  en kotu   73$  en iyi   117$ | zararli yil % 71
+4H 1/3 kirilim, ilk-zirve de alinir      | haftada  3.1 alim | karla kapanan % 56 | 100$ 12 ay sonra: tipik    76$  en kotu   64$  en iyi   118$ | zararli yil % 81
+4H KULLANICI: 20 mum zirvesi kirilmali, ilk-zirve alinir | haftada  2.9 alim | karla kapanan % 56 | 100$ 12 ay sonra: tipik    79$  en kotu   68$  en iyi   135$ | zararli yil % 76
+4H 3/3 kirilim, ilk-zirve alinir         | haftada  2.7 alim | karla kapanan % 57 | 100$ 12 ay sonra: tipik    86$  en kotu   66$  en iyi   123$ | zararli yil % 76
+2023-26 4h: hazir 128 sn
+2023-26: 25240 sinyal, 6393 tanesi ilk-zirve kirilimi
+
+4H simdiki (1/3 kirilim, ilk-zirve alinmaz) | haftada  2.6 alim | karla kapanan % 63 | 100$ 12 ay sonra: tipik   145$  en kotu   83$  en iyi   222$ | zararli yil % 46
+4H 20 mum zirvesi kirilmali, ilk-zirve alinmaz | haftada  2.2 alim | karla kapanan % 62 | 100$ 12 ay sonra: tipik   175$  en kotu   71$  en iyi   309$ | zararli yil % 42
+4H 1/3 kirilim, ilk-zirve de alinir      | haftada  3.3 alim | karla kapanan % 58 | 100$ 12 ay sonra: tipik   134$  en kotu   77$  en iyi   201$ | zararli yil % 21
+4H KULLANICI: 20 mum zirvesi kirilmali, ilk-zirve alinir | haftada  3.2 alim | karla kapanan % 57 | 100$ 12 ay sonra: tipik   140$  en kotu   78$  en iyi   234$ | zararli yil % 42
+4H 3/3 kirilim, ilk-zirve alinir         | haftada  3.1 alim | karla kapanan % 58 | 100$ 12 ay sonra: tipik   140$  en kotu   74$  en iyi   228$ | zararli yil % 29
