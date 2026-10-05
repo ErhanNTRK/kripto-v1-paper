@@ -1,0 +1,52 @@
+328 coin, 49 memecoin
+
+=== A. Yeni listelenen coinler: listelemeden 3 gun sonra girilseydi ===
+  tum yeni   7 gun sonra (LONG getirisi): n=  95 | ortalama % -5.22 | ortanca %-12.55 | pozitif % 33
+  tum yeni  30 gun sonra (LONG getirisi): n=  95 | ortalama %-13.09 | ortanca %-25.70 | pozitif % 29
+  tum yeni  90 gun sonra (LONG getirisi): n=  95 | ortalama %-39.03 | ortanca %-54.60 | pozitif % 19
+  tum yeni  30 gun SHORT, masraf dahil: n=  95 | ortalama %+11.99 | ortanca %+24.60 | pozitif % 71
+  memecoin   7 gun sonra (LONG getirisi): n=  31 | ortalama % -3.63 | ortanca %-12.10 | pozitif % 35
+  memecoin  30 gun sonra (LONG getirisi): n=  31 | ortalama % -6.39 | ortanca %-23.46 | pozitif % 42
+  memecoin  90 gun sonra (LONG getirisi): n=  31 | ortalama %-51.96 | ortanca %-73.55 | pozitif % 16
+  memecoin  30 gun SHORT, masraf dahil: n=  31 | ortalama % +5.29 | ortanca %+22.36 | pozitif % 58
+
+=== B. Memecoin fonlama uclari ===
+  asiri isinmis long (fon>=%0.10, 72s>=+%30) 1g sonra fiyat: n=  20 | ortalama % -8.48 | ortanca % -1.69 | pozitif % 45
+  asiri isinmis long (fon>=%0.10, 72s>=+%30) 3g sonra fiyat: n=  20 | ortalama %-15.64 | ortanca %-15.20 | pozitif % 25
+  asiri isinmis long (fon>=%0.10, 72s>=+%30) 7g sonra fiyat: n=  20 | ortalama %-21.30 | ortanca %-32.58 | pozitif % 25
+  kalabalik short (fon<=-%0.10)            1g sonra fiyat: n= 207 | ortalama % -0.33 | ortanca % -2.15 | pozitif % 36
+  kalabalik short (fon<=-%0.10)            3g sonra fiyat: n= 206 | ortalama % +1.56 | ortanca % -2.05 | pozitif % 38
+  kalabalik short (fon<=-%0.10)            7g sonra fiyat: n= 206 | ortalama % -1.85 | ortanca % -6.17 | pozitif % 35
+
+=== C. Gunluk tersine donus / momentum (likiditeye gore) ===
+  likit olmayan: dusenleri al, yukselenleri sat: 720 gun | gun basi net %-0.251 | 100$ -> 15 | 1.yil x0.30 2.yil x0.49
+  likit ilk 20: yukselenleri al, dusenleri sat: 720 gun | gun basi net %-0.144 | 100$ -> 17 | 1.yil x0.23 2.yil x0.76
+
+=== D. Saatlik pompa (24s +%40 ve saatlik hacim 7 gunluk ortalamanin 5 kati) sonrasi ===
+  tum coinler SHORT 1g tut (stopsuz, net): n= 745 | ortalama % +1.96 | ortanca % +7.49 | pozitif % 68
+  tum coinler SHORT 3g tut (stopsuz, net): n= 745 | ortalama % +3.49 | ortanca %+11.29 | pozitif % 70
+  tum coinler SHORT 7g tut (stopsuz, net): n= 738 | ortalama % +6.32 | ortanca %+15.97 | pozitif % 72
+  tum coinler SHORT 3g, stop zirve+%5 (net): n= 745 | ortalama % +0.68 | ortanca % -6.52 | pozitif % 32
+  memecoin    SHORT 1g tut (stopsuz, net): n= 176 | ortalama % +1.15 | ortanca % +6.78 | pozitif % 65
+  memecoin    SHORT 3g tut (stopsuz, net): n= 176 | ortalama % +0.90 | ortanca %+10.05 | pozitif % 68
+  memecoin    SHORT 7g tut (stopsuz, net): n= 176 | ortalama % +4.33 | ortanca %+14.35 | pozitif % 69
+  memecoin    SHORT 3g, stop zirve+%5 (net): n= 176 | ortalama % -0.88 | ortanca % -6.87 | pozitif % 27
+
+=== E. Memecoin sepeti (esit agirlik, haftalik) BTC 50 gunluk ortalamanin ustundeyken ===
+  BTC>EMA50 haftalarinda (44 hafta): meme sepeti 100$ -> 27 | BTC 100$ -> 127
+  Her hafta meme sepeti (filtresiz): 100$ -> 31
+=== Saatlik pompa short'u (24s +%40, hacim 5x) ===
+  3g tut, stop +%25: n= 745 ort %+1.45 ortanca % +7.41 kazanan % 58 | 1.yil ort %+0.72 (n=305) 2.yil ort %+1.96 (n=440) | en kotu %-25
+  3g tut, stop +%40: n= 745 ort %+1.45 ortanca % +9.92 kazanan % 64 | 1.yil ort %+0.27 (n=305) 2.yil ort %+2.26 (n=440) | en kotu %-40
+  3g tut, stop +%60: n= 745 ort %+1.33 ortanca %+10.78 kazanan % 68 | 1.yil ort %+0.36 (n=305) 2.yil ort %+2.00 (n=440) | en kotu %-60
+  3g tut, stop yok : n= 745 ort %+3.49 ortanca %+11.29 kazanan % 70 | 1.yil ort %+1.45 (n=305) 2.yil ort %+4.91 (n=440) | en kotu %-611
+  7g tut, stop +%25: n= 745 ort %+2.17 ortanca % +7.03 kazanan % 54 | 1.yil ort %+0.93 (n=305) 2.yil ort %+3.03 (n=440) | en kotu %-25
+  7g tut, stop +%40: n= 745 ort %+2.14 ortanca %+13.22 kazanan % 63 | 1.yil ort %-0.13 (n=305) 2.yil ort %+3.71 (n=440) | en kotu %-40
+  7g tut, stop +%60: n= 745 ort %+1.94 ortanca %+14.86 kazanan % 68 | 1.yil ort %-0.26 (n=305) 2.yil ort %+3.46 (n=440) | en kotu %-60
+  7g tut, stop yok : n= 745 ort %+6.40 ortanca %+16.00 kazanan % 72 | 1.yil ort %+2.63 (n=305) 2.yil ort %+9.01 (n=440) | en kotu %-351
+
+=== Yeni listelenen coin short'u (listelemeden 3 gun sonra, 30 gun) ===
+  stop +%30: n=  95 ort %+9.40 ortanca %+11.33 kazanan % 56 | 1.yil ort %+9.67 (n=92) 2.yil ort %+1.01 (n=3) | en kotu %-31
+  stop +%50: n=  95 ort %+4.69 ortanca %+20.86 kazanan % 60 | 1.yil ort %+5.25 (n=92) 2.yil ort %-12.34 (n=3) | en kotu %-51
+  stop +%100: n=  95 ort %+7.17 ortanca %+22.36 kazanan % 69 | 1.yil ort %+7.42 (n=92) 2.yil ort %-0.71 (n=3) | en kotu %-101
+  stop yok : n=  95 ort %+11.99 ortanca %+24.60 kazanan % 71 | 1.yil ort %+13.71 (n=92) 2.yil ort %-40.97 (n=3) | en kotu %-221
