@@ -1,0 +1,22 @@
+2021-23 2h: hazir 238 sn
+
+--- 2021-23: Binance minimum emir tutarlari ile (bugunku ~200 USDT cuzdan) ---
+ilk 50 (canli)                           | haftada  7.4 alim | karla kapanan % 64 | 100$ 12 ay sonra: tipik    89$  en kotu   35$  en iyi   151$ | zararli yil % 71 | yilda 39 zararli stop
+ilk 10 + BTC                             | haftada  2.5 alim | karla kapanan % 67 | 100$ 12 ay sonra: tipik   103$  en kotu   71$  en iyi   147$ | zararli yil % 38 | yilda 13 zararli stop
+sadece BTC + ETH                         | haftada  0.3 alim | karla kapanan % 63 | 100$ 12 ay sonra: tipik   100$  en kotu   95$  en iyi   109$ | zararli yil % 48 | yilda 1 zararli stop
+
+--- 2021-23: minimumlar kaldirilmis (daha buyuk cuzdan gibi) ---
+ilk 50 (canli)                           | haftada  7.5 alim | karla kapanan % 63 | 100$ 12 ay sonra: tipik    88$  en kotu   35$  en iyi   148$ | zararli yil % 71 | yilda 39 zararli stop
+ilk 10 + BTC                             | haftada  2.8 alim | karla kapanan % 65 | 100$ 12 ay sonra: tipik   100$  en kotu   71$  en iyi   133$ | zararli yil % 48 | yilda 14 zararli stop
+sadece BTC + ETH                         | haftada  0.5 alim | karla kapanan % 58 | 100$ 12 ay sonra: tipik    99$  en kotu   95$  en iyi   106$ | zararli yil % 62 | yilda 2 zararli stop
+2023-26 2h: hazir 493 sn
+
+--- 2023-26: Binance minimum emir tutarlari ile (bugunku ~200 USDT cuzdan) ---
+ilk 50 (canli)                           | haftada 11.2 alim | karla kapanan % 66 | 100$ 12 ay sonra: tipik   200$  en kotu  119$  en iyi   410$ | zararli yil %  0 | yilda 51 zararli stop
+ilk 10 + BTC                             | haftada  4.9 alim | karla kapanan % 66 | 100$ 12 ay sonra: tipik   172$  en kotu  114$  en iyi   270$ | zararli yil %  0 | yilda 20 zararli stop
+sadece BTC + ETH                         | haftada  0.5 alim | karla kapanan % 60 | 100$ 12 ay sonra: tipik   107$  en kotu   98$  en iyi   118$ | zararli yil % 12 | yilda 1 zararli stop
+
+--- 2023-26: minimumlar kaldirilmis (daha buyuk cuzdan gibi) ---
+ilk 50 (canli)                           | haftada 11.2 alim | karla kapanan % 66 | 100$ 12 ay sonra: tipik   200$  en kotu  119$  en iyi   410$ | zararli yil %  0 | yilda 51 zararli stop
+ilk 10 + BTC                             | haftada  5.2 alim | karla kapanan % 65 | 100$ 12 ay sonra: tipik   179$  en kotu  113$  en iyi   278$ | zararli yil %  0 | yilda 21 zararli stop
+sadece BTC + ETH                         | haftada  1.1 alim | karla kapanan % 59 | 100$ 12 ay sonra: tipik   108$  en kotu   98$  en iyi   139$ | zararli yil %  4 | yilda 1 zararli stop
