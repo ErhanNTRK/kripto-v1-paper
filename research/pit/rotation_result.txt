@@ -1,0 +1,66 @@
+94 hafta (2024-11-11 - 2026-08-24); kapi acik 38 hafta
+
+Karsilastirma (sadece kapi acik haftalar): BTC tut 100$ -> 127 | ilk 100'un hepsi esit 100$ -> 38
+
+kapili  stopsuz  son 14g en guclu  3: 100$ ->      5 | 1.yil x0.36 2.yil x0.14 | en derin dusus % 97 | kazanan hafta % 34 (38 hafta)
+kapili  stopsuz  son 14g en guclu  5: 100$ ->      9 | 1.yil x0.37 2.yil x0.24 | en derin dusus % 93 | kazanan hafta % 29 (38 hafta)
+kapili  stopsuz  son 14g en guclu 10: 100$ ->     16 | 1.yil x0.46 2.yil x0.34 | en derin dusus % 90 | kazanan hafta % 37 (38 hafta)
+kapili  stopsuz  son 30g en guclu  3: 100$ ->      1 | 1.yil x0.24 2.yil x0.04 | en derin dusus % 99 | kazanan hafta % 24 (38 hafta)
+kapili  stopsuz  son 30g en guclu  5: 100$ ->      4 | 1.yil x0.27 2.yil x0.14 | en derin dusus % 97 | kazanan hafta % 24 (38 hafta)
+kapili  stopsuz  son 30g en guclu 10: 100$ ->     10 | 1.yil x0.40 2.yil x0.26 | en derin dusus % 93 | kazanan hafta % 24 (38 hafta)
+kapili  stopsuz  son 60g en guclu  3: 100$ ->      2 | 1.yil x0.27 2.yil x0.08 | en derin dusus % 98 | kazanan hafta % 18 (38 hafta)
+kapili  stopsuz  son 60g en guclu  5: 100$ ->      7 | 1.yil x0.32 2.yil x0.20 | en derin dusus % 96 | kazanan hafta % 26 (38 hafta)
+kapili  stopsuz  son 60g en guclu 10: 100$ ->     21 | 1.yil x0.38 2.yil x0.56 | en derin dusus % 88 | kazanan hafta % 29 (38 hafta)
+kapili  stop-%15 son 14g en guclu  3: 100$ ->     29 | 1.yil x0.42 2.yil x0.69 | en derin dusus % 82 | kazanan hafta % 32 (38 hafta)
+kapili  stop-%15 son 14g en guclu  5: 100$ ->     25 | 1.yil x0.44 2.yil x0.57 | en derin dusus % 81 | kazanan hafta % 37 (38 hafta)
+kapili  stop-%15 son 14g en guclu 10: 100$ ->     25 | 1.yil x0.52 2.yil x0.49 | en derin dusus % 82 | kazanan hafta % 32 (38 hafta)
+kapili  stop-%15 son 30g en guclu  3: 100$ ->      9 | 1.yil x0.37 2.yil x0.24 | en derin dusus % 95 | kazanan hafta % 24 (38 hafta)
+kapili  stop-%15 son 30g en guclu  5: 100$ ->     13 | 1.yil x0.34 2.yil x0.38 | en derin dusus % 91 | kazanan hafta % 26 (38 hafta)
+kapili  stop-%15 son 30g en guclu 10: 100$ ->     18 | 1.yil x0.43 2.yil x0.41 | en derin dusus % 88 | kazanan hafta % 26 (38 hafta)
+kapili  stop-%15 son 60g en guclu  3: 100$ ->     12 | 1.yil x0.31 2.yil x0.38 | en derin dusus % 91 | kazanan hafta % 21 (38 hafta)
+kapili  stop-%15 son 60g en guclu  5: 100$ ->     20 | 1.yil x0.34 2.yil x0.59 | en derin dusus % 87 | kazanan hafta % 24 (38 hafta)
+kapili  stop-%15 son 60g en guclu 10: 100$ ->     29 | 1.yil x0.36 2.yil x0.83 | en derin dusus % 83 | kazanan hafta % 39 (38 hafta)
+kapisiz stopsuz  son 14g en guclu  3: 100$ ->      0 | 1.yil x0.52 2.yil x0.01 | en derin dusus %100 | kazanan hafta % 35 (94 hafta)
+kapisiz stopsuz  son 14g en guclu  5: 100$ ->      2 | 1.yil x0.43 2.yil x0.04 | en derin dusus % 99 | kazanan hafta % 36 (94 hafta)
+kapisiz stopsuz  son 14g en guclu 10: 100$ ->      4 | 1.yil x0.53 2.yil x0.07 | en derin dusus % 98 | kazanan hafta % 40 (94 hafta)
+kapisiz stopsuz  son 30g en guclu  3: 100$ ->      0 | 1.yil x0.55 2.yil x0.00 | en derin dusus %100 | kazanan hafta % 33 (94 hafta)
+kapisiz stopsuz  son 30g en guclu  5: 100$ ->      0 | 1.yil x0.31 2.yil x0.01 | en derin dusus %100 | kazanan hafta % 28 (94 hafta)
+kapisiz stopsuz  son 30g en guclu 10: 100$ ->      2 | 1.yil x0.47 2.yil x0.04 | en derin dusus % 99 | kazanan hafta % 35 (94 hafta)
+kapisiz stopsuz  son 60g en guclu  3: 100$ ->      1 | 1.yil x0.26 2.yil x0.02 | en derin dusus %100 | kazanan hafta % 35 (94 hafta)
+kapisiz stopsuz  son 60g en guclu  5: 100$ ->      1 | 1.yil x0.30 2.yil x0.04 | en derin dusus % 99 | kazanan hafta % 34 (94 hafta)
+kapisiz stopsuz  son 60g en guclu 10: 100$ ->      3 | 1.yil x0.40 2.yil x0.08 | en derin dusus % 99 | kazanan hafta % 34 (94 hafta)
+kapisiz stop-%15 son 14g en guclu  3: 100$ ->     12 | 1.yil x0.85 2.yil x0.14 | en derin dusus % 96 | kazanan hafta % 37 (94 hafta)
+kapisiz stop-%15 son 14g en guclu  5: 100$ ->     13 | 1.yil x0.78 2.yil x0.17 | en derin dusus % 94 | kazanan hafta % 38 (94 hafta)
+kapisiz stop-%15 son 14g en guclu 10: 100$ ->      8 | 1.yil x0.66 2.yil x0.12 | en derin dusus % 96 | kazanan hafta % 36 (94 hafta)
+kapisiz stop-%15 son 30g en guclu  3: 100$ ->      2 | 1.yil x0.79 2.yil x0.03 | en derin dusus % 99 | kazanan hafta % 33 (94 hafta)
+kapisiz stop-%15 son 30g en guclu  5: 100$ ->      2 | 1.yil x0.46 2.yil x0.04 | en derin dusus % 99 | kazanan hafta % 28 (94 hafta)
+kapisiz stop-%15 son 30g en guclu 10: 100$ ->      5 | 1.yil x0.52 2.yil x0.10 | en derin dusus % 98 | kazanan hafta % 35 (94 hafta)
+kapisiz stop-%15 son 60g en guclu  3: 100$ ->      2 | 1.yil x0.26 2.yil x0.08 | en derin dusus % 98 | kazanan hafta % 29 (94 hafta)
+kapisiz stop-%15 son 60g en guclu  5: 100$ ->      3 | 1.yil x0.36 2.yil x0.09 | en derin dusus % 98 | kazanan hafta % 30 (94 hafta)
+kapisiz stop-%15 son 60g en guclu 10: 100$ ->      6 | 1.yil x0.47 2.yil x0.13 | en derin dusus % 97 | kazanan hafta % 35 (94 hafta)
+
+=== sadece buyuk coinler: ilk 20 / 30 / 50 (hacme gore) ===
+ilk 20 kapili  son 30g en guclu 3: 100$ ->    12 | 1.yil x0.44 2.yil x0.27 | en derin dusus % 94 | kazanan hafta % 29
+ilk 20 kapili  son 30g en guclu 5: 100$ ->    24 | 1.yil x0.53 2.yil x0.45 | en derin dusus % 85 | kazanan hafta % 32
+ilk 20 kapili  son 60g en guclu 3: 100$ ->     9 | 1.yil x0.40 2.yil x0.24 | en derin dusus % 93 | kazanan hafta % 32
+ilk 20 kapili  son 60g en guclu 5: 100$ ->    14 | 1.yil x0.42 2.yil x0.35 | en derin dusus % 91 | kazanan hafta % 29
+ilk 20 kapisiz son 30g en guclu 3: 100$ ->     1 | 1.yil x0.28 2.yil x0.02 | en derin dusus %100 | kazanan hafta % 31
+ilk 20 kapisiz son 30g en guclu 5: 100$ ->     3 | 1.yil x0.56 2.yil x0.05 | en derin dusus % 99 | kazanan hafta % 34
+ilk 20 kapisiz son 60g en guclu 3: 100$ ->     1 | 1.yil x0.37 2.yil x0.02 | en derin dusus % 99 | kazanan hafta % 35
+ilk 20 kapisiz son 60g en guclu 5: 100$ ->     3 | 1.yil x0.49 2.yil x0.06 | en derin dusus % 99 | kazanan hafta % 33
+ilk 30 kapili  son 30g en guclu 3: 100$ ->     4 | 1.yil x0.32 2.yil x0.11 | en derin dusus % 98 | kazanan hafta % 24
+ilk 30 kapili  son 30g en guclu 5: 100$ ->     8 | 1.yil x0.38 2.yil x0.22 | en derin dusus % 95 | kazanan hafta % 24
+ilk 30 kapili  son 60g en guclu 3: 100$ ->     2 | 1.yil x0.36 2.yil x0.07 | en derin dusus % 98 | kazanan hafta % 21
+ilk 30 kapili  son 60g en guclu 5: 100$ ->     9 | 1.yil x0.39 2.yil x0.23 | en derin dusus % 95 | kazanan hafta % 24
+ilk 30 kapisiz son 30g en guclu 3: 100$ ->     0 | 1.yil x0.24 2.yil x0.00 | en derin dusus %100 | kazanan hafta % 32
+ilk 30 kapisiz son 30g en guclu 5: 100$ ->     1 | 1.yil x0.30 2.yil x0.02 | en derin dusus %100 | kazanan hafta % 31
+ilk 30 kapisiz son 60g en guclu 3: 100$ ->     0 | 1.yil x0.22 2.yil x0.01 | en derin dusus %100 | kazanan hafta % 34
+ilk 30 kapisiz son 60g en guclu 5: 100$ ->     1 | 1.yil x0.30 2.yil x0.02 | en derin dusus %100 | kazanan hafta % 29
+ilk 50 kapili  son 30g en guclu 3: 100$ ->     1 | 1.yil x0.20 2.yil x0.05 | en derin dusus % 99 | kazanan hafta % 24
+ilk 50 kapili  son 30g en guclu 5: 100$ ->     5 | 1.yil x0.25 2.yil x0.19 | en derin dusus % 97 | kazanan hafta % 24
+ilk 50 kapili  son 60g en guclu 3: 100$ ->     4 | 1.yil x0.41 2.yil x0.10 | en derin dusus % 97 | kazanan hafta % 26
+ilk 50 kapili  son 60g en guclu 5: 100$ ->    13 | 1.yil x0.33 2.yil x0.39 | en derin dusus % 93 | kazanan hafta % 34
+ilk 50 kapisiz son 30g en guclu 3: 100$ ->     0 | 1.yil x0.22 2.yil x0.00 | en derin dusus %100 | kazanan hafta % 29
+ilk 50 kapisiz son 30g en guclu 5: 100$ ->     0 | 1.yil x0.21 2.yil x0.01 | en derin dusus %100 | kazanan hafta % 27
+ilk 50 kapisiz son 60g en guclu 3: 100$ ->     1 | 1.yil x0.33 2.yil x0.02 | en derin dusus %100 | kazanan hafta % 35
+ilk 50 kapisiz son 60g en guclu 5: 100$ ->     1 | 1.yil x0.29 2.yil x0.04 | en derin dusus % 99 | kazanan hafta % 36
