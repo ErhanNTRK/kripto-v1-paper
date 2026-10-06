@@ -7,7 +7,7 @@ from pathlib import Path
 from .binance_account import verify_from_environment
 from .binance_futures import FuturesExecutor
 from .binance_trade import OrderRejected, SpotExecutor
-from . import crash_alarm, ledger, news_watch, shadow
+from . import crash_alarm, early_alert, ledger, news_watch, shadow
 from .dip_catcher import DipCatcher
 from .dip_live import LiveDipCatcher
 from .spike_rule import LiveSpikeRule
@@ -1700,6 +1700,8 @@ def main():
         threading.Thread(target=crash_alarm.run_forever, args=(runtime_dir / "crash_alarm.json",), daemon=True).start()
         # News watch (user's request, 5 Oct 2026): Fed decisions, FOMC reminders, crypto headlines, sharp BTC moves.
         threading.Thread(target=news_watch.run_forever, args=(runtime_dir / "news_watch.json",), daemon=True).start()
+        # Early-entry alert (user's request, 6 Oct 2026): the long detector on the forming 2H/4H candle, every minute.
+        threading.Thread(target=early_alert.run_forever, args=(runtime_dir,), daemon=True).start()
     # Dip-catcher, paper only for now (user's decision, 30 Sep 2026): sized
     # from the 2H sleeve it will belong to, skipping coins the account holds.
     def held_symbols():
