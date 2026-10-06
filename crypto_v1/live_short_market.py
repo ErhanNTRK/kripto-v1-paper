@@ -633,19 +633,16 @@ class BinanceFuturesMarket:
         return positions
 
     def _note_foreign(self, symbol, amount):
-        """One Telegram line per position the bot will not touch although it
+        """Log one line per position the bot will not touch although it
         traded that coin: opened by hand after the bot's own trade ended,
         or changed by hand since. It has no stop from the bot."""
         key = (symbol, str(amount))
         if key in BinanceFuturesMarket._foreign_noted:
             return
         BinanceFuturesMarket._foreign_noted.add(key)
+        # The Telegram line that used to follow is gone (user, 6 Oct 2026: he opens trades by hand and does not want
+        # to be told every time); the log line stays.
         print(f"Position not adopted ({symbol} {amount}): not the bot's own", flush=True)
-        try:
-            send_message(f"ELLE ACILMIS POZISYON: {symbol} ({format(amount, 'f')}) botun kendi islemiyle "
-                         "eslesmiyor. Dokunmuyorum, stop koymuyorum; korumasi sizde.")
-        except Exception as exc:
-            print(f"Telegram foreign-position notice failed: {exc}", flush=True)
 
     def analysis(self, position, feature_fn, interval=INTERVAL):
         now = get("time")["serverTime"] // interval * interval

@@ -607,7 +607,7 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         adopted, send = self._foreign([{"symbol": "BCHUSDT", "positionAmt": "0.5", "entryPrice": "340"}],
                                       [self.OPEN_4H, self.CLOSED_BY_STOP, hand])
         self.assertEqual(adopted, [])
-        self.assertIn("ELLE ACILMIS POZISYON", send.call_args.args[0])
+        send.assert_not_called()   # logged only: the user opens trades by hand and does not want a Telegram line each time
 
     def test_the_same_quantity_bought_by_hand_later_is_still_not_the_bot_s(self):
         hand = {"symbol": "BCHUSDT", "clientOrderId": "web_abc", "orderId": 3, "status": "FILLED",
@@ -622,7 +622,7 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         adopted, send = self._foreign([{"symbol": "BCHUSDT", "positionAmt": "0.461", "entryPrice": "338"}],
                                       [self.OPEN_4H, hand])
         self.assertEqual(adopted, [])
-        send.assert_called_once()
+        send.assert_not_called()
 
     def test_a_partly_closed_bot_position_is_still_the_bot_s(self):
         part = {"symbol": "BCHUSDT", "clientOrderId": "web_tp", "orderId": 3, "status": "FILLED",
@@ -632,7 +632,7 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         self.assertEqual([p["quantity"] for p in adopted], ["0.161"])
         send.assert_not_called()
 
-    def test_one_notice_per_position(self):
+    def test_no_telegram_notice_for_a_position_opened_by_hand(self):
         hand = {"symbol": "BCHUSDT", "clientOrderId": "web_abc", "orderId": 3, "status": "FILLED",
                 "side": "BUY", "executedQty": "0.5", "time": 1790120000000}
         market = self._market([{"symbol": "BCHUSDT", "positionAmt": "0.5", "entryPrice": "340"}],
@@ -641,7 +641,7 @@ class UnprotectedPositionAdoptionTests(unittest.TestCase):
         with patch("crypto_v1.live_short_market.send_message") as send:
             market.unprotected_positions()
             market.unprotected_positions()
-        send.assert_called_once()
+        send.assert_not_called()
 
 
 class SymbolCodeTests(unittest.TestCase):
