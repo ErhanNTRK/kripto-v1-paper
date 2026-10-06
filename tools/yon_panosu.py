@@ -7,7 +7,7 @@ the funding rate. A header shows BTC's own state and ETH/BTC against its 50-day 
 
 Public market data only: no API key, no account access, no orders. Writes an HTML page that reloads itself;
 run it with "Yon Panosu.bat" (or: python tools/yon_panosu.py [--once])."""
-import json, sys, time, urllib.request, urllib.parse, webbrowser
+import json, os, sys, time, urllib.request, urllib.parse, webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from html import escape
@@ -71,7 +71,7 @@ def frame(symbol, interval):
     e50, e200 = ema(C, 50), ema(C, 200)
     pos, tk = cloud(H, L, C)
     votes = (1 if C[-1] > e200[-1] else -1) + (1 if e50[-1] > e200[-1] else -1) + pos
-    return {"close": C[-1], "e200": e200[-1], "vote": votes, "cloud": pos, "tk": tk, "closes": C, "vol": V}
+    return {"close": C[-1], "e200": e200[-1], "vote": votes, "cloud": pos, "tk": tk, "closes": C, "vol": V, "H": H, "L": L}
 
 
 def visits(values, test):
@@ -84,21 +84,35 @@ def visits(values, test):
     return n
 
 
-def band(symbol):
+def band(symbol, h1=None):
     """The last 2 days (192 x 15m bars) as a range: floor, ceiling, and whether it is a real tight band (3-30% wide,
-    small drift, at least two separate visits to both outer quarters) -- the narrow-range idea of 6 Oct 2026."""
+    small drift, at least two separate visits to both outer quarters) -- the narrow-range idea of 6 Oct 2026.
+    Also the price's place in the 1-day (96 x 15m) and 7-day (168 x 1h) ranges, the distance to the 2-day edges,
+    the last hour's move and the colour of the last 15m candle (user, 6 Oct 2026: he picks coins near lows/highs)."""
     k = get("klines", {"symbol": symbol, "interval": "15m", "limit": 192})
     if len(k) < 150:
         return None
-    H = [float(r[2]) for r in k]; L = [float(r[3]) for r in k]; C = [float(r[4]) for r in k]
+    O = [float(r[1]) for r in k]; H = [float(r[2]) for r in k]; L = [float(r[3]) for r in k]; C = [float(r[4]) for r in k]
     hi, lo = max(H), min(L)
     w = hi - lo
     if w <= 0:
         return None
+    price = C[-1]
     mid = (hi + lo) / 2
+
+    def place(hh, ll):
+        top, bot = max(max(hh), price), min(min(ll), price)
+        return 100 * (price - bot) / (top - bot) if top > bot else 50.0
+
     tight = (0.03 <= w / mid <= 0.30 and abs(C[-1] - C[0]) / w <= 0.5
              and visits(L, lambda x: x <= lo + 0.25 * w) >= 2 and visits(H, lambda x: x >= hi - 0.25 * w) >= 2)
-    return {"lo": lo, "hi": hi, "width": 100 * w / mid, "pos": 100 * (C[-1] - lo) / w, "tight": tight}
+    hh7 = h1["H"][-168:] if h1 else H
+    ll7 = h1["L"][-168:] if h1 else L
+    return {"lo": lo, "hi": hi, "width": 100 * w / mid, "pos": 100 * (price - lo) / w, "tight": tight,
+            "p1": place(H[-96:], L[-96:]), "lo1": min(L[-96:]), "hi1": max(H[-96:]),
+            "p7": place(hh7, ll7), "lo7": min(ll7), "hi7": max(hh7),
+            "d_lo": 100 * (price / lo - 1), "d_hi": 100 * (hi / price - 1),
+            "mom1h": 100 * (C[-1] / C[-5] - 1), "green": C[-1] >= O[-1]}
 
 
 def zone(pos):
@@ -132,7 +146,7 @@ def scan():
     with ThreadPoolExecutor(6) as pool:
         frames = dict(zip(jobs, pool.map(lambda j: _safe(frame, *j), jobs)))
     with ThreadPoolExecutor(4) as pool:
-        bands = dict(zip(symbols, pool.map(lambda s: _safe(band, s), symbols)))
+        bands = dict(zip(symbols, pool.map(lambda s: _safe(band, s, (frames.get((s, "1h")) or None)), symbols)))
     eth_d = _safe(frame, "ETHUSDT", "1d") if "ETHUSDT" not in symbols else frames[("ETHUSDT", "1d")]
     btc = {tf: frames[("BTCUSDT", tf)] for tf, _ in TFS}
     rows = []
@@ -146,7 +160,8 @@ def scan():
         rel7 = (c1d[-1] / c1d[-8] - 1) - (b1d[-1] / b1d[-8] - 1) if len(c1d) >= 8 and len(b1d) >= 8 else 0
         vol_ratio = f["1h"]["vol"][-2] / (sum(f["1h"]["vol"][-26:-2]) / 24 or 1)   # last CLOSED hour vs the 24 before
         t = tmap[s]
-        bd = bands.get(s) or {"lo": 0.0, "hi": 0.0, "width": 0.0, "pos": 50.0, "tight": False}
+        bd = bands.get(s) or {"lo": 0.0, "hi": 0.0, "width": 0.0, "pos": 50.0, "tight": False, "p1": 50.0, "lo1": 0.0, "hi1": 0.0,
+                              "p7": 50.0, "lo7": 0.0, "hi7": 0.0, "d_lo": 0.0, "d_hi": 0.0, "mom1h": 0.0, "green": True}
         low, last = float(t["lowPrice"]), float(t["lastPrice"])
         score = sum(WEIGHT[tf] * f[tf]["vote"] for tf, _ in TFS) + (2 if rel24 > 0.02 else -2 if rel24 < -0.02 else 0)
         verdict = ("GUCLU LONG" if score >= 14 else "LONG" if score >= 7 else
@@ -184,7 +199,55 @@ def band_cells(r):
     z = zone(b["pos"]) + (" &middot; dar bant" if b["tight"] else " &middot; bant yok")
     return (f'<td>{fmt(b["lo"])}</td><td>{fmt(b["hi"])}</td>'
             f'<td class="pos" data-lo="{b["lo"]}" data-hi="{b["hi"]}">{b["pos"]:.0f}%</td>'
-            f'<td class="zone" data-t="{1 if b["tight"] else 0}">{z}</td>')
+            f'<td class="zone" data-t="{1 if b["tight"] else 0}">{z}</td>'
+            f'<td class="pos1" data-lo="{b["lo1"]}" data-hi="{b["hi1"]}">{b["p1"]:.0f}%</td>'
+            f'<td class="pos7" data-lo="{b["lo7"]}" data-hi="{b["hi7"]}">{b["p7"]:.0f}%</td>')
+
+
+def pos_cells(b):
+    return (f'<td class="pos1" data-lo="{b["lo1"]}" data-hi="{b["hi1"]}">{b["p1"]:.0f}%</td>'
+            f'<td class="pos" data-lo="{b["lo"]}" data-hi="{b["hi"]}">{b["pos"]:.0f}%</td>'
+            f'<td class="pos7" data-lo="{b["lo7"]}" data-hi="{b["hi7"]}">{b["p7"]:.0f}%</td>')
+
+
+def composite(r):
+    b = r["band"]
+    return (b["p1"] + b["pos"] + b["p7"]) / 3
+
+
+def extremes(rows, n=10):
+    """Coins nearest the bottom / the top of their 1-day, 2-day and 7-day ranges (average place), ranges at least 6%
+    wide so a flat, dead coin does not top the list."""
+    pool = [r for r in rows if r["band"]["width"] >= 6]
+    return sorted(pool, key=composite)[:n], sorted(pool, key=composite, reverse=True)[:n]
+
+
+def _ext_table(title, picks, low):
+    edge = "Dibe kalan %" if low else "Tepeye kalan %"
+    body = []
+    for r in picks:
+        b = r["band"]
+        vcls = "up" if "LONG" in r["verdict"] else "down" if "SHORT" in r["verdict"] else "flat"
+        warn = ", ".join(warnings(r))
+        body.append(
+            f'<tr><td class="sym">{escape(r["s"])}</td><td class="{vcls}">{r["verdict"]}</td>'
+            f'<td class="px" data-s="{escape(r["s"])}" data-p="{r["price"]}">{fmt(r["price"])}</td>'
+            f'<td>{b["d_lo"] if low else b["d_hi"]:.1f}</td>{pos_cells(b)}<td>{b["width"]:.0f}%</td>'
+            f'<td class="{"up" if b["mom1h"] > 0 else "down"}">{b["mom1h"]:+.1f}</td>'
+            f'<td class="{"up" if b["green"] else "down"}">{"&#9650;" if b["green"] else "&#9660;"}</td>'
+            f'<td>{r["rsi"]:.0f}</td><td>{r["fund"]:+.3f}</td><td class="warn">{warn}</td></tr>')
+    return (f'<h2>{title}</h2><div class="wrap"><table class="card"><thead><tr><th>Coin</th><th>Yorum</th><th>Fiyat (canli)</th>'
+            f'<th>{edge}</th><th>Konum 1g</th><th>Konum 2g</th><th>Konum 7g</th><th>2g genislik</th><th>Son 1s %</th>'
+            f'<th>Son mum</th><th>RSI 1s</th><th>Fonlama %</th><th>Uyari</th></tr></thead><tbody>{"".join(body)}</tbody></table></div><br>')
+
+
+def render_extremes(rows):
+    low, high = extremes(rows)
+    return (_ext_table("Dibe en yakin 10 <span class=\"note\">(1g + 2g + 7g aralik konumu ortalamasi; 2g genislik en az %6; "
+                       "konum 0% = aralik dibi, 100% = tepesi; son mum ▲ yesil / ▼ kirmizi)</span>", low, True)
+            + _ext_table("Tepeye en yakin 10", high, False)
+            + '<div class="note">Dip ya da tepe tek basina yon kaniti degil: dibe yakin coin dusmeye devam edebilir, tepedeki yukselmeye. '
+              'Karar icin son mum, 1 saatlik hareket, RSI ve fonlamaya birlikte bak.</div>')
 
 
 def top_buys(rows, n=6):
@@ -246,7 +309,7 @@ def render(btc, ethbtc, rows):
             f'<td class="{"up" if r["chg"] > 0 else "down"}">{r["chg"]:+.1f}</td><td>{r["pump"]:.1f}</td>'
             f'<td>{r["fund"]:+.3f}</td><td class="warn">{", ".join(warn)}</td></tr>')
     cols = ["Coin", "Yorum", "Puan", "5dk", "1s", "4s", "1g", "Ichi 4s/1g", "BTC'ye gore 24s %", "BTC'ye gore 7g %",
-            "Hacim (son 1s)", "RSI 1s", "Fiyat", "2g alt", "2g ust", "Bant konumu %", "Bolge", "24s %", "24s dipten %", "Fonlama %", "Uyari"]
+            "Hacim (son 1s)", "RSI 1s", "Fiyat", "2g alt", "2g ust", "Bant konumu %", "Bolge", "Konum 1g", "Konum 7g", "24s %", "24s dipten %", "Fonlama %", "Uyari"]
     ths = "".join(f'<th onclick="sortBy({i})">{c}</th>' for i, c in enumerate(cols))
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Yon Panosu</title><style>
 body{{background:#101418;color:#e6e6e6;font:13px system-ui,Segoe UI,sans-serif;margin:16px}}
@@ -262,6 +325,7 @@ th{{position:sticky;top:0;background:#161c22;cursor:pointer;color:#aab4be}} td.s
 Oklar: fiyat EMA200 ustu/alti + EMA50/EMA200 + Ichimoku bulutu (3 oyun 2'si ayni yondeyse ok). Puan: 1g ve 4s cift sayilir,
 1s ve 5dk tek, BTC'ye gore guc +-2. Basliga tiklayinca siralar.</div>
 {head}<span class="chip" id="live">canli fiyat: baglaniyor...</span>
+{render_extremes(rows)}
 {render_top(rows)}
 <h2>Tum coinler <span class="note">(100 hacimli vadeli; baslik tiklayinca siralar, ilk tik buyukten kucuge)</span></h2>
 <div style="margin-bottom:6px"><button onclick="sortCol({POS_COL},1)">Uste yakin olanlar ustte</button>
@@ -278,9 +342,9 @@ try{{const s=JSON.parse(sessionStorage.getItem('sort'));if(s)sortCol(s[0],s[1])}
 const fmtp=p=>p>=100?p.toLocaleString('en',{{minimumFractionDigits:2,maximumFractionDigits:2}}):p>=1?p.toFixed(4):String(+p.toPrecision(6));
 async function live(){{try{{const r=await fetch('https://fapi.binance.com/fapi/v1/ticker/price');const a=await r.json();const m={{}};a.forEach(x=>m[x.symbol]=+x.price);
 document.querySelectorAll('td.px').forEach(td=>{{const p=m[td.dataset.s+'USDT'];if(!p)return;const old=+td.dataset.p;td.dataset.p=p;td.textContent=fmtp(p);
-td.style.color=p>old?'#3ecf8e':p<old?'#ff6b6b':'';const row=td.parentElement,c=row.querySelector('td.pos'),z=row.querySelector('td.zone');if(!c)return;
-const lo=Math.min(+c.dataset.lo,p),hi=Math.max(+c.dataset.hi,p),pos=(p-lo)/(hi-lo)*100;c.textContent=pos.toFixed(0)+'%';
-z.innerHTML=(pos<=25?'ALTA YAKIN':pos>=75?'USTE YAKIN':'ORTA')+(z.dataset.t=='1'?' &middot; dar bant':' &middot; bant yok')}});
+td.style.color=p>old?'#3ecf8e':p<old?'#ff6b6b':'';const row=td.parentElement;
+row.querySelectorAll('td[data-lo]').forEach(c=>{{const lo=Math.min(+c.dataset.lo,p),hi=Math.max(+c.dataset.hi,p),pos=(p-lo)/(hi-lo)*100;c.textContent=pos.toFixed(0)+'%';
+if(c.classList.contains('pos')){{const z=row.querySelector('td.zone');if(z)z.innerHTML=(pos<=25?'ALTA YAKIN':pos>=75?'USTE YAKIN':'ORTA')+(z.dataset.t=='1'?' &middot; dar bant':' &middot; bant yok')}}}})}});
 document.getElementById('live').textContent='canli fiyat: '+new Date().toLocaleTimeString('tr')}}catch(e){{document.getElementById('live').textContent='canli fiyat kesildi, yeniden deneniyor'}}}}
 live();setInterval(live,5000);
 const m=location.hash.match(/y=([0-9]+)/);if(m)window.scrollTo(0,+m[1]);
@@ -386,6 +450,63 @@ def render_card(card, since):
             f'<tbody>{"".join(body)}</tbody></table></div><br>')
 
 
+ALERTS = OUT.parent / "uyari_durumu.json"
+ALERT_COOLDOWN_MS = 6 * 3_600_000
+ALERT_MAX_PER_SCAN = 5
+
+
+def _secret(name):
+    try:
+        return (Path.home() / "kripto" / "secrets" / name).read_text(encoding="utf-8").strip()
+    except OSError:
+        return os.environ.get(name, "")
+
+
+def telegram(text):
+    token, chat = _secret("TELEGRAM_BOT_TOKEN"), _secret("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        return False
+    body = json.dumps({"chat_id": chat, "text": text[:4096]}).encode("utf-8")
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.status == 200
+
+
+def touch_alerts(rows, now_ms):
+    """Telegram note when a coin with a 2-day range at least 8% wide touches the bottom or top 5% of it. Information
+    only. Each coin and side is quiet for 6 hours, at most 5 messages per scan, the most extreme first."""
+    try:
+        sent = json.loads(ALERTS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        sent = {}
+    hits = []
+    for r in rows:
+        b = r["band"]
+        if b["width"] < 8 or 5 < b["pos"] < 95:
+            continue
+        side = "DIBINE" if b["pos"] <= 5 else "TEPESINE"
+        key = f'{r["s"]}:{side}'
+        if now_ms - sent.get(key, 0) < ALERT_COOLDOWN_MS:
+            continue
+        hits.append((abs(composite(r) - 50), r, side, key))
+    hits.sort(key=lambda x: -x[0])
+    for _, r, side, key in hits[:ALERT_MAX_PER_SCAN]:
+        b = r["band"]
+        text = (f'[UC] {r["s"]} 2 gunluk araligin {side} degdi | fiyat {fmt(r["price"])} | aralik {fmt(b["lo"])} - {fmt(b["hi"])} '
+                f'(genislik %{b["width"]:.0f}) | konum 1g/2g/7g: %{b["p1"]:.0f}/%{b["pos"]:.0f}/%{b["p7"]:.0f} | '
+                f'son 1s %{b["mom1h"]:+.1f}, son mum {"yesil" if b["green"] else "kirmizi"} | RSI {r["rsi"]:.0f} | '
+                f'fonlama %{r["fund"]:+.3f}. Sadece bilgi; dip/tepe tek basina yon kaniti degil.')
+        try:
+            if telegram(text):
+                sent[key] = now_ms
+        except Exception as exc:
+            print(f"  telegram uyarisi gonderilemedi: {exc}", flush=True)
+            break
+    ALERTS.write_text(json.dumps({k: v for k, v in sent.items() if now_ms - v < 2 * ALERT_COOLDOWN_MS}), encoding="utf-8")
+    return len(hits)
+
+
 def main():
     once = "--once" in sys.argv
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -401,6 +522,8 @@ def main():
             preds = [p for p in preds if (p["t"], p["s"]) not in settled]
             new = [{"t": now_ms, "s": r["s"] + "USDT", "v": r["verdict"], "p": r["price"]} for r in rows]
             record(rows, now_ms); preds += new
+            if "--no-alert" not in sys.argv:
+                _safe(touch_alerts, rows, now_ms)
             first = min([d["t"] for d in done] + [now_ms])
             card = render_card(report_card(done), datetime.fromtimestamp(first / 1000).strftime("%d.%m %H:%M"))
             OUT.write_text(render(btc, ethbtc, rows).replace("<!--CARD-->", card), encoding="utf-8")
