@@ -35,6 +35,15 @@ def _detect(agg_data, symbols, config, entry_fn, breaks_key):
         stop = entry_fn(row, btc, config)
         if stop is None:
             continue
+        # Range-top filter (user's choice, 6 Oct 2026, from the 2H review of 54 live trades: the 34 entered in the top
+        # 20% of the last two days' range lost -2.48 USDT at 38% wins; the other 20 made +0.40). A long whose close sits
+        # above max_range_position of the last range_bars bars' low-to-high span is skipped. Off when the key is absent.
+        cap = config.get("max_range_position")
+        if cap is not None and breaks_key == "breaks_up":
+            window = rows[-int(config.get("range_bars", 24)):]
+            top, bottom = max(r["h"] for r in window), min(r["l"] for r in window)
+            if top > bottom and (row["c"] - bottom) / (top - bottom) > cap:
+                continue
         breaks = row.get(breaks_key, 0)
         candidates.append({
             "symbol": symbol,

@@ -75,6 +75,18 @@ class DetectLongCandidatesTests(unittest.TestCase):
         self.assertLess(candidate['stop'], candidate['close'])
         self.assertIn(candidate['leverage'], (LEVERAGE_NORMAL, LEVERAGE_STRONG))
 
+    def test_range_top_filter_skips_a_long_closing_near_the_top_of_its_range(self):
+        n = 260
+        data = {'BTCUSDT': _trending_rows(n, 2.0), 'ALTUSDT': _trending_rows(n, 2.0)}
+        capped = dict(C, max_range_position=0.8, range_bars=24)
+        self.assertEqual(detect_long_candidates(data, ['ALTUSDT'], capped), [])
+
+    def test_range_top_filter_keeps_a_long_below_the_cap(self):
+        n = 260
+        data = {'BTCUSDT': _trending_rows(n, 2.0), 'ALTUSDT': _trending_rows(n, 2.0)}
+        loose = dict(C, max_range_position=1.0, range_bars=24)
+        self.assertEqual(len(detect_long_candidates(data, ['ALTUSDT'], loose)), 1)
+
     def test_downtrend_does_not_yield_a_long_candidate(self):
         n = 260
         data = {'BTCUSDT': _trending_rows(n, -2.0), 'ALTUSDT': _trending_rows(n, -2.0)}

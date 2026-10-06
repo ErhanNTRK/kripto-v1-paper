@@ -12,6 +12,8 @@
   "btc_filter": "loose",
   "atr_multiplier": 5.0,
   "trailing_atr": 8.0,
+  "max_range_position": 0.8,
+  "range_bars": 24,
   "volume_multiple": 1.5,
   "rsi_min": 55,
   "rsi_max": 70,
