@@ -15,7 +15,7 @@ from pathlib import Path
 
 BASE = "https://fapi.binance.com/fapi/v1/"
 OUT = Path.home() / "kripto" / "pano" / "yon.html"
-TOP_N, EVERY_S = 50, 300
+TOP_N, EVERY_S = 100, 300
 TFS = (("5m", "5dk"), ("1h", "1s"), ("4h", "4s"), ("1d", "1g"))
 WEIGHT = {"5m": 1, "1h": 1, "4h": 2, "1d": 2}
 SKIP = {"USDCUSDT", "FDUSDUSDT", "BTCDOMUSDT", "PAXGUSDT", "XAUTUSDT"}   # stables, index, gold
@@ -74,6 +74,46 @@ def frame(symbol, interval):
     return {"close": C[-1], "e200": e200[-1], "vote": votes, "cloud": pos, "tk": tk, "closes": C, "vol": V}
 
 
+def visits(values, test):
+    n, prev = 0, False
+    for x in values:
+        hit = test(x)
+        if hit and not prev:
+            n += 1
+        prev = hit
+    return n
+
+
+def band(symbol):
+    """The last 2 days (192 x 15m bars) as a range: floor, ceiling, and whether it is a real tight band (3-30% wide,
+    small drift, at least two separate visits to both outer quarters) -- the narrow-range idea of 6 Oct 2026."""
+    k = get("klines", {"symbol": symbol, "interval": "15m", "limit": 192})
+    if len(k) < 150:
+        return None
+    H = [float(r[2]) for r in k]; L = [float(r[3]) for r in k]; C = [float(r[4]) for r in k]
+    hi, lo = max(H), min(L)
+    w = hi - lo
+    if w <= 0:
+        return None
+    mid = (hi + lo) / 2
+    tight = (0.03 <= w / mid <= 0.30 and abs(C[-1] - C[0]) / w <= 0.5
+             and visits(L, lambda x: x <= lo + 0.25 * w) >= 2 and visits(H, lambda x: x >= hi - 0.25 * w) >= 2)
+    return {"lo": lo, "hi": hi, "width": 100 * w / mid, "pos": 100 * (C[-1] - lo) / w, "tight": tight}
+
+
+def zone(pos):
+    return "ALTA YAKIN" if pos <= 25 else "USTE YAKIN" if pos >= 75 else "ORTA"
+
+
+def warnings(r):
+    warn = []
+    if r["pump"] > 20: warn.append("pompa")
+    if r["rsi"] > 75: warn.append("RSI asiri")
+    if r["rsi"] < 25: warn.append("RSI dip")
+    if r["fund"] > 0.05: warn.append("fonlama yuksek")
+    return warn
+
+
 def arrow(v):
     return ("&#9650;", "up") if v >= 2 else ("&#9660;", "down") if v <= -2 else ("&#9654;", "flat")
 
@@ -91,6 +131,8 @@ def scan():
     jobs = [(s, tf) for s in symbols for tf, _ in TFS]
     with ThreadPoolExecutor(6) as pool:
         frames = dict(zip(jobs, pool.map(lambda j: _safe(frame, *j), jobs)))
+    with ThreadPoolExecutor(4) as pool:
+        bands = dict(zip(symbols, pool.map(lambda s: _safe(band, s), symbols)))
     eth_d = _safe(frame, "ETHUSDT", "1d") if "ETHUSDT" not in symbols else frames[("ETHUSDT", "1d")]
     btc = {tf: frames[("BTCUSDT", tf)] for tf, _ in TFS}
     rows = []
@@ -104,6 +146,7 @@ def scan():
         rel7 = (c1d[-1] / c1d[-8] - 1) - (b1d[-1] / b1d[-8] - 1) if len(c1d) >= 8 and len(b1d) >= 8 else 0
         vol_ratio = f["1h"]["vol"][-2] / (sum(f["1h"]["vol"][-26:-2]) / 24 or 1)   # last CLOSED hour vs the 24 before
         t = tmap[s]
+        bd = bands.get(s) or {"lo": 0.0, "hi": 0.0, "width": 0.0, "pos": 50.0, "tight": False}
         low, last = float(t["lowPrice"]), float(t["lastPrice"])
         score = sum(WEIGHT[tf] * f[tf]["vote"] for tf, _ in TFS) + (2 if rel24 > 0.02 else -2 if rel24 < -0.02 else 0)
         verdict = ("GUCLU LONG" if score >= 14 else "LONG" if score >= 7 else
@@ -112,7 +155,7 @@ def scan():
                      "pump": (last / low - 1) * 100 if low > 0 else 0, "rel24": rel24 * 100, "rel7": rel7 * 100,
                      "vol": vol_ratio, "rsi": rsi(c1h), "fund": fund.get(s, 0) * 100, "score": score,
                      "verdict": verdict, "tf": {tf: f[tf]["vote"] for tf, _ in TFS},
-                     "ichi4": f["4h"]["cloud"], "ichi1d": f["1d"]["cloud"]})
+                     "ichi4": f["4h"]["cloud"], "ichi1d": f["1d"]["cloud"], "band": bd})
     rows.sort(key=lambda r: -r["score"])
     ethbtc = None
     if eth_d and btc["1d"]:
@@ -131,6 +174,45 @@ def _safe(fn, *a):
 
 def fmt(p):
     return f"{p:,.2f}" if p >= 100 else f"{p:.4f}" if p >= 1 else f"{p:.6g}"
+
+
+POS_COL = 15
+
+
+def band_cells(r):
+    b = r["band"]
+    z = zone(b["pos"]) + (" &middot; dar bant" if b["tight"] else " &middot; bant yok")
+    return (f'<td>{fmt(b["lo"])}</td><td>{fmt(b["hi"])}</td>'
+            f'<td class="pos" data-lo="{b["lo"]}" data-hi="{b["hi"]}">{b["pos"]:.0f}%</td>'
+            f'<td class="zone" data-t="{1 if b["tight"] else 0}">{z}</td>')
+
+
+def top_buys(rows, n=6):
+    """The strongest LONG calls without a warning flag (pump, extreme RSI, hot funding), best score first."""
+    good = [r for r in rows if r["verdict"] in ("GUCLU LONG", "LONG") and not warnings(r)]
+    good.sort(key=lambda r: (-r["score"], -r["rel24"]))
+    return good[:n], sum(1 for r in rows if r["verdict"] in ("GUCLU LONG", "LONG"))
+
+
+def render_top(rows):
+    picks, total = top_buys(rows)
+    if not picks:
+        body = '<tr><td colspan="10" class="flat" style="text-align:left">Su an uyari isaretsiz LONG yorumu veren coin yok.</td></tr>'
+    else:
+        body = "".join(
+            f'<tr><td class="sym">{escape(r["s"])}</td><td class="{"up" if r["verdict"] == "GUCLU LONG" else "flat"} b">{r["verdict"]}</td>'
+            f'<td>{r["score"]:+d}</td>'
+            + "".join(f'<td class="{arrow(r["tf"][t])[1]}">{arrow(r["tf"][t])[0]}</td>' for t, _ in TFS)
+            + f'<td class="px" data-s="{escape(r["s"])}" data-p="{r["price"]}">{fmt(r["price"])}</td>'
+              f'<td class="pos" data-lo="{r["band"]["lo"]}" data-hi="{r["band"]["hi"]}">{r["band"]["pos"]:.0f}%</td>'
+              f'<td class="zone" data-t="{1 if r["band"]["tight"] else 0}">{zone(r["band"]["pos"])}'
+              f'{" &middot; dar bant" if r["band"]["tight"] else " &middot; bant yok"}</td></tr>' for r in picks)
+    return (f'<h2>Onemli AL sinyali verenler <span class="note">(en iyi {len(picks)} / {total} LONG yorumu; pompa, asiri RSI ve '
+            f'yuksek fonlama isaretliler elenir)</span></h2>'
+            f'<div class="note" style="color:#f5b041">Dikkat: bu siralamanin para kazandirdigi kanitlanmadi. Panonun LONG yorumlari '
+            f'gecmiste 7773 islemde %45 dogru, masraf sonrasi ortalama -%0.15 cikti. Elle karar icin bir aday listesi; bot bununla islem acmaz.</div>'
+            f'<div class="wrap"><table class="card"><thead><tr><th>Coin</th><th>Yorum</th><th>Puan</th><th>5dk</th><th>1s</th><th>4s</th>'
+            f'<th>1g</th><th>Fiyat (canli)</th><th>Bant konumu</th><th>Bolge</th></tr></thead><tbody>{body}</tbody></table></div><br>')
 
 
 def render(btc, ethbtc, rows):
@@ -152,26 +234,23 @@ def render(btc, ethbtc, rows):
     for r in rows:
         tf = "".join(f'<td class="{arrow(r["tf"][t])[1]}">{arrow(r["tf"][t])[0]}</td>' for t, _ in TFS)
         vcls = "up" if "LONG" in r["verdict"] else "down" if "SHORT" in r["verdict"] else "flat"
-        warn = []
-        if r["pump"] > 20: warn.append("pompa")
-        if r["rsi"] > 75: warn.append("RSI asiri")
-        if r["rsi"] < 25: warn.append("RSI dip")
-        if r["fund"] > 0.05: warn.append("fonlama yuksek")
+        warn = warnings(r)
         body.append(
             f'<tr><td class="sym">{escape(r["s"])}</td><td class="{vcls} b">{r["verdict"]}</td><td>{r["score"]:+d}</td>{tf}'
             f'<td>{"&#9650;" if r["ichi4"] > 0 else "&#9660;" if r["ichi4"] < 0 else "&middot;"}'
             f'{"&#9650;" if r["ichi1d"] > 0 else "&#9660;" if r["ichi1d"] < 0 else "&middot;"}</td>'
             f'<td class="{"up" if r["rel24"] > 0 else "down"}">{r["rel24"]:+.1f}</td>'
             f'<td class="{"up" if r["rel7"] > 0 else "down"}">{r["rel7"]:+.1f}</td>'
-            f'<td>{r["vol"]:.1f}x</td><td>{r["rsi"]:.0f}</td><td>{fmt(r["price"])}</td>'
+            f'<td>{r["vol"]:.1f}x</td><td>{r["rsi"]:.0f}</td><td class="px" data-s="{escape(r["s"])}" data-p="{r["price"]}">{fmt(r["price"])}</td>'
+            f'{band_cells(r)}'
             f'<td class="{"up" if r["chg"] > 0 else "down"}">{r["chg"]:+.1f}</td><td>{r["pump"]:.1f}</td>'
             f'<td>{r["fund"]:+.3f}</td><td class="warn">{", ".join(warn)}</td></tr>')
     cols = ["Coin", "Yorum", "Puan", "5dk", "1s", "4s", "1g", "Ichi 4s/1g", "BTC'ye gore 24s %", "BTC'ye gore 7g %",
-            "Hacim (son 1s)", "RSI 1s", "Fiyat", "24s %", "24s dipten %", "Fonlama %", "Uyari"]
+            "Hacim (son 1s)", "RSI 1s", "Fiyat", "2g alt", "2g ust", "Bant konumu %", "Bolge", "24s %", "24s dipten %", "Fonlama %", "Uyari"]
     ths = "".join(f'<th onclick="sortBy({i})">{c}</th>' for i, c in enumerate(cols))
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Yon Panosu</title><style>
 body{{background:#101418;color:#e6e6e6;font:13px system-ui,Segoe UI,sans-serif;margin:16px}}
-h1{{font-size:18px;margin:0 0 6px}} h2{{font-size:15px;margin:8px 0 6px}} table.card td{{text-align:left}} .note{{color:#8a96a3;margin:4px 0 10px}}
+h1{{font-size:18px;margin:0 0 6px}} h2{{font-size:15px;margin:8px 0 6px}} button{{background:#1c232b;color:#e6e6e6;border:1px solid #2c3743;border-radius:6px;padding:4px 10px;cursor:pointer}} table.card td{{text-align:left}} .note{{color:#8a96a3;margin:4px 0 10px}}
 .btc{{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}}
 .chip{{background:#1c232b;border-radius:6px;padding:3px 8px}}
 table{{border-collapse:collapse;width:100%}} th,td{{padding:4px 6px;border-bottom:1px solid #222a33;text-align:right;white-space:nowrap}}
@@ -179,14 +258,31 @@ th{{position:sticky;top:0;background:#161c22;cursor:pointer;color:#aab4be}} td.s
 .up{{color:#3ecf8e}} .down{{color:#ff6b6b}} .flat{{color:#8a96a3}} .b{{font-weight:700}} .warn{{color:#f5b041;text-align:left}}
 .wrap{{overflow-x:auto}}</style></head><body>
 <h1>Yon Panosu &middot; {now}</h1>
-<div class="note">Sadece bilgi: bot bu sayfadan islem acmaz. Her 5 dakikada yenilenir (sayfa her dakika kendini yeniler, kaldiginiz yerde kalir; tahmin karnesi tablonun altinda).
+<div class="note">Sadece bilgi: bot bu sayfadan islem acmaz. Coin listesi ve yorumlar her 5 dakikada hesaplanir; fiyat ve bant konumu tarayicida her 5 saniyede canli guncellenir (sayfa dakikada bir kendini yeniler, siralamanizi ve kaydirmayi korur; tahmin karnesi tablonun altinda).
 Oklar: fiyat EMA200 ustu/alti + EMA50/EMA200 + Ichimoku bulutu (3 oyun 2'si ayni yondeyse ok). Puan: 1g ve 4s cift sayilir,
 1s ve 5dk tek, BTC'ye gore guc +-2. Basliga tiklayinca siralar.</div>
-{head}<div class="wrap"><table id="t"><thead><tr>{ths}</tr></thead><tbody>{''.join(body)}</tbody></table></div><br><!--CARD-->
-<script>function sortBy(i){{const t=document.getElementById('t').tBodies[0];const r=[...t.rows];
-const v=x=>{{const s=x.cells[i].innerText.replace(/[x%,]/g,'');const n=parseFloat(s);return isNaN(n)?s:n}};
-const d=t.dataset.s==i?-1:1;t.dataset.s=d==1?i:'';r.sort((a,b)=>{{const p=v(a),q=v(b);return (p>q?1:p<q?-1:0)*-d}});
-r.forEach(x=>t.appendChild(x))}}
+{head}<span class="chip" id="live">canli fiyat: baglaniyor...</span>
+{render_top(rows)}
+<h2>Tum coinler <span class="note">(100 hacimli vadeli; baslik tiklayinca siralar, ilk tik buyukten kucuge)</span></h2>
+<div style="margin-bottom:6px"><button onclick="sortCol({POS_COL},1)">Uste yakin olanlar ustte</button>
+<button onclick="sortCol({POS_COL},-1)">Alta yakin olanlar ustte</button>
+<button onclick="sortCol(2,1)">Puana gore</button></div>
+<div class="wrap"><table id="t"><thead><tr>{ths}</tr></thead><tbody>{''.join(body)}</tbody></table></div><br><!--CARD-->
+<script>
+const tb=document.getElementById('t').tBodies[0];
+const val=(x,i)=>{{const s=x.cells[i].innerText.replace(/[x%,]/g,'');const n=parseFloat(s);return isNaN(n)?s:n}};
+function sortCol(i,d){{[...tb.rows].sort((a,b)=>{{const p=val(a,i),q=val(b,i);return (p>q?1:p<q?-1:0)*-d}}).forEach(x=>tb.appendChild(x));
+try{{sessionStorage.setItem('sort',JSON.stringify([i,d]))}}catch(e){{}}}}
+function sortBy(i){{let s=null;try{{s=JSON.parse(sessionStorage.getItem('sort'))}}catch(e){{}}sortCol(i,(s&&s[0]==i&&s[1]==1)?-1:1)}}
+try{{const s=JSON.parse(sessionStorage.getItem('sort'));if(s)sortCol(s[0],s[1])}}catch(e){{}}
+const fmtp=p=>p>=100?p.toLocaleString('en',{{minimumFractionDigits:2,maximumFractionDigits:2}}):p>=1?p.toFixed(4):String(+p.toPrecision(6));
+async function live(){{try{{const r=await fetch('https://fapi.binance.com/fapi/v1/ticker/price');const a=await r.json();const m={{}};a.forEach(x=>m[x.symbol]=+x.price);
+document.querySelectorAll('td.px').forEach(td=>{{const p=m[td.dataset.s+'USDT'];if(!p)return;const old=+td.dataset.p;td.dataset.p=p;td.textContent=fmtp(p);
+td.style.color=p>old?'#3ecf8e':p<old?'#ff6b6b':'';const row=td.parentElement,c=row.querySelector('td.pos'),z=row.querySelector('td.zone');if(!c)return;
+const lo=Math.min(+c.dataset.lo,p),hi=Math.max(+c.dataset.hi,p),pos=(p-lo)/(hi-lo)*100;c.textContent=pos.toFixed(0)+'%';
+z.innerHTML=(pos<=25?'ALTA YAKIN':pos>=75?'USTE YAKIN':'ORTA')+(z.dataset.t=='1'?' &middot; dar bant':' &middot; bant yok')}});
+document.getElementById('live').textContent='canli fiyat: '+new Date().toLocaleTimeString('tr')}}catch(e){{document.getElementById('live').textContent='canli fiyat kesildi, yeniden deneniyor'}}}}
+live();setInterval(live,5000);
 const m=location.hash.match(/y=([0-9]+)/);if(m)window.scrollTo(0,+m[1]);
 setTimeout(()=>{{location.hash='y='+Math.round(window.scrollY);location.reload()}},60000);</script></body></html>"""
 
